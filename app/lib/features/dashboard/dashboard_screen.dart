@@ -17,6 +17,12 @@ class DashboardScreen extends ConsumerWidget {
         title: const Text('풍선 운동 디바이스'),
         actions: [
           IconButton(
+            tooltip: '훈련 기록',
+            icon: const Icon(Icons.show_chart),
+            onPressed: () => context.go('/history'),
+          ),
+          IconButton(
+            tooltip: '기기 연결',
             icon: Icon(connected ? Icons.bluetooth_connected : Icons.bluetooth_disabled),
             onPressed: () => context.go('/connect'),
           ),

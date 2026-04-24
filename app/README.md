@@ -9,7 +9,18 @@ Flutter SDK 3.22+ 필요.
 ```bash
 flutter --version   # 3.22 이상 확인
 flutter pub get
+dart run build_runner build --delete-conflicting-outputs  # Drift 코드 생성
 ```
+
+### 코드 생성 (Drift)
+
+`lib/core/db/app_database.dart` 를 수정한 뒤에는 반드시 build_runner 재실행:
+
+```bash
+dart run build_runner build --delete-conflicting-outputs
+```
+
+생성된 `*.g.dart` 파일은 `.gitignore` 되어 있다. 개발자 머신마다 직접 생성.
 
 ### 플랫폼 초기화 (최초 1회)
 
@@ -65,6 +76,10 @@ lib/
 │   │   ├── blowfit_uuids.dart     UUID + opcode + enum 단일 출처
 │   │   ├── ble_manager.dart       BLE 연결 + 디코더
 │   │   └── ble_providers.dart     Riverpod Providers
+│   ├── db/
+│   │   ├── app_database.dart      Drift 테이블 + DB 인스턴스
+│   │   ├── session_repository.dart 세션 저장/조회 API
+│   │   └── db_providers.dart      Riverpod Providers (자동 저장 포함)
 │   └── models/
 │       └── pressure_sample.dart   PressureSample, DeviceSnapshot, SessionSummary
 └── features/

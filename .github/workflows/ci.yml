@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  flutter:
+    name: Flutter analyze + test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.22.x'
+          channel: stable
+          cache: true
+      - run: flutter --version
+      - run: flutter pub get
+      - run: dart run build_runner build --delete-conflicting-outputs
+      - run: flutter analyze
+      - run: flutter test
+
+  simulator:
+    name: BLE simulator lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tools
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install ruff
+      - run: ruff check .
+
+  firmware-syntax:
+    name: Firmware header-only compile check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install g++
+        run: sudo apt-get update && sudo apt-get install -y g++
+      # Sanity check that headers parse and no syntax errors in hardware-free
+      # modules. Full Arduino build requires the Seeed nRF52 toolchain, which
+      # is heavier than CI warrants for the MVP.
+      - name: Compile state_machine unit test
+        run: |
+          cd firmware/tests
+          g++ -std=c++17 -I.. test_state_machine.cpp -o test_sm
+          ./test_sm
