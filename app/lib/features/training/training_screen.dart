@@ -122,7 +122,7 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
         child: Column(
           children: [
             Card(
-              color: _zoneColor(_current).withValues(alpha: 0.15),
+              color: _zoneColor(_current).withOpacity(0.15),
               child: Padding(
                 padding: const EdgeInsets.all(20),
                 child: Column(
@@ -160,7 +160,7 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
                       horizontalRangeAnnotations: [
                         HorizontalRangeAnnotation(
                           y1: 20, y2: 30,
-                          color: Colors.green.withValues(alpha: 0.15),
+                          color: Colors.green.withOpacity(0.15),
                         ),
                       ],
                     ),

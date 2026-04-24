@@ -55,15 +55,17 @@ static void test_target_hit_after_15s_in_zone() {
   tick(30000);  // -> Train
 
   uint32_t t = 30000;
-  // Feed 100 Hz samples for 15 seconds at 25 cmH2O (inside target zone).
-  for (int i = 0; i < 1500; i++) {
+  // Feed 100 Hz samples for 15+ seconds at 25 cmH2O (inside target zone).
+  // Zone enters on first sample (t=30010), so the 15000 ms hold threshold
+  // is reached at t=45010, i.e. iteration 1501.
+  for (int i = 0; i < 1600; i++) {
     t += 10;
     tick(t);
     onPressureSample(25.0f);
   }
   CHECK(metrics().targetHits == 1);
   CHECK(metrics().maxPressure >= 24.9f);
-  CHECK(metrics().enduranceMs >= 14900);
+  CHECK(metrics().enduranceMs >= 15000);
 }
 
 static void test_hysteresis_keeps_zone_on_brief_dip() {

@@ -12,7 +12,6 @@ Peak is configurable per orifice level.
 
 from __future__ import annotations
 
-import math
 import random
 from dataclasses import dataclass
 
