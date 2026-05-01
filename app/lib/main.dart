@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/date_symbol_data_local.dart';
 
 import 'core/db/db_providers.dart';
+import 'core/theme/blowfit_theme.dart';
 import 'features/connect/connect_screen.dart';
 import 'features/dashboard/dashboard_screen.dart';
 import 'features/guide/guide_screen.dart';
@@ -91,90 +92,11 @@ class BlowfitApp extends ConsumerWidget {
     ref.watch(autoReconnectProvider);
     return MaterialApp.router(
       title: 'BlowFit',
-      theme: _buildTheme(),
+      theme: BlowfitTheme.light(),
       routerConfig: _router,
       debugShowCheckedModeBanner: false,
     );
   }
 }
 
-ThemeData _buildTheme() {
-  const seed = Color(0xFF3B82F6); // wireframe blue
-  final scheme = ColorScheme.fromSeed(
-    seedColor: seed,
-    brightness: Brightness.light,
-  );
-  return ThemeData(
-    useMaterial3: true,
-    brightness: Brightness.light,
-    colorScheme: scheme,
-    scaffoldBackgroundColor: const Color(0xFFF7F8FA),
-    cardTheme: CardThemeData(
-      color: Colors.white,
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-        side: BorderSide(color: Colors.grey.shade200, width: 1),
-      ),
-      margin: EdgeInsets.zero,
-    ),
-    appBarTheme: const AppBarTheme(
-      backgroundColor: Colors.white,
-      foregroundColor: Colors.black87,
-      elevation: 0,
-      scrolledUnderElevation: 0,
-      surfaceTintColor: Colors.transparent,
-      centerTitle: false,
-      titleTextStyle: TextStyle(
-        color: Colors.black87,
-        fontSize: 18,
-        fontWeight: FontWeight.w600,
-      ),
-    ),
-    navigationBarTheme: NavigationBarThemeData(
-      backgroundColor: Colors.white,
-      surfaceTintColor: Colors.transparent,
-      indicatorColor: scheme.primary.withOpacity(0.12),
-      labelTextStyle: WidgetStateProperty.resolveWith((states) {
-        final selected = states.contains(WidgetState.selected);
-        return TextStyle(
-          fontSize: 12,
-          fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-          color: selected ? scheme.primary : Colors.grey.shade600,
-        );
-      }),
-      iconTheme: WidgetStateProperty.resolveWith((states) {
-        final selected = states.contains(WidgetState.selected);
-        return IconThemeData(
-          color: selected ? scheme.primary : Colors.grey.shade600,
-          size: 24,
-        );
-      }),
-    ),
-    filledButtonTheme: FilledButtonThemeData(
-      style: FilledButton.styleFrom(
-        backgroundColor: scheme.primary,
-        foregroundColor: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 18),
-      ),
-    ),
-    outlinedButtonTheme: OutlinedButtonThemeData(
-      style: OutlinedButton.styleFrom(
-        foregroundColor: scheme.primary,
-        side: BorderSide(color: scheme.primary),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 18),
-      ),
-    ),
-    textTheme: const TextTheme(
-      bodySmall: TextStyle(color: Colors.black54),
-      bodyMedium: TextStyle(color: Colors.black87),
-      bodyLarge: TextStyle(color: Colors.black87),
-    ),
-    listTileTheme: const ListTileThemeData(
-      iconColor: Colors.black54,
-      textColor: Colors.black87,
-    ),
-  );
-}
+// 테마 정의는 core/theme/blowfit_theme.dart 로 이전됨.
