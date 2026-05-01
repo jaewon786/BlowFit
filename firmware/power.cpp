@@ -3,7 +3,6 @@
 
 #ifdef ARDUINO
   #include <Arduino.h>
-  #include <nrf_soc.h>
 #endif
 
 namespace power {
@@ -24,23 +23,25 @@ uint8_t voltageToPct(float v) {
 }  // namespace
 
 void begin() {
-#ifdef ARDUINO
+#if defined(ARDUINO) && HAS_BATTERY
   pinMode(31, INPUT);
 #endif
 }
 
 uint8_t batteryPct() {
-#ifdef ARDUINO
+#if defined(ARDUINO) && HAS_BATTERY
   uint16_t adc = analogRead(31);
   float v = (float)adc * sensor_cfg::ADC_VREF / (float)sensor_cfg::ADC_MAX * VBAT_DIVIDER;
   return voltageToPct(v);
 #else
+  // mbed BSP 에서 analogRead(31) (AIN7) 가 hang 하는 이슈로 HAS_BATTERY=0 일 때
+  // 안전한 더미값 반환. 실제 VBAT 회로 결선 + mbed SAADC 검증 후 HAS_BATTERY=1.
   return 80;
 #endif
 }
 
 bool isCharging() {
-#ifdef ARDUINO
+#if defined(ARDUINO) && HAS_BATTERY
   // XIAO BLE has no dedicated CHG pin exposed; heuristic: VBAT rising above ~4.1V
   // implies USB power. More accurate detection would require PCB modification.
   uint16_t adc = analogRead(31);
@@ -52,10 +53,9 @@ bool isCharging() {
 }
 
 void enterDeepSleep() {
-#ifdef ARDUINO
-  // Configure button as wake source, then power off.
-  sd_power_system_off();
-#endif
+  // Adafruit Bluefruit BSP 에서만 SoftDevice (sd_power_system_off) 사용 가능.
+  // 현재 mbed BSP 사용 중이고 loop() 에서 호출하는 경로도 없어서 no-op.
+  // mbed 스택용 deep sleep 은 추후 별도 작업 (e.g. mbed::deepsleep()).
 }
 
 }  // namespace power

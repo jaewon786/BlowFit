@@ -38,7 +38,12 @@ void startSession(uint32_t nowMs, uint8_t orifice) {
   g_metrics = Metrics{};
   g_metrics.sessionStartMs = nowMs;
   g_metrics.orificeLevel = orifice;
-  g_metrics.sessionId = g_nextSessionId++;
+  // sessionId 는 session 시작 시점의 millis() 사용. 부팅 안에서 monotonic 하고,
+  // 부팅마다 첫 세션 시작 시점이 달라서 cross-reboot 충돌이 사실상 안 일어남.
+  // 앱 DB unique key (deviceSessionId) 와 결합해 retransmission dedup 도 유지.
+  // nowMs == 0 인 host test 에선 기존 카운터로 fallback.
+  g_metrics.sessionId = (nowMs > 0) ? nowMs : g_nextSessionId;
+  g_nextSessionId++;
   g_setIndex = 0;
   g_inZone = false;
   g_holdCountedThisEntry = false;

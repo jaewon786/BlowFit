@@ -1,0 +1,7 @@
+# Compiled host-test binaries (built by run_all.sh)
+test_button
+test_feedback
+test_power
+test_sensor
+test_state_machine
+test_storage

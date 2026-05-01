@@ -4,7 +4,12 @@
 #ifdef ARDUINO
   #include <Arduino.h>
 #else
-  static int digitalRead(uint8_t) { return 1; }
+  namespace button {
+    // Host-test seam: tests flip this to simulate the physical button.
+    // Pull-up wiring → false = released (digitalRead returns 1).
+    bool g_hostPressed = false;
+  }
+  static int digitalRead(uint8_t) { return button::g_hostPressed ? 0 : 1; }
   static void pinMode(uint8_t, uint8_t) {}
   #define INPUT_PULLUP 2
 #endif

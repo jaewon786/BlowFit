@@ -97,19 +97,27 @@ static void test_ble_stop_ends_session() {
 }
 
 static void test_three_sets_auto_complete() {
+  // 타임라인 (REST_MS=30s 기준):
+  //   0~30s    Prep
+  //   30~270s  Train1     (4분)
+  //   270~300s Rest1      (30초)
+  //   300~540s Train2
+  //   540~570s Rest2
+  //   570~810s Train3
+  //   810s+    Summary
   reset();
   dispatch(Event::BleStartSession, 0);
   tick(30000);
   CHECK(state() == DeviceState::Train);
   tick(30000 + 4*60*1000);
   CHECK(state() == DeviceState::Rest);
-  tick(30000 + 4*60*1000 + 60*1000);
+  tick(30000 + 4*60*1000 + 30*1000);
   CHECK(state() == DeviceState::Train);
-  tick(30000 + 2*(4*60*1000) + 60*1000);
+  tick(30000 + 2*(4*60*1000) + 30*1000);
   CHECK(state() == DeviceState::Rest);
-  tick(30000 + 2*(4*60*1000) + 2*60*1000);
+  tick(30000 + 2*(4*60*1000) + 2*30*1000);
   CHECK(state() == DeviceState::Train);
-  tick(30000 + 3*(4*60*1000) + 2*60*1000);
+  tick(30000 + 3*(4*60*1000) + 2*30*1000);
   CHECK(state() == DeviceState::Summary);
 }
 

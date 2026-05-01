@@ -1,6 +1,6 @@
 #include "storage.h"
 
-#ifdef ARDUINO
+#if defined(ARDUINO) && HAS_FLASH
   #include <Adafruit_LittleFS.h>
   #include <InternalFileSystem.h>
   using namespace Adafruit_LittleFS_Namespace;
@@ -40,7 +40,7 @@ bool g_loaded = false;
 
 void ensureLoaded() {
   if (g_loaded) return;
-#ifdef ARDUINO
+#if defined(ARDUINO) && HAS_FLASH
   File f = openFs(HISTORY_PATH, FILE_O_READ);
   if (f && f.size() == sizeof(HistoryFile)) {
     f.read(&g_hist, sizeof(g_hist));
@@ -58,7 +58,7 @@ void ensureLoaded() {
 }
 
 void persist() {
-#ifdef ARDUINO
+#if defined(ARDUINO) && HAS_FLASH
   File f = openFs(HISTORY_PATH, FILE_O_WRITE);
   if (!f) return;
   f.write((const uint8_t*)&g_hist, sizeof(g_hist));
@@ -69,7 +69,7 @@ void persist() {
 }  // namespace
 
 void begin() {
-#ifdef ARDUINO
+#if defined(ARDUINO) && HAS_FLASH
   InternalFS.begin();
 #endif
   ensureLoaded();
@@ -104,7 +104,7 @@ uint8_t readHistory(HistoryEntry out[MAX_HISTORY]) {
 }
 
 void saveConfig(float zeroOffset, float targetLow, float targetHigh) {
-#ifdef ARDUINO
+#if defined(ARDUINO) && HAS_FLASH
   ConfigFile c{ MAGIC, zeroOffset, targetLow, targetHigh, 0 };
   File f = openFs(CONFIG_PATH, FILE_O_WRITE);
   if (!f) return;
@@ -116,7 +116,7 @@ void saveConfig(float zeroOffset, float targetLow, float targetHigh) {
 }
 
 bool loadConfig(float& zeroOffset, float& targetLow, float& targetHigh) {
-#ifdef ARDUINO
+#if defined(ARDUINO) && HAS_FLASH
   File f = openFs(CONFIG_PATH, FILE_O_READ);
   if (!f || f.size() != sizeof(ConfigFile)) { if (f) f.close(); return false; }
   ConfigFile c;

@@ -4,10 +4,14 @@
 #ifdef ARDUINO
   #include <Arduino.h>
 #else
-  // Unit-test stubs
+  // Unit-test stubs. Tests set [g_hostAdc] / [g_hostMillis] before driving ticks.
   #include <cstdint>
-  static uint16_t analogRead(uint8_t) { return 0; }
-  static uint32_t millis() { return 0; }
+  namespace sensor {
+    uint16_t g_hostAdc = 0;
+    uint32_t g_hostMillis = 0;
+  }
+  static uint16_t analogRead(uint8_t) { return sensor::g_hostAdc; }
+  static uint32_t millis() { return sensor::g_hostMillis; }
   static void pinMode(uint8_t, uint8_t) {}
   static void analogReadResolution(uint8_t) {}
 #endif
@@ -50,12 +54,20 @@ float adcToCmH2O(uint16_t adc) {
 
 void onTimerTick() {
   uint16_t adc = analogRead(pins::PRESSURE_ADC);
+#if SENSOR_DEBUG_RAW
+  // Debug: 영점 보정 무시하고 raw ADC / 100 을 그대로 차트에 표시.
+  // idle ≈ 2.5 (ADC 248 = 0.2V), sealed full scale 5kPa ≈ 33.5 (ADC 3350 = 2.7V).
+  // Y축 max=40 가 절대값 기준이라 풀스케일까지 다 보임.
+  float raw = (float)adc / 100.0f;
+#else
   float raw = adcToCmH2O(adc) - g_zeroOffset;
+#endif
 
   // EMA filter
   g_ema = sensor_cfg::EMA_ALPHA * raw + (1.0f - sensor_cfg::EMA_ALPHA) * g_ema;
 
-  // Calibration accumulator
+#if !SENSOR_DEBUG_RAW
+  // Calibration accumulator (debug 모드에선 영점 보정 사용 안 함)
   if (g_calibrating) {
     g_calAccum += adcToCmH2O(adc);  // include offset so accum measures absolute
     if (--g_calSamplesRemaining == 0) {
@@ -64,6 +76,7 @@ void onTimerTick() {
       g_calibrating = false;
     }
   }
+#endif
 
   // Enqueue (drop oldest on overflow)
   uint32_t next = (g_head + 1) % RING_SIZE;

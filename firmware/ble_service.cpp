@@ -8,6 +8,10 @@
 
 #include <string.h>
 
+// 전역 스코프의 weak hook — firmware.ino 의 강한 정의가 override 함.
+// (anon namespace 내부에서 extern 선언하면 별도 심볼이 되어 링크 실패하는 문제 회피.)
+void onBleCalibrateRequested();
+
 namespace ble_service {
 
 namespace {
@@ -28,7 +32,7 @@ uint32_t g_startEpoch = 0;
 
 void onControlWritten(
 #ifdef ARDUINO
-  BLEDevice, BLECharacteristic& c
+  BLEDevice, BLECharacteristic c
 #endif
 ) {
 #ifdef ARDUINO
@@ -50,10 +54,8 @@ void onControlWritten(
       }
       break;
     case opcode::ZERO_CALIBRATE:
-      // Caller (main) observes this via a separate hook; keep BLE thin.
-      // Exposed via a weak symbol for simplicity:
-      extern void onBleCalibrateRequested();
-      onBleCalibrateRequested();
+      // 전역 스코프의 hook 호출 — firmware.ino 가 strong override 제공.
+      ::onBleCalibrateRequested();
       break;
     case opcode::SET_TARGET:
       if (c.valueLength() >= 3) {
@@ -69,9 +71,6 @@ void onControlWritten(
 }
 
 }  // namespace
-
-// Weak default — override in main if you need to hook calibration.
-__attribute__((weak)) void onBleCalibrateRequested() {}
 
 void begin() {
 #ifdef ARDUINO
@@ -157,6 +156,13 @@ void pushSummary(const state_machine::Metrics& m, uint32_t crc32) {
 void poll() {
 #ifdef ARDUINO
   BLE.poll();
+  // disconnect 트랜지션에서만 1회 재광고. 주기적 호출은 mbed BSP 에서 느림.
+  static bool wasConnected = false;
+  const bool isConn = BLE.connected();
+  if (wasConnected && !isConn) {
+    BLE.advertise();
+  }
+  wasConnected = isConn;
 #endif
 }
 
@@ -171,3 +177,6 @@ bool isConnected() {
 uint32_t startEpoch() { return g_startEpoch; }
 
 }  // namespace ble_service
+
+// Weak default — firmware.ino 가 동일 시그니처로 정의해서 override 함.
+__attribute__((weak)) void onBleCalibrateRequested() {}
