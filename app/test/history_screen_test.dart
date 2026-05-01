@@ -2,16 +2,16 @@ import 'package:blowfit/core/db/app_database.dart';
 import 'package:blowfit/core/db/db_providers.dart';
 import 'package:blowfit/core/db/session_repository.dart';
 import 'package:blowfit/core/models/pressure_sample.dart';
+import 'package:blowfit/core/theme/blowfit_theme.dart';
 import 'package:blowfit/features/history/history_screen.dart';
-import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/date_symbol_data_local.dart';
 
-/// HistoryScreen 은 [SessionRepository.watchSince] 결과만 사용. Drift 직접
-/// 띄우면 stream timer 누수가 위젯 테스트에서 잡혀 실패하므로 메서드만 stub.
+/// HistoryScreen 은 Phase 5d 에서 calendar 그리드로 재구성됨. 위젯 레벨에선
+/// SessionRepository 와 consecutiveDays/weekHits provider 만 의존.
 class _FakeRepo implements SessionRepository {
   _FakeRepo(this._sessions);
   final List<Session> _sessions;
@@ -100,7 +100,10 @@ Widget _buildHarness({required _FakeRepo repo}) {
     overrides: [
       sessionRepositoryProvider.overrideWithValue(repo),
     ],
-    child: MaterialApp.router(routerConfig: _stubRouter()),
+    child: MaterialApp.router(
+      theme: BlowfitTheme.light(),
+      routerConfig: _stubRouter(),
+    ),
   );
 }
 
@@ -115,46 +118,37 @@ void main() {
     await initializeDateFormatting('ko');
   });
 
-  testWidgets('empty state when no sessions exist', (tester) async {
+  testWidgets('renders streak hero + calendar + recent sessions header',
+      (tester) async {
     _useTallView(tester);
     await tester.pumpWidget(_buildHarness(repo: _FakeRepo(const [])));
     await tester.pumpAndSettle();
 
     expect(find.text('훈련 기록'), findsOneWidget);
-    expect(find.textContaining('아직 완료한 세션이 없습니다'), findsOneWidget);
+    expect(find.text('연속 훈련'), findsOneWidget);
+    expect(find.text('최근 세션'), findsOneWidget);
+    // 캘린더 요일 헤더.
+    expect(find.text('일'), findsOneWidget);
+    expect(find.text('토'), findsOneWidget);
   });
 
-  testWidgets('weekly tab renders BarChart + 추이 헤더', (tester) async {
+  testWidgets('empty state shows hint when no sessions', (tester) async {
+    _useTallView(tester);
+    await tester.pumpWidget(_buildHarness(repo: _FakeRepo(const [])));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('아직 완료한 세션이 없어요'), findsOneWidget);
+  });
+
+  testWidgets('stats triple shows 이번 달/이번 주/총 훈련 labels', (tester) async {
     _useTallView(tester);
     final repo = _FakeRepo([_session(id: 1, receivedAt: DateTime.now())]);
     await tester.pumpWidget(_buildHarness(repo: repo));
-    await tester.pumpAndSettle();
-
-    expect(find.text('주간'), findsOneWidget);
-    expect(find.text('월간'), findsOneWidget);
-    expect(find.byType(BarChart), findsOneWidget);
-    expect(find.textContaining('평균 압력 추이'), findsOneWidget);
-  });
-
-  testWidgets('switching to monthly tab shows 이번 달 label', (tester) async {
-    _useTallView(tester);
-    final repo = _FakeRepo([_session(id: 1, receivedAt: DateTime.now())]);
-    await tester.pumpWidget(_buildHarness(repo: repo));
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.text('월간'));
     await tester.pumpAndSettle();
 
     expect(find.text('이번 달'), findsOneWidget);
-  });
-
-  testWidgets('지난주 데이터 없음 when no prior-week data', (tester) async {
-    _useTallView(tester);
-    final repo = _FakeRepo([_session(id: 1, receivedAt: DateTime.now())]);
-    await tester.pumpWidget(_buildHarness(repo: repo));
-    await tester.pumpAndSettle();
-
-    expect(find.textContaining('지난주 데이터 없음'), findsOneWidget);
+    expect(find.text('이번 주'), findsOneWidget);
+    expect(find.text('총 훈련'), findsOneWidget);
   });
 
   testWidgets('session tile tap navigates to /session/:id', (tester) async {
@@ -163,7 +157,9 @@ void main() {
     await tester.pumpWidget(_buildHarness(repo: repo));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byType(ListTile).first);
+    // 'STUB:session/7' 까지 가는지 — 캘린더 안에 새로 그린 _SessionRow 탭.
+    // 점수 텍스트 클릭으로 InkWell 트리거.
+    await tester.tap(find.text('점수'));
     await tester.pumpAndSettle();
 
     expect(find.text('STUB:session/7'), findsOneWidget);
