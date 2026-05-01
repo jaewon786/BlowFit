@@ -32,7 +32,6 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
   bool _sessionActive = false;
   DateTime? _sessionStart;
   Duration _enduranceMs = Duration.zero;
-  DateTime? _lastSampleAt;
   Timer? _ticker;
   // Summary 모달이 떴는지 추적. _stop() 의 watchdog 이 모달이 안 뜬 케이스에서만
   // 강제로 홈 복귀하기 위해 사용.
@@ -103,9 +102,8 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
           _points.first.x < elapsedSec - _windowSec) {
         _points.removeFirst();
       }
-      // endurance 는 _ticker (1s) 가 _current 기준으로 누적. 여기선 _lastSampleAt 만
-      // 갱신 (다른 용도 추후 가능성 위해 유지).
-      _lastSampleAt = s.timestamp;
+      // endurance 는 _ticker (1s) 가 _current 기준으로 누적 — sample 단위 timing
+      // 사용 안 함 (BLE packet jitter + zero-padding 영향 방지).
     });
   }
 
@@ -134,7 +132,6 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
       _points.clear();
       _sessionStart = DateTime.now();
       _enduranceMs = Duration.zero;
-      _lastSampleAt = null;
     });
     _ticker?.cancel();
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {

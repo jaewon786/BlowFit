@@ -33,19 +33,20 @@ static void test_boot_to_standby() {
   CHECK(state() == DeviceState::Standby);
 }
 
-static void test_ble_start_moves_to_prep() {
+static void test_ble_start_moves_to_prep_or_train() {
   reset();
   dispatch(Event::BleStartSession, /*orifice=*/1);
-  CHECK(state() == DeviceState::Prep);
+  // PREP_MS=0 (UX 결정: 준비시간 스킵) 이면 dispatch 시점에 Prep, tick 한번에
+  // Train 으로 전환. PREP_MS>0 이면 Prep 유지. 둘 다 허용.
+  CHECK(state() == DeviceState::Prep || state() == DeviceState::Train);
   CHECK(metrics().orificeLevel == 1);
 }
 
-static void test_prep_transitions_to_train_after_30s() {
+static void test_prep_transitions_to_train() {
   reset();
   dispatch(Event::BleStartSession, 1);
-  tick(29000);
-  CHECK(state() == DeviceState::Prep);
-  tick(30000);
+  // PREP_MS 만큼 (또는 0이면 즉시) 지나면 Train.
+  tick(train_cfg::PREP_MS);
   CHECK(state() == DeviceState::Train);
 }
 
@@ -130,8 +131,8 @@ static void test_set_target_zone_clamps() {
 
 int main() {
   test_boot_to_standby();
-  test_ble_start_moves_to_prep();
-  test_prep_transitions_to_train_after_30s();
+  test_ble_start_moves_to_prep_or_train();
+  test_prep_transitions_to_train();
   test_target_hit_after_15s_in_zone();
   test_hysteresis_keeps_zone_on_brief_dip();
   test_ble_stop_ends_session();
