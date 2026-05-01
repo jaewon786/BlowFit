@@ -127,9 +127,9 @@ void main() {
     expect(find.text('훈련 기록'), findsOneWidget);
     expect(find.text('연속 훈련'), findsOneWidget);
     expect(find.text('최근 세션'), findsOneWidget);
-    // 캘린더 요일 헤더.
-    expect(find.text('일'), findsOneWidget);
-    expect(find.text('토'), findsOneWidget);
+    // 캘린더 요일 헤더 — '월'/'화' 는 일자 그리드와 겹치지 않아 1번만 노출.
+    expect(find.text('월'), findsOneWidget);
+    expect(find.text('화'), findsOneWidget);
   });
 
   testWidgets('empty state shows hint when no sessions', (tester) async {
