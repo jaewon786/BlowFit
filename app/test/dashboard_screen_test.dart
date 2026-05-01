@@ -2,11 +2,13 @@ import 'package:blowfit/core/ble/ble_manager.dart';
 import 'package:blowfit/core/ble/ble_providers.dart';
 import 'package:blowfit/core/ble/fake_ble_manager.dart';
 import 'package:blowfit/core/db/db_providers.dart';
+import 'package:blowfit/core/theme/blowfit_theme.dart';
 import 'package:blowfit/features/dashboard/dashboard_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/date_symbol_data_local.dart';
 
 GoRouter _stubRouter() => GoRouter(
       initialLocation: '/',
@@ -14,6 +16,7 @@ GoRouter _stubRouter() => GoRouter(
         GoRoute(path: '/', builder: (_, __) => const DashboardScreen()),
         GoRoute(path: '/connect', builder: (_, __) => const _StubScreen('connect')),
         GoRoute(path: '/training', builder: (_, __) => const _StubScreen('training')),
+        GoRoute(path: '/trend', builder: (_, __) => const _StubScreen('trend')),
       ],
     );
 
@@ -40,7 +43,10 @@ Widget _buildHarness({
       todayDurationProvider
           .overrideWith((ref) => Stream<Duration>.value(todayDuration)),
     ],
-    child: MaterialApp.router(routerConfig: _stubRouter()),
+    child: MaterialApp.router(
+      theme: BlowfitTheme.light(),
+      routerConfig: _stubRouter(),
+    ),
   );
 }
 
@@ -52,7 +58,11 @@ void _useTallView(WidgetTester tester) {
 }
 
 void main() {
-  testWidgets('Dashboard renders BlowFit header + 오늘 목표 card', (tester) async {
+  setUpAll(() async {
+    await initializeDateFormatting('ko');
+  });
+
+  testWidgets('Dashboard renders BlowFit header + 오늘의 훈련 CTA', (tester) async {
     _useTallView(tester);
     final fake = FakeBleManager();
     addTearDown(fake.dispose);
@@ -61,11 +71,11 @@ void main() {
     await tester.pump();
 
     expect(find.text('BlowFit'), findsOneWidget);
-    expect(find.text('오늘 목표'), findsOneWidget);
-    expect(find.text('훈련 시작'), findsOneWidget);
+    expect(find.text('오늘의 훈련'), findsOneWidget);
+    expect(find.text('5분 호흡 훈련'), findsOneWidget);
   });
 
-  testWidgets('disconnected state shows 기기 연결 prompt', (tester) async {
+  testWidgets('disconnected state shows 기기 연결 CTA', (tester) async {
     _useTallView(tester);
     final fake = FakeBleManager();
     addTearDown(fake.dispose);
@@ -73,19 +83,13 @@ void main() {
     await tester.pumpWidget(_buildHarness(ble: fake));
     await tester.pump();
 
-    // Connect prompt visible
-    expect(find.text('기기 연결'), findsOneWidget);
-    expect(find.text('기기를 먼저 연결해주세요'), findsOneWidget);
-
-    // Train button is disabled — tapping its label should NOT navigate.
-    // (Behavioral check is more robust than structural checks against
-    // FilledButton.icon() which wraps differently across Flutter versions.)
-    await tester.tap(find.text('훈련 시작'));
-    await tester.pumpAndSettle();
-    expect(find.text('STUB:training'), findsNothing);
+    // CTA 버튼이 disconnected 시 '기기 연결' 라벨로 바뀜.
+    expect(find.text('기기 연결'), findsWidgets);
+    // Device card 도 '기기 연결 안 됨' 으로 표시.
+    expect(find.text('기기 연결 안 됨'), findsOneWidget);
   });
 
-  testWidgets('tapping 기기 연결 navigates to /connect', (tester) async {
+  testWidgets('tapping 기기 연결 CTA navigates to /connect', (tester) async {
     _useTallView(tester);
     final fake = FakeBleManager();
     addTearDown(fake.dispose);
@@ -93,13 +97,14 @@ void main() {
     await tester.pumpWidget(_buildHarness(ble: fake));
     await tester.pump();
 
-    await tester.tap(find.text('기기 연결'));
+    // 그라데이션 CTA 안의 '기기 연결' (FilledButton) 탭.
+    await tester.tap(find.text('기기 연결').first);
     await tester.pumpAndSettle();
 
     expect(find.text('STUB:connect'), findsOneWidget);
   });
 
-  testWidgets('stat cards reflect injected values', (tester) async {
+  testWidgets('quick stats reflect injected weekHits', (tester) async {
     _useTallView(tester);
     final fake = FakeBleManager();
     addTearDown(fake.dispose);
@@ -107,45 +112,42 @@ void main() {
     await tester.pumpWidget(_buildHarness(
       ble: fake,
       consecutiveDays: 5,
-      weekHits: 6, // 6/7 = 86% rounded
+      weekHits: 6,
       todayDuration: const Duration(minutes: 8),
     ));
     await tester.pump();
 
-    expect(find.text('연속 사용일'), findsOneWidget);
-    expect(find.text('주간 달성률'), findsOneWidget);
-    expect(find.text('5'), findsOneWidget);
-    expect(find.text('86'), findsOneWidget); // 6/7 * 100 = 85.7 → 86
+    expect(find.text('이번 주'), findsOneWidget);
+    expect(find.text('평균 호기 압력'), findsOneWidget);
+    // weekHits=6 → "6 / 7회" (split across two Text widgets).
+    expect(find.text('6'), findsOneWidget);
+    expect(find.text(' / 7회'), findsOneWidget);
   });
 
-  testWidgets('goal progress shows minutes ratio', (tester) async {
+  testWidgets('streak badge shows when consecutiveDays > 0', (tester) async {
     _useTallView(tester);
     final fake = FakeBleManager();
     addTearDown(fake.dispose);
 
     await tester.pumpWidget(_buildHarness(
       ble: fake,
-      todayDuration: const Duration(minutes: 12),
+      consecutiveDays: 12,
     ));
     await tester.pump();
 
-    // Inside the circular progress center: "12 / 20분" (RichText)
-    expect(find.byType(CircularProgressIndicator), findsOneWidget);
-    expect(find.text('오늘도 화이팅!'), findsOneWidget);
+    expect(find.text('12일 연속'), findsOneWidget);
   });
 
-  testWidgets('reaching the daily target switches the goal label', (tester) async {
+  testWidgets('coaching card shows weekly tip', (tester) async {
     _useTallView(tester);
     final fake = FakeBleManager();
     addTearDown(fake.dispose);
 
-    await tester.pumpWidget(_buildHarness(
-      ble: fake,
-      todayDuration: const Duration(minutes: 22),
-    ));
+    await tester.pumpWidget(_buildHarness(ble: fake));
     await tester.pump();
 
-    expect(find.text('목표 달성!'), findsOneWidget);
+    expect(find.text('이번 주 코칭'), findsOneWidget);
+    expect(find.text('자세히 보기'), findsOneWidget);
   });
 
   testWidgets('bell icon shows coming-soon snackbar', (tester) async {
@@ -156,7 +158,7 @@ void main() {
     await tester.pumpWidget(_buildHarness(ble: fake));
     await tester.pump();
 
-    await tester.tap(find.byIcon(Icons.notifications_none));
+    await tester.tap(find.byIcon(Icons.notifications_outlined));
     await tester.pump();
 
     expect(find.text('알림 기능은 곧 출시됩니다'), findsOneWidget);
