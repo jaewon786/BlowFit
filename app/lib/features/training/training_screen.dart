@@ -187,14 +187,8 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
     context.go('/result', extra: s);
   }
 
-  String _fmt(Duration d) {
-    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
-    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
-    return '$m:$s';
-  }
-
-  // _phaseLabel 은 Phase 4 디자인 변경에서 _PhaseGuide 위젯이 자체 매핑하므로
-  // 더 이상 필요없음.
+  // _fmt / _phaseLabel 은 Phase 4-5a 에서 _BottomStats / _PhaseGuide 가 자체
+  // 포맷팅을 가져가서 더 이상 필요없음.
 
   @override
   Widget build(BuildContext context) {
