@@ -237,7 +237,6 @@ class _PairingHero extends StatelessWidget {
     required this.desc,
     required this.buttonLabel,
     required this.buttonEnabled,
-    this.onButton,
   });
 
   final _HeroState state;
@@ -245,7 +244,6 @@ class _PairingHero extends StatelessWidget {
   final String desc;
   final String buttonLabel;
   final bool buttonEnabled;
-  final VoidCallback? onButton;
 
   @override
   Widget build(BuildContext context) {
@@ -324,7 +322,10 @@ class _PairingHero extends StatelessWidget {
           SizedBox(
             width: double.infinity,
             child: FilledButton(
-              onPressed: buttonEnabled ? onButton : null,
+              // Hero button is informational-only in scanning / auto-reconnecting
+              // states. Action buttons live on Permissions / Failed / Empty
+              // views which have their own dedicated render path.
+              onPressed: buttonEnabled ? () {} : null,
               child: Text(buttonLabel),
             ),
           ),
