@@ -1,5 +1,10 @@
 # Development Tools
 
+> **참고**: 단순 UI/DB 흐름 검증만 필요하면 Python 시뮬레이터를 띄우는 대신
+> 앱 안의 `FakeBleManager` 를 쓰는 게 더 빠르다 — `flutter run --dart-define=FAKE_BLE=true`.
+> 이 폴더의 시뮬레이터는 **외부 BLE 클라이언트(nRF Connect, 다른 폰의 앱 등)** 와의
+> 호환성 검증이 필요할 때 사용한다.
+
 ## BLE Simulator
 
 Virtual BLE peripheral that mimics the real device so the Flutter app can be developed without hardware.

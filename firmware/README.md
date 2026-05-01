@@ -22,6 +22,17 @@ Tools → Board → `Seeed XIAO nRF52840 (Sense)` 선택 (non-Sense 도 가능).
 - **Adafruit_LittleFS**, **InternalFileSystem** (Seeed 보드 패키지에 포함)
 
 ### 4. TFT_eSPI 설정
+
+> **TFT 가 아직 없다면**: [config.h](config.h) 의 `HAS_TFT` 가 기본값 0 이므로 TFT_eSPI 라이브러리 설치 자체가 불필요. `ui_tft::begin/render/invalidate` 가 모두 no-op 으로 컴파일됨. TFT 도착 후 `HAS_TFT 1` 로 토글하고 아래 User_Setup.h 적용.
+
+### 4.5. Flash 영속화 (LittleFS)
+
+> **mbed-enabled BSP 사용 시 (현재 권장 — ArduinoBLE 호환)**: Adafruit_LittleFS 가 BSP 에 번들되어 있지 않으므로 [config.h](config.h) 의 `HAS_FLASH` 가 기본값 0. `storage::saveSession/readHistory/saveConfig/loadConfig` 가 모두 no-op 으로 컴파일됨 — 세션은 RAM 에만 보관되어 재부팅 시 사라짐. 앱 측 Drift SQLite 가 1차 영속화 책임.
+>
+> Flash 영속화 활성화 옵션:
+> - Adafruit-based Seeed BSP 로 전환 + Bluefruit BLE 라이브러리로 ble_service 재작성, 또는
+> - mbed core 의 `mbed::LittleFileSystem` + `FlashIAPBlockDevice` 로 storage.cpp 재작성 (추후 작업)
+
 `Arduino/libraries/TFT_eSPI/User_Setup.h` 를 수정해야 한다. 편의를 위해 본 저장소 `firmware/TFT_eSPI_User_Setup.h` (추후 추가 예정) 를 라이브러리 폴더에 복사.
 
 ST7735 80×160 세로 설정 핵심:
@@ -49,21 +60,40 @@ ST7735 80×160 세로 설정 핵심:
 3. 첫 업로드 시 리셋 버튼을 두 번 빠르게 눌러 부트로더 진입
 4. ✓ 컴파일 → → 업로드
 
+## 호스트 단위 테스트
+
+Arduino 툴체인 없이 PC 의 g++ 로 빌드·실행. CI(Ubuntu) 와 동일한 흐름:
+
+```bash
+bash firmware/tests/run_all.sh
+```
+
+총 4개 파일 28 케이스가 순차 실행됨:
+
+| 테스트 | 검증 영역 |
+|---|---|
+| `test_state_machine.cpp` | Boot→Standby→Prep(30s)→Train(4min)→Rest(30s)→Train→…→Summary 3세트 전이, 타깃 hold 15s |
+| `test_storage.cpp` | LittleFS 링버퍼 (MAX_HISTORY=30), 최신순 정렬, max/duration clamping |
+| `test_feedback.cpp` | 진동 시퀀스, Pattern → pulseVibration 매핑, idle 패턴 |
+| `test_button.cpp` | 30ms 디바운스, short/long(2000ms) 판별, chatter 거부 |
+
+호스트 빌드를 위해 `button.cpp` 는 ARDUINO 매크로 분기 안에 `g_hostPressed` 시드를 둔다 — 실기기 빌드에는 영향 없음.
+
 ## 시리얼 디버그
 
 Tools → Serial Monitor 115200 baud. `Serial.print` 로 압력값/상태 확인.
 
 ## 주차별 마일스톤
 
-| 주 | 목표 |
-|---|---|
-| 3 | Blink 업로드, 시리얼 출력, ADC 읽기 |
-| 4 | `sensor::adcToCmH2O` 검증, EMA 필터 적용, 시리얼 플로터 |
-| 5 | 100 Hz 샘플 루프, TFT 막대 그래프, LED/진동 |
-| 6 | 상태 머신, 버튼 입력, 세션 플로우 |
-| 7 | BLE GATT 연동, 앱 연결 확인, Flash 세션 저장 |
-| 8 | 배터리 모니터, Deep sleep, 캘리브레이션 영구 저장 |
-| 9 | 버그 픽스만, 수요일 Code Freeze |
+| 주 | 목표 | 상태 |
+|---|---|---|
+| 3 | Blink 업로드, 시리얼 출력, ADC 읽기 | ⏳ 기기 도착 후 |
+| 4 | `sensor::adcToCmH2O` 검증, EMA 필터 적용, 시리얼 플로터 | ⏳ 기기 도착 후 |
+| 5 | 100 Hz 샘플 루프, TFT 막대 그래프, LED/진동 | ⏳ 기기 도착 후 |
+| 6 | 상태 머신, 버튼 입력, 세션 플로우 | ✅ 코드 완료 + 호스트 테스트 |
+| 7 | BLE GATT 연동, 앱 연결 확인, Flash 세션 저장 | ✅ 코드 완료 (storage 단위 테스트 포함) |
+| 8 | 배터리 모니터, Deep sleep, 캘리브레이션 영구 저장 | ✅ 코드 완료 |
+| 9 | 버그 픽스만, 수요일 Code Freeze | — |
 
 ## 구조
 
