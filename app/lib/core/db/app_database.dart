@@ -34,6 +34,9 @@ class Sessions extends Table {
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_open());
 
+  /// In-memory executor seam for unit tests.
+  AppDatabase.forTesting(QueryExecutor e) : super(e);
+
   @override
   int get schemaVersion => 1;
 
