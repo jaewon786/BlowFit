@@ -60,7 +60,7 @@ namespace train_cfg {
   constexpr float DEFAULT_TARGET_HIGH_CMH2O = 30.0f;
   constexpr float ZONE_HYSTERESIS_CMH2O     = 3.0f;
   constexpr uint16_t TARGET_HOLD_MS         = 15000; // 15 s for targetHit
-  constexpr uint32_t PREP_MS                = 0;     // E-1 디버그용. 정상 검증 후 30000 으로 복귀.
+  constexpr uint32_t PREP_MS                = 30000;
   constexpr uint32_t TRAIN_SET_MS           = 4UL * 60 * 1000;
   constexpr uint32_t REST_MS                = 30UL * 1000;   // UI 가이드와 일치 (앱 D1 결정 후속)
   constexpr uint8_t  TOTAL_SETS             = 3;
