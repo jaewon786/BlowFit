@@ -4,12 +4,13 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/date_symbol_data_local.dart';
 
 import 'core/db/db_providers.dart';
+import 'core/models/pressure_sample.dart';
 import 'core/theme/blowfit_theme.dart';
 import 'features/connect/connect_screen.dart';
 import 'features/dashboard/dashboard_screen.dart';
 import 'features/guide/guide_screen.dart';
 import 'features/history/history_screen.dart';
-import 'core/models/pressure_sample.dart';
+import 'features/onboarding/onboarding_screen.dart';
 import 'features/profile/profile_screen.dart';
 import 'features/result/result_screen.dart';
 import 'features/session_detail/session_detail_screen.dart';
@@ -87,11 +88,17 @@ final _router = GoRouter(
         return ResultScreen(summary: summary);
       },
     ),
-    // 가이드는 더 이상 탭이 아니지만 프로필에서 push 되도록 유지.
+    // 가이드는 더 이상 탭이 아니지만 widget test 호환을 위해 라우트 유지.
     GoRoute(
       parentNavigatorKey: _rootNavKey,
       path: '/guide',
       builder: (_, __) => const GuideScreen(),
+    ),
+    // 첫 사용 가이드 — 온보딩 슬라이드. 프로필 → '훈련 가이드 다시 보기'.
+    GoRoute(
+      parentNavigatorKey: _rootNavKey,
+      path: '/onboarding',
+      builder: (_, __) => const OnboardingScreen(),
     ),
   ],
 );

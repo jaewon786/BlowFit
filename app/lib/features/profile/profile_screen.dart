@@ -90,9 +90,9 @@ class ProfileScreen extends ConsumerWidget {
                   const Divider(indent: 60, height: 1),
                   _SettingsRow(
                     icon: Icons.menu_book_outlined,
-                    title: '훈련 가이드 다시 보기',
+                    title: '첫 사용 가이드 다시 보기',
                     subtitle: null,
-                    onTap: () => context.push('/guide'),
+                    onTap: () => context.push('/onboarding'),
                   ),
                   const Divider(indent: 60, height: 1),
                   _SettingsRow(
