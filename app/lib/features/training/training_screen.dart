@@ -242,7 +242,7 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
   @override
   Widget build(BuildContext context) {
     final connected = ref.watch(connectionProvider).valueOrNull ?? false;
-    final state = ref.watch(deviceStateProvider).valueOrNull;
+    // deviceStateProvider 는 _phase 갱신만을 위해 listen 했고 여기선 직접 안 씀.
     final health = ref.watch(bleHealthProvider).valueOrNull;
     final degraded = health?.isDegraded ?? false;
     final zone = ref
