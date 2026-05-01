@@ -9,7 +9,9 @@ import 'features/connect/connect_screen.dart';
 import 'features/dashboard/dashboard_screen.dart';
 import 'features/guide/guide_screen.dart';
 import 'features/history/history_screen.dart';
+import 'core/models/pressure_sample.dart';
 import 'features/profile/profile_screen.dart';
+import 'features/result/result_screen.dart';
 import 'features/session_detail/session_detail_screen.dart';
 import 'features/settings/target_settings_screen.dart';
 import 'features/shell/main_shell.dart';
@@ -75,6 +77,15 @@ final _router = GoRouter(
       parentNavigatorKey: _rootNavKey,
       path: '/settings/target',
       builder: (_, __) => const TargetSettingsScreen(),
+    ),
+    // 훈련 종료 직후 push — extra 로 SessionSummary 전달.
+    GoRoute(
+      parentNavigatorKey: _rootNavKey,
+      path: '/result',
+      builder: (_, state) {
+        final summary = state.extra as SessionSummary;
+        return ResultScreen(summary: summary);
+      },
     ),
     // 가이드는 더 이상 탭이 아니지만 프로필에서 push 되도록 유지.
     GoRoute(

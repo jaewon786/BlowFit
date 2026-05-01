@@ -183,52 +183,9 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
       _sessionStart = null;
     });
     _ticker?.cancel();
-    showModalBottomSheet<void>(
-      context: context,
-      builder: (_) => Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              '세션 요약',
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 16),
-            _summaryRow('최대 압력', '${s.maxPressure.toStringAsFixed(1)} cmH₂O'),
-            _summaryRow('평균 압력', '${s.avgPressure.toStringAsFixed(1)} cmH₂O'),
-            _summaryRow('지구력 시간', _fmt(s.endurance)),
-            _summaryRow('성공 횟수', '${s.targetHits}회'),
-            _summaryRow('훈련 시간', _fmt(s.duration)),
-            const SizedBox(height: 20),
-            FilledButton(
-              onPressed: () {
-                Navigator.pop(context);
-                if (context.canPop()) {
-                  context.pop();
-                } else {
-                  context.go('/');
-                }
-              },
-              child: const Text('확인'),
-            ),
-          ],
-        ),
-      ),
-    );
+    // Phase 5a: modal 대신 별도 결과 화면으로 이동. extra 로 summary 전달.
+    context.go('/result', extra: s);
   }
-
-  Widget _summaryRow(String k, String v) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(k, style: const TextStyle(color: Colors.black54)),
-            Text(v, style: const TextStyle(fontWeight: FontWeight.w600)),
-          ],
-        ),
-      );
 
   String _fmt(Duration d) {
     final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
