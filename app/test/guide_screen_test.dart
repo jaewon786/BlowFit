@@ -77,7 +77,9 @@ void main() {
     await tester.pumpWidget(_buildHarness(firstSessionDate: null));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.widgetWithText(FilledButton, '훈련 시작'));
+    // FilledButton.icon: byType + first is more robust than widgetWithText
+    // across Flutter versions (icon button internal hierarchy varies).
+    await tester.tap(find.byType(FilledButton).first);
     await tester.pumpAndSettle();
 
     expect(find.text('STUB:training'), findsOneWidget);

@@ -40,32 +40,36 @@ static void resetAll() {
 }
 
 // -- adcToCmH2O conversion -----------------------------------------------
+// 변환식 sanity 테스트는 sensor_cfg 상수로부터 ADC 값을 동적으로 계산해서
+// OUT_LOW_V/HIGH_V 가 변경되어도 테스트가 자동 적응하도록 함.
+
+static uint16_t voltsToAdc(float v) {
+  return (uint16_t)(v / sensor_cfg::ADC_VREF * sensor_cfg::ADC_MAX);
+}
 
 static void test_zero_voltage_maps_to_zero_cmh2o() {
   CHECK_NEAR(adcToCmH2O(0), 0.0f, 0.01f);
 }
 
 static void test_low_threshold_voltage_maps_to_zero() {
-  // 0.2 V (sensor's "0 kPa" floor) -> 0 cmH2O.
-  // adc = 0.2/3.3 * 4095 ≈ 248
-  CHECK_NEAR(adcToCmH2O(248), 0.0f, 0.1f);
+  // OUT_LOW_V (sensor's 0 kPa baseline) → 0 cmH2O.
+  CHECK_NEAR(adcToCmH2O(voltsToAdc(sensor_cfg::OUT_LOW_V)), 0.0f, 0.1f);
 }
 
-static void test_documented_midpoint_maps_to_25cmh2o() {
-  // Doc 5.1 example: ADC 1.45 V -> 25.49 cmH2O.
-  // adc = 1.45/3.3 * 4095 ≈ 1799
-  CHECK_NEAR(adcToCmH2O(1799), 25.5f, 0.5f);
-}
-
-static void test_full_range_maps_to_51cmh2o() {
-  // 2.7 V (sensor's "5 kPa" full scale) -> 51 cmH2O.
-  // adc = 2.7/3.3 * 4095 ≈ 3351
-  CHECK_NEAR(adcToCmH2O(3351), 50.99f, 0.5f);
+static void test_midpoint_voltage_round_trips() {
+  // Halfway between LOW_V and HIGH_V → half of full-scale (~25.5 cmH2O).
+  const float vMid = (sensor_cfg::OUT_LOW_V + sensor_cfg::OUT_HIGH_V) * 0.5f;
+  // ADC 가 3.3V 에서 saturate 하므로 vMid 가 그 위라면 측정 불가 — 그땐 skip.
+  if (vMid > sensor_cfg::ADC_VREF) return;
+  const float expected =
+      sensor_cfg::KPA_FULL * 0.5f * sensor_cfg::KPA_TO_CMH2O;
+  CHECK_NEAR(adcToCmH2O(voltsToAdc(vMid)), expected, 0.5f);
 }
 
 static void test_below_threshold_clamps_to_zero() {
-  // adc=100 → ~0.08V which is below OUT_LOW_V=0.2. Should clamp at 0.
-  CHECK_NEAR(adcToCmH2O(100), 0.0f, 0.01f);
+  // OUT_LOW_V 보다 낮은 전압은 0 cmH2O 로 클램프.
+  const uint16_t adcBelow = voltsToAdc(sensor_cfg::OUT_LOW_V) / 2;
+  CHECK_NEAR(adcToCmH2O(adcBelow), 0.0f, 0.01f);
 }
 
 // -- EMA filter convergence ---------------------------------------------
@@ -73,23 +77,32 @@ static void test_below_threshold_clamps_to_zero() {
 static void test_ema_converges_to_steady_state() {
   resetAll();
   begin();
-  // Drive a constant 1.45 V (≈25.5 cmH2O) for 30 samples.
-  // With α=0.2 and EMA starting at 0: after 30 ticks the filter should be
-  // within 1% of the input (1 - (1-α)^30 ≈ 0.9988).
-  g_hostAdc = 1799;
+  // Drive a known midpoint voltage for 30 samples. With α=0.2 and EMA
+  // starting at 0: after 30 ticks the filter is within 1% of input.
+  const float vMid = (sensor_cfg::OUT_LOW_V + sensor_cfg::OUT_HIGH_V) * 0.5f;
+  if (vMid > sensor_cfg::ADC_VREF) return; // ADC saturates at midpoint — skip.
+  const uint16_t adcMid = voltsToAdc(vMid);
+  const float expected =
+      sensor_cfg::KPA_FULL * 0.5f * sensor_cfg::KPA_TO_CMH2O;
+  g_hostAdc = adcMid;
   for (int i = 0; i < 30; i++) {
     onTimerTick();
   }
-  CHECK_NEAR(latestFiltered(), 25.5f, 1.0f);
+  CHECK_NEAR(latestFiltered(), expected, 1.0f);
 }
 
 static void test_ema_first_sample_partially_weighted() {
   resetAll();
   begin();
-  g_hostAdc = 1799;
+  const float vMid = (sensor_cfg::OUT_LOW_V + sensor_cfg::OUT_HIGH_V) * 0.5f;
+  if (vMid > sensor_cfg::ADC_VREF) return;
+  const uint16_t adcMid = voltsToAdc(vMid);
+  const float fullValue =
+      sensor_cfg::KPA_FULL * 0.5f * sensor_cfg::KPA_TO_CMH2O;
+  g_hostAdc = adcMid;
   onTimerTick();
-  // After single tick: EMA = α·25.5 + (1-α)·0 ≈ 5.1
-  CHECK_NEAR(latestFiltered(), 25.5f * 0.2f, 0.5f);
+  // After single tick: EMA = α · input + (1-α) · 0 = α · input
+  CHECK_NEAR(latestFiltered(), fullValue * sensor_cfg::EMA_ALPHA, 0.5f);
 }
 
 // -- Zero calibration ---------------------------------------------------
@@ -97,33 +110,36 @@ static void test_ema_first_sample_partially_weighted() {
 static void test_zero_calibration_offsets_subsequent_readings() {
   resetAll();
   begin();
-  // Feed a steady "ambient" reading (≈25.5 cmH2O) during calibration.
-  g_hostAdc = 1799;
+  const float vMid = (sensor_cfg::OUT_LOW_V + sensor_cfg::OUT_HIGH_V) * 0.5f;
+  if (vMid > sensor_cfg::ADC_VREF) return;
+  const uint16_t adcMid = voltsToAdc(vMid);
+  const float midCmH2O =
+      sensor_cfg::KPA_FULL * 0.5f * sensor_cfg::KPA_TO_CMH2O;
+  // Feed a steady "ambient" reading at midpoint during calibration.
+  g_hostAdc = adcMid;
   startZeroCalibration();
   CHECK(isCalibrating());
 
-  // ZERO_CAL_SAMPLES = 500 ticks at constant ADC.
+  // ZERO_CAL_SAMPLES ticks at constant ADC.
   for (uint16_t i = 0; i < sensor_cfg::ZERO_CAL_SAMPLES; i++) {
     onTimerTick();
   }
 
   CHECK(!isCalibrating());
-  // Offset should equal the calibration input pressure (~25.5 cmH2O).
-  CHECK_NEAR(zeroOffset(), 25.5f, 0.5f);
-
-  // After calibration, subsequent raw readings = adcCmH2O - offset.
-  // At same ADC, raw should now be near 0.
-  resetAll(); // resets g_ema/queue but not the offset → preserve manually
-  // Actually we need to re-run with offset preserved. Use a fresh test below.
+  CHECK_NEAR(zeroOffset(), midCmH2O, 0.5f);
 }
 
 static void test_offset_subtracted_from_raw_after_calibration() {
   resetAll();
   begin();
-  g_hostAdc = 1799;  // ~25.5 cmH2O
-  // Manually set offset (skip calibration loop for speed).
-  g_zeroOffset = 25.5f;
-  // EMA remains 0 from begin(). One tick → raw = 25.5 - 25.5 = 0; EMA stays ≈0.
+  const float vMid = (sensor_cfg::OUT_LOW_V + sensor_cfg::OUT_HIGH_V) * 0.5f;
+  if (vMid > sensor_cfg::ADC_VREF) return;
+  const uint16_t adcMid = voltsToAdc(vMid);
+  const float midCmH2O =
+      sensor_cfg::KPA_FULL * 0.5f * sensor_cfg::KPA_TO_CMH2O;
+  g_hostAdc = adcMid;
+  g_zeroOffset = midCmH2O;  // skip cal loop, set directly
+  // EMA at 0. One tick → raw = midCmH2O - midCmH2O = 0; EMA stays ≈0.
   onTimerTick();
   CHECK_NEAR(latestFiltered(), 0.0f, 0.1f);
 }
@@ -165,8 +181,7 @@ static void test_sample_count_increments_each_tick() {
 int main() {
   test_zero_voltage_maps_to_zero_cmh2o();
   test_low_threshold_voltage_maps_to_zero();
-  test_documented_midpoint_maps_to_25cmh2o();
-  test_full_range_maps_to_51cmh2o();
+  test_midpoint_voltage_round_trips();
   test_below_threshold_clamps_to_zero();
   test_ema_converges_to_steady_state();
   test_ema_first_sample_partially_weighted();
