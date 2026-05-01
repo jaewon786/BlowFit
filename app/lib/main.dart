@@ -9,11 +9,12 @@ import 'features/connect/connect_screen.dart';
 import 'features/dashboard/dashboard_screen.dart';
 import 'features/guide/guide_screen.dart';
 import 'features/history/history_screen.dart';
+import 'features/profile/profile_screen.dart';
 import 'features/session_detail/session_detail_screen.dart';
-import 'features/settings/settings_screen.dart';
 import 'features/settings/target_settings_screen.dart';
 import 'features/shell/main_shell.dart';
 import 'features/training/training_screen.dart';
+import 'features/trend/trend_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -47,12 +48,12 @@ final _router = GoRouter(
         ),
         StatefulShellBranch(
           routes: [
-            GoRoute(path: '/guide', builder: (_, __) => const GuideScreen()),
+            GoRoute(path: '/trend', builder: (_, __) => const TrendScreen()),
           ],
         ),
         StatefulShellBranch(
           routes: [
-            GoRoute(path: '/settings', builder: (_, __) => const SettingsScreen()),
+            GoRoute(path: '/profile', builder: (_, __) => const ProfileScreen()),
           ],
         ),
       ],
@@ -74,6 +75,12 @@ final _router = GoRouter(
       parentNavigatorKey: _rootNavKey,
       path: '/settings/target',
       builder: (_, __) => const TargetSettingsScreen(),
+    ),
+    // 가이드는 더 이상 탭이 아니지만 프로필에서 push 되도록 유지.
+    GoRoute(
+      parentNavigatorKey: _rootNavKey,
+      path: '/guide',
+      builder: (_, __) => const GuideScreen(),
     ),
   ],
 );
