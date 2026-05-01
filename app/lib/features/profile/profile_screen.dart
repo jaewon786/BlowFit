@@ -7,9 +7,6 @@ import '../../core/theme/blowfit_colors.dart';
 import '../../core/theme/blowfit_widgets.dart';
 
 /// 프로필 + 설정 흡수 화면. 디자인의 09 화면.
-///
-/// 이전엔 별도 settings 탭이었던 항목들 (목표 압력, 영점 보정, 기기 연결,
-/// 앱 정보) 을 이 화면 안의 리스트 행으로 이동.
 class ProfileScreen extends ConsumerWidget {
   const ProfileScreen({super.key});
 
@@ -18,92 +15,86 @@ class ProfileScreen extends ConsumerWidget {
     final connected = ref.watch(connectionProvider).valueOrNull ?? false;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('프로필')),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            // 프로필 카드 (이름, 베이스라인 등 — Phase 5 에서 본격 구현)
-            BlowfitCard(
-              padding: const EdgeInsets.all(20),
-              child: Row(
-                children: [
-                  Container(
-                    width: 56,
-                    height: 56,
-                    decoration: const BoxDecoration(
-                      color: BlowfitColors.blue50,
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(Icons.person,
-                        size: 28, color: BlowfitColors.blue500),
-                  ),
-                  const SizedBox(width: 16),
-                  const Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '사용자',
-                          style: TextStyle(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w700,
-                            color: BlowfitColors.ink,
-                          ),
-                        ),
-                        SizedBox(height: 2),
-                        Text(
-                          '프로필 설정 — 추후 구현',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: BlowfitColors.ink3,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
+      appBar: AppBar(
+        title: const Text('프로필'),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: IconButton(
+              onPressed: () => context.push('/settings/target'),
+              icon: const Icon(Icons.settings_outlined,
+                  color: BlowfitColors.gray700),
+              style: IconButton.styleFrom(
+                backgroundColor: BlowfitColors.gray100,
+                shape: const CircleBorder(),
               ),
             ),
-            const SizedBox(height: 16),
-
-            // 설정 섹션
-            const _SectionHeader('설정'),
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+          children: [
+            const _ProfileHeader(),
+            const SizedBox(height: 14),
+            const _BaselineCard(),
+            const SizedBox(height: 14),
+            _SectionHeader('설정'),
             BlowfitCard(
               padding: EdgeInsets.zero,
               child: Column(
                 children: [
                   _SettingsRow(
+                    icon: Icons.notifications_outlined,
+                    title: '훈련 알림',
+                    subtitle: '매일 오전 8시',
+                    onTap: () => _comingSoon(context),
+                  ),
+                  const Divider(indent: 60, height: 1),
+                  _SettingsRow(
                     icon: Icons.bluetooth,
-                    title: '내 기기',
-                    subtitle: connected ? '연결됨' : '연결 안 됨',
+                    title: '기기 관리',
+                    subtitle: connected ? 'BlowFit 연결됨' : '연결 안 됨',
                     onTap: () => context.push('/connect'),
                   ),
-                  const Divider(indent: 56, height: 1),
+                  const Divider(indent: 60, height: 1),
                   _SettingsRow(
                     icon: Icons.tune,
                     title: '목표 압력 설정',
                     subtitle: '훈련 목표 영역 조정',
                     onTap: () => context.push('/settings/target'),
                   ),
-                  const Divider(indent: 56, height: 1),
+                  const Divider(indent: 60, height: 1),
                   _SettingsRow(
-                    icon: Icons.menu_book_outlined,
-                    title: '훈련 가이드',
-                    subtitle: '올바른 호흡 자세',
-                    onTap: () => context.push('/guide'),
+                    icon: Icons.trending_up,
+                    title: '훈련 강도 자동 추천',
+                    subtitle: '켜짐',
+                    onTap: () => _comingSoon(context),
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 16),
-
-            // 정보 섹션
-            const _SectionHeader('정보'),
+            const SizedBox(height: 14),
+            _SectionHeader('지원'),
             BlowfitCard(
               padding: EdgeInsets.zero,
               child: Column(
                 children: [
+                  _SettingsRow(
+                    icon: Icons.person_outline,
+                    title: '개인 정보 수정',
+                    subtitle: null,
+                    onTap: () => _comingSoon(context),
+                  ),
+                  const Divider(indent: 60, height: 1),
+                  _SettingsRow(
+                    icon: Icons.menu_book_outlined,
+                    title: '훈련 가이드 다시 보기',
+                    subtitle: null,
+                    onTap: () => context.push('/guide'),
+                  ),
+                  const Divider(indent: 60, height: 1),
                   _SettingsRow(
                     icon: Icons.info_outline,
                     title: '앱 정보',
@@ -123,7 +114,200 @@ class ProfileScreen extends ConsumerWidget {
       ),
     );
   }
+
+  void _comingSoon(BuildContext context) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('곧 출시될 기능입니다')),
+    );
+  }
 }
+
+// ---------------------------------------------------------------------------
+// Profile header — avatar + name + chips
+// ---------------------------------------------------------------------------
+
+class _ProfileHeader extends StatelessWidget {
+  const _ProfileHeader();
+
+  @override
+  Widget build(BuildContext context) {
+    return BlowfitCard(
+      padding: const EdgeInsets.all(20),
+      child: Row(
+        children: [
+          Container(
+            width: 64,
+            height: 64,
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [BlowfitColors.blue400, BlowfitColors.blue500],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              shape: BoxShape.circle,
+            ),
+            child: const Center(
+              child: Text(
+                '김',
+                style: TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  '김영호',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: BlowfitColors.ink,
+                    letterSpacing: -0.36,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                const Text(
+                  '56세 · 남성',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: BlowfitColors.ink3,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: const [
+                    BlowfitChip(label: '12주차', tone: BlowfitChipTone.blue),
+                    SizedBox(width: 6),
+                    BlowfitChip(
+                        label: '활성 사용자', tone: BlowfitChipTone.green),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Baseline card — 시작 시점 호기 / 흡기
+// ---------------------------------------------------------------------------
+
+class _BaselineCard extends StatelessWidget {
+  const _BaselineCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return BlowfitCard(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            '나의 베이스라인',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              color: BlowfitColors.ink,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: const [
+              Expanded(
+                child: _BaselineTile(
+                  label: '시작 시점 호기',
+                  value: '16.2',
+                  unit: 'cmH₂O',
+                ),
+              ),
+              SizedBox(width: 10),
+              Expanded(
+                child: _BaselineTile(
+                  label: '시작 시점 흡기',
+                  value: '-14.0',
+                  unit: 'cmH₂O',
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BaselineTile extends StatelessWidget {
+  const _BaselineTile({
+    required this.label,
+    required this.value,
+    required this.unit,
+  });
+  final String label;
+  final String value;
+  final String unit;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+      decoration: BoxDecoration(
+        color: BlowfitColors.gray50,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: BlowfitColors.ink3,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Text(
+                value,
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: BlowfitColors.ink,
+                  letterSpacing: -0.36,
+                  fontFeatures: [FontFeature.tabularFigures()],
+                ),
+              ),
+              const SizedBox(width: 4),
+              Text(
+                unit,
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: BlowfitColors.ink3,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Section header
+// ---------------------------------------------------------------------------
 
 class _SectionHeader extends StatelessWidget {
   const _SectionHeader(this.text);
@@ -132,18 +316,23 @@ class _SectionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 4, 4, 8),
+      padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
       child: Text(
         text,
         style: const TextStyle(
-          fontSize: 13,
-          fontWeight: FontWeight.w600,
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
           color: BlowfitColors.ink3,
+          letterSpacing: 0.48,
         ),
       ),
     );
   }
 }
+
+// ---------------------------------------------------------------------------
+// Settings row
+// ---------------------------------------------------------------------------
 
 class _SettingsRow extends StatelessWidget {
   const _SettingsRow({
@@ -155,7 +344,7 @@ class _SettingsRow extends StatelessWidget {
 
   final IconData icon;
   final String title;
-  final String subtitle;
+  final String? subtitle;
   final VoidCallback onTap;
 
   @override
@@ -169,14 +358,14 @@ class _SettingsRow extends StatelessWidget {
           child: Row(
             children: [
               Container(
-                width: 36,
-                height: 36,
+                width: 32,
+                height: 32,
                 decoration: BoxDecoration(
                   color: BlowfitColors.blue50,
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: Icon(icon,
-                    size: 18, color: BlowfitColors.blue500),
+                child:
+                    Icon(icon, size: 18, color: BlowfitColors.blue500),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -186,24 +375,26 @@ class _SettingsRow extends StatelessWidget {
                     Text(
                       title,
                       style: const TextStyle(
-                        fontSize: 15,
+                        fontSize: 14,
                         fontWeight: FontWeight.w600,
                         color: BlowfitColors.ink,
                       ),
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        color: BlowfitColors.ink3,
+                    if (subtitle != null) ...[
+                      const SizedBox(height: 1),
+                      Text(
+                        subtitle!,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: BlowfitColors.ink3,
+                        ),
                       ),
-                    ),
+                    ],
                   ],
                 ),
               ),
               const Icon(Icons.chevron_right,
-                  size: 20, color: BlowfitColors.gray400),
+                  size: 16, color: BlowfitColors.gray400),
             ],
           ),
         ),
