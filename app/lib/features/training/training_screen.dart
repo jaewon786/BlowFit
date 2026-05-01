@@ -10,6 +10,8 @@ import '../../core/ble/blowfit_uuids.dart';
 import '../../core/ble/ble_providers.dart';
 import '../../core/models/pressure_sample.dart';
 import '../../core/storage/storage_providers.dart';
+import '../../core/theme/blowfit_colors.dart';
+import '../../core/theme/blowfit_widgets.dart';
 
 class TrainingScreen extends ConsumerStatefulWidget {
   const TrainingScreen({super.key});
@@ -234,27 +236,15 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
     return '$m:$s';
   }
 
-  String _phaseLabel(DeviceStateCode p) {
-    switch (p) {
-      case DeviceStateCode.prep:    return '준비 중';
-      case DeviceStateCode.train:   return '훈련 중';
-      case DeviceStateCode.rest:    return '휴식';
-      case DeviceStateCode.summary: return '완료';
-      case DeviceStateCode.weekly:  return '주간 요약';
-      case DeviceStateCode.error:   return '오류';
-      case DeviceStateCode.boot:
-      case DeviceStateCode.standby: return '대기';
-    }
-  }
+  // _phaseLabel 은 Phase 4 디자인 변경에서 _PhaseGuide 위젯이 자체 매핑하므로
+  // 더 이상 필요없음.
 
   @override
   Widget build(BuildContext context) {
     final connected = ref.watch(connectionProvider).valueOrNull ?? false;
     final state = ref.watch(deviceStateProvider).valueOrNull;
-    final lowBattery = state != null && (state.lowBattery || state.batteryPct < 20);
     final health = ref.watch(bleHealthProvider).valueOrNull;
     final degraded = health?.isDegraded ?? false;
-    // Settings 에서 저장된 목표 압력대를 읽어와 차트와 endurance 계산에 반영.
     final zone = ref
         .watch(targetSettingsStoreProvider)
         .valueOrNull
@@ -266,167 +256,66 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
     final elapsed = _sessionStart == null
         ? Duration.zero
         : DateTime.now().difference(_sessionStart!);
-    // 차트 x 범위는 elapsed 기반으로 항상 최근 30초 윈도우. 샘플이 안 들어오는
-    // 동안에도 x축이 흘러가도록 포인트가 아닌 wall-clock 으로 계산.
     final elapsedSec = elapsed.inMilliseconds / 1000.0;
-    // 차트 x 범위는 항상 정수 초로 정렬 — fl_chart tick interval(5)이 minX 에
-    // 앵커되므로 minX 가 정수여야 라벨이 정수초 위치에 안정적으로 표시됨.
-    final visibleEnd = elapsedSec < _windowSec ? _windowSec.toDouble() : elapsedSec;
+    final visibleEnd =
+        elapsedSec < _windowSec ? _windowSec.toDouble() : elapsedSec;
     final endX = visibleEnd.ceilToDouble();
     final startX = (endX - _windowSec).clamp(0.0, double.infinity);
 
-    // Phase chip 은 "훈련 중" 일 때는 노출하지 않음 (와이어프레임과 일치).
-    final showPhaseChip = _phase != DeviceStateCode.train &&
-        _phase != DeviceStateCode.standby;
+    // 펌웨어 set 진행도 — Metrics.setIndex / TOTAL_SETS. 디자인은 1/3 ~ 3/3.
+    // 현재 firmware 가 setIndex 를 BLE 로 노출 안 해서 임시로 1 고정.
+    const totalSets = 3;
+    final currentSet = _sessionActive ? 1 : 1;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('실시간 훈련'),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 16),
-            child: _ConnectionChip(connected: connected),
-          ),
-        ],
-      ),
+      backgroundColor: BlowfitColors.bg,
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            children: [
-              if (showPhaseChip || (lowBattery && connected) || degraded) ...[
-                Row(
-                  children: [
-                    if (showPhaseChip) _PhaseChip(label: _phaseLabel(_phase)),
-                    const Spacer(),
-                    if (lowBattery && connected)
-                      _MiniBadge(
-                        icon: state.charging
-                            ? Icons.battery_charging_full
-                            : Icons.battery_alert,
-                        text: '${state.batteryPct}%',
-                        color: Colors.redAccent,
-                      ),
-                    if (degraded) ...[
-                      const SizedBox(width: 4),
-                      const _MiniBadge(
-                        icon: Icons.signal_cellular_alt_2_bar,
-                        text: '신호 약함',
-                        color: Colors.orange,
-                      ),
-                    ],
-                  ],
-                ),
-                const SizedBox(height: 8),
-              ],
-              _PressureCard(
-                current: _current,
-                primary: Theme.of(context).colorScheme.primary,
-                targetLow: _targetLow,
-                targetHigh: _targetHigh,
-              ),
-              const SizedBox(height: 12),
-              Expanded(
+        child: Column(
+          children: [
+            _TrainingTopBar(
+              currentSet: currentSet,
+              totalSets: totalSets,
+              onClose: () => context.pop(),
+            ),
+            const SizedBox(height: 4),
+            _PhaseGuide(
+              phase: _phase,
+              sessionActive: _sessionActive,
+            ),
+            if (degraded) ...[
+              const SizedBox(height: 8),
+              const _DegradedSignalBanner(),
+            ],
+            const SizedBox(height: 12),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: _LiveChart(
                   points: _points,
                   startX: startX,
                   endX: endX,
-                  primary: Theme.of(context).colorScheme.primary,
+                  current: _current,
                   targetLow: _targetLow,
                   targetHigh: _targetHigh,
                 ),
               ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(child: _StatTile(label: '지구력 시간', value: _fmt(_enduranceMs))),
-                  const SizedBox(width: 12),
-                  Expanded(child: _StatTile(label: '훈련 시간', value: _fmt(elapsed))),
-                ],
+            ),
+            const SizedBox(height: 12),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: _BottomStats(
+                endurance: _enduranceMs,
+                elapsed: elapsed,
               ),
-              const SizedBox(height: 12),
-              SizedBox(
+            ),
+            const SizedBox(height: 12),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              child: SizedBox(
                 width: double.infinity,
                 child: FilledButton(
                   onPressed: connected && _sessionActive ? _stop : null,
-                  style: FilledButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                  ),
-                  child: const Text(
-                    '훈련 종료',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _PressureCard extends StatelessWidget {
-  const _PressureCard({
-    required this.current,
-    required this.primary,
-    required this.targetLow,
-    required this.targetHigh,
-  });
-  final double current;
-  final Color primary;
-  final double targetLow;
-  final double targetHigh;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              '현재 압력',
-              style: TextStyle(fontSize: 13, color: Colors.black54),
-            ),
-            const SizedBox(height: 4),
-            Center(
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.baseline,
-                textBaseline: TextBaseline.alphabetic,
-                children: [
-                  Text(
-                    current.toStringAsFixed(0),
-                    style: TextStyle(
-                      fontSize: 48,
-                      fontWeight: FontWeight.bold,
-                      color: primary,
-                      height: 1.0,
-                      fontFeatures: const [FontFeature.tabularFigures()],
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    'cmH₂O',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w600,
-                      color: primary,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 6),
-            Center(
-              child: Text(
-                '목표 구간 ${targetLow.toStringAsFixed(0)}-${targetHigh.toStringAsFixed(0)} cmH₂O',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.green.shade700,
-                  fontWeight: FontWeight.w500,
+                  child: const Text('훈련 종료'),
                 ),
               ),
             ),
@@ -437,145 +326,324 @@ class _PressureCard extends StatelessWidget {
   }
 }
 
-class _LiveChart extends StatelessWidget {
-  const _LiveChart({
-    required this.points,
-    required this.startX,
-    required this.endX,
-    required this.primary,
-    required this.targetLow,
-    required this.targetHigh,
+// ---------------------------------------------------------------------------
+// Top bar — close + set chip + (right side reserved for future pause)
+// ---------------------------------------------------------------------------
+
+class _TrainingTopBar extends StatelessWidget {
+  const _TrainingTopBar({
+    required this.currentSet,
+    required this.totalSets,
+    required this.onClose,
   });
-  final Queue<FlSpot> points;
-  final double startX;
-  final double endX;
-  final Color primary;
-  final double targetLow;
-  final double targetHigh;
+
+  final int currentSet;
+  final int totalSets;
+  final VoidCallback onClose;
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(8, 16, 16, 8),
-        child: LineChart(
-          LineChartData(
-            minY: 0, maxY: 50,  // E-1 debug: ADC/100 의 풀스케일 ~41 까지 보이도록 50
-            minX: startX, maxX: endX,
-            clipData: const FlClipData.all(),
-            gridData: FlGridData(
-              show: true,
-              drawVerticalLine: false,
-              horizontalInterval: 10,
-              getDrawingHorizontalLine: (_) => FlLine(
-                color: Colors.grey.shade200,
-                strokeWidth: 1,
-              ),
+    return Container(
+      height: 52,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
+        children: [
+          _CircleIconButton(icon: Icons.close, onTap: onClose),
+          const Spacer(),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(999),
+              boxShadow: BlowfitColors.shadowLevel1,
             ),
-            borderData: FlBorderData(show: false),
-            titlesData: FlTitlesData(
-              leftTitles: AxisTitles(
-                sideTitles: SideTitles(
-                  showTitles: true,
-                  reservedSize: 32,
-                  interval: 10,
-                  getTitlesWidget: (v, meta) => Padding(
-                    padding: const EdgeInsets.only(right: 6),
-                    child: SizedBox(
-                      width: 18,
-                      child: Text(
-                        v.toInt().toString(),
-                        textAlign: TextAlign.right,
-                        style: const TextStyle(
-                          fontSize: 11,
-                          color: Colors.black54,
-                          fontFeatures: [FontFeature.tabularFigures()],
-                        ),
-                      ),
-                    ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  '세트 ',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: BlowfitColors.ink,
                   ),
                 ),
-              ),
-              bottomTitles: AxisTitles(
-                sideTitles: SideTitles(
-                  showTitles: true,
-                  reservedSize: 22,
-                  interval: 5,
-                  getTitlesWidget: (v, meta) {
-                    // startX/endX 가 정수 초로 정렬돼 있으므로 v 도 정수.
-                    // 절대 경과 초 (0초, 5초, ..., 30초, 35초, ...).
-                    final sec = v.round();
-                    if (sec < 0 || sec % 5 != 0) {
-                      return const SizedBox.shrink();
-                    }
-                    return Padding(
-                      padding: const EdgeInsets.only(top: 4),
-                      child: Text(
-                        sec == 0 ? '0' : '${sec}초',
-                        style: const TextStyle(
-                          fontSize: 11,
-                          color: Colors.black54,
-                          fontFeatures: [FontFeature.tabularFigures()],
-                        ),
-                      ),
-                    );
-                  },
+                Text(
+                  '$currentSet',
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: BlowfitColors.blue500,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
                 ),
-              ),
-              topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-              rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-            ),
-            rangeAnnotations: RangeAnnotations(
-              horizontalRangeAnnotations: [
-                HorizontalRangeAnnotation(
-                  y1: targetLow, y2: targetHigh,
-                  color: Colors.green.withOpacity(0.10),
+                Text(
+                  ' / $totalSets',
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: BlowfitColors.ink,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
                 ),
               ],
             ),
-            lineBarsData: [
-              LineChartBarData(
-                spots: points.toList(growable: false),
-                isCurved: true,
-                curveSmoothness: 0.25,
-                preventCurveOverShooting: true,
-                color: primary,
-                barWidth: 2.5,
-                dotData: const FlDotData(show: false),
-                belowBarData: BarAreaData(
-                  show: true,
-                  color: primary.withOpacity(0.06),
-                ),
-              ),
-            ],
           ),
+          const Spacer(),
+          // 향후 일시정지 버튼 자리 — 현재는 빈 공간으로 close 버튼과 시각적 균형.
+          const SizedBox(width: 36),
+        ],
+      ),
+    );
+  }
+}
+
+class _CircleIconButton extends StatelessWidget {
+  const _CircleIconButton({required this.icon, required this.onTap});
+  final IconData icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: onTap,
+        child: Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            shape: BoxShape.circle,
+            boxShadow: BlowfitColors.shadowLevel1,
+          ),
+          child: Icon(icon, size: 20, color: BlowfitColors.gray700),
         ),
       ),
     );
   }
 }
 
-class _ConnectionChip extends StatelessWidget {
-  const _ConnectionChip({required this.connected});
-  final bool connected;
+// ---------------------------------------------------------------------------
+// Phase guide — chip + big text (current pressure visualized via chart)
+// ---------------------------------------------------------------------------
+
+class _PhaseGuide extends StatelessWidget {
+  const _PhaseGuide({required this.phase, required this.sessionActive});
+  final DeviceStateCode phase;
+  final bool sessionActive;
+
+  ({String chip, String guide, String sub, IconData icon}) get _content {
+    switch (phase) {
+      case DeviceStateCode.train:
+        return (
+          chip: '호기 단계',
+          guide: '입으로 강하게 내쉬세요',
+          sub: '복부의 힘을 사용하세요',
+          icon: Icons.arrow_upward,
+        );
+      case DeviceStateCode.prep:
+        return (
+          chip: '준비',
+          guide: '곧 시작합니다',
+          sub: '편안한 자세로 앉아주세요',
+          icon: Icons.timer_outlined,
+        );
+      case DeviceStateCode.rest:
+        return (
+          chip: '휴식',
+          guide: '잠시 쉬어요',
+          sub: '다음 세트를 준비하세요',
+          icon: Icons.pause_circle_outline,
+        );
+      case DeviceStateCode.summary:
+        return (
+          chip: '완료',
+          guide: '훈련 완료!',
+          sub: '잘하셨어요',
+          icon: Icons.check_circle_outline,
+        );
+      case DeviceStateCode.standby:
+      case DeviceStateCode.boot:
+      case DeviceStateCode.weekly:
+      case DeviceStateCode.error:
+        return (
+          chip: '대기',
+          guide: sessionActive ? '시작 중...' : '훈련을 시작하세요',
+          sub: '기기를 입에 물고 준비하세요',
+          icon: Icons.air,
+        );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final color = connected ? Colors.green : Colors.grey;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 8, height: 8,
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+    final content = _content;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: BlowfitColors.blue500,
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(content.icon, size: 12, color: Colors.white),
+                const SizedBox(width: 6),
+                Text(
+                  content.chip,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
+                    letterSpacing: 0.48,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            content.guide,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 26,
+              fontWeight: FontWeight.w700,
+              letterSpacing: -0.78,
+              height: 1.25,
+              color: BlowfitColors.ink,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            content.sub,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+              color: BlowfitColors.ink3,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DegradedSignalBanner extends StatelessWidget {
+  const _DegradedSignalBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: BlowfitColors.amberBg,
+          borderRadius: BorderRadius.circular(BlowfitRadius.md),
         ),
-        const SizedBox(width: 6),
-        Text(
-          connected ? '연결 중' : '끊김',
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: color,
+        child: const Row(
+          children: [
+            Icon(Icons.signal_cellular_alt_2_bar,
+                size: 16, color: BlowfitColors.amberInk),
+            SizedBox(width: 8),
+            Text(
+              '신호 약함 — 일부 데이터가 누락될 수 있습니다',
+              style: TextStyle(
+                fontSize: 12,
+                color: BlowfitColors.amberInk,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Bottom stats — endurance + elapsed
+// ---------------------------------------------------------------------------
+
+class _BottomStats extends StatelessWidget {
+  const _BottomStats({required this.endurance, required this.elapsed});
+  final Duration endurance;
+  final Duration elapsed;
+
+  String _fmt(Duration d) {
+    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: BlowfitCard(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  '지구력 시간',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: BlowfitColors.ink3,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  _fmt(endurance),
+                  style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w700,
+                    color: BlowfitColors.ink,
+                    letterSpacing: -0.44,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: BlowfitCard(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  '훈련 시간',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: BlowfitColors.ink3,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  _fmt(elapsed),
+                  style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w700,
+                    color: BlowfitColors.ink,
+                    letterSpacing: -0.44,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ],
@@ -583,93 +651,201 @@ class _ConnectionChip extends StatelessWidget {
   }
 }
 
-class _PhaseChip extends StatelessWidget {
-  const _PhaseChip({required this.label});
-  final String label;
+// ---------------------------------------------------------------------------
+// Bidirectional live chart — Y axis ±30 cmH2O, target zone band,
+// realtime current pressure label.
+// ---------------------------------------------------------------------------
+
+class _LiveChart extends StatelessWidget {
+  const _LiveChart({
+    required this.points,
+    required this.startX,
+    required this.endX,
+    required this.current,
+    required this.targetLow,
+    required this.targetHigh,
+  });
+
+  final Queue<FlSpot> points;
+  final double startX;
+  final double endX;
+  final double current;
+  final double targetLow;
+  final double targetHigh;
+
+  // 디자인의 ±30 cmH2O 양방향 시각화를 따른다. 현재 하드웨어 (XGZP6847A005KPG)
+  // 는 양압만 측정하므로 음수 영역은 항상 비어있고, 차후 차압 센서로 교체 시
+  // 흡기 데이터가 자동으로 그래프 하단에 들어옴.
+  static const double _yMin = -30.0;
+  static const double _yMax = 30.0;
 
   @override
   Widget build(BuildContext context) {
-    final primary = Theme.of(context).colorScheme.primary;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(
-        color: primary.withOpacity(0.10),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Text(
-        '현재: $label',
-        style: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-          color: primary,
-        ),
-      ),
-    );
-  }
-}
-
-class _MiniBadge extends StatelessWidget {
-  const _MiniBadge({required this.icon, required this.text, required this.color});
-  final IconData icon;
-  final String text;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
+    return BlowfitCard(
+      padding: const EdgeInsets.fromLTRB(8, 14, 12, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: color, size: 14),
-          const SizedBox(width: 4),
-          Text(
-            text,
-            style: TextStyle(
-              fontSize: 11, fontWeight: FontWeight.w600, color: color,
+          // 헤더 — 라벨 + 현재값 + 목표 구간 범례
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Row(
+              children: [
+                const Text(
+                  '실시간 압력',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: BlowfitColors.ink,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  '${current.toStringAsFixed(1)} cmH₂O',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: BlowfitColors.blue500,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
+                ),
+                const Spacer(),
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: BlowfitColors.green100,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                const Text(
+                  '목표 구간',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: BlowfitColors.ink3,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 4),
+          Expanded(
+            child: LineChart(
+              LineChartData(
+                minY: _yMin,
+                maxY: _yMax,
+                minX: startX,
+                maxX: endX,
+                clipData: const FlClipData.all(),
+                gridData: FlGridData(
+                  show: true,
+                  drawVerticalLine: false,
+                  horizontalInterval: 10,
+                  getDrawingHorizontalLine: (v) {
+                    // y=0 baseline 은 더 진하게.
+                    final isZero = v.abs() < 0.01;
+                    return FlLine(
+                      color: isZero
+                          ? BlowfitColors.gray400
+                          : BlowfitColors.gray150,
+                      strokeWidth: isZero ? 1.2 : 1,
+                    );
+                  },
+                ),
+                borderData: FlBorderData(show: false),
+                titlesData: FlTitlesData(
+                  leftTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      reservedSize: 32,
+                      interval: 10,
+                      getTitlesWidget: (v, meta) {
+                        // -30, -20, ..., +30
+                        final n = v.round();
+                        final label = n > 0 ? '+$n' : '$n';
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child: SizedBox(
+                            width: 24,
+                            child: Text(
+                              label,
+                              textAlign: TextAlign.right,
+                              style: const TextStyle(
+                                fontSize: 10,
+                                color: BlowfitColors.ink3,
+                                fontFeatures: [FontFeature.tabularFigures()],
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  bottomTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      reservedSize: 22,
+                      interval: 5,
+                      getTitlesWidget: (v, meta) {
+                        final sec = v.round();
+                        if (sec < 0 || sec % 5 != 0) {
+                          return const SizedBox.shrink();
+                        }
+                        return Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Text(
+                            sec == 0 ? '0' : '${sec}s',
+                            style: const TextStyle(
+                              fontSize: 10,
+                              color: BlowfitColors.ink3,
+                              fontFeatures: [FontFeature.tabularFigures()],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  topTitles: const AxisTitles(
+                      sideTitles: SideTitles(showTitles: false)),
+                  rightTitles: const AxisTitles(
+                      sideTitles: SideTitles(showTitles: false)),
+                ),
+                rangeAnnotations: RangeAnnotations(
+                  horizontalRangeAnnotations: [
+                    // 호기 (양압) 목표 구간.
+                    HorizontalRangeAnnotation(
+                      y1: targetLow,
+                      y2: targetHigh,
+                      color: const Color.fromRGBO(0, 191, 64, 0.12),
+                    ),
+                    // 흡기 (음압) 목표 구간 — 차후 흡기 센서 추가 시 활용.
+                    HorizontalRangeAnnotation(
+                      y1: -targetHigh,
+                      y2: -targetLow,
+                      color: const Color.fromRGBO(0, 191, 64, 0.08),
+                    ),
+                  ],
+                ),
+                lineBarsData: [
+                  LineChartBarData(
+                    spots: points.toList(growable: false),
+                    isCurved: true,
+                    curveSmoothness: 0.25,
+                    preventCurveOverShooting: true,
+                    color: BlowfitColors.blue500,
+                    barWidth: 2.5,
+                    dotData: const FlDotData(show: false),
+                    belowBarData: BarAreaData(
+                      show: true,
+                      color: const Color.fromRGBO(0, 102, 255, 0.06),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _StatTile extends StatelessWidget {
-  const _StatTile({required this.label, required this.value});
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Text(
-              label,
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 12, color: Colors.black54),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              value,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
-                color: Colors.black87,
-                fontFeatures: [FontFeature.tabularFigures()],
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }
