@@ -73,15 +73,16 @@ void main() {
     await tester.pumpWidget(_buildHarness(ble: fake));
     await tester.pump();
 
-    // Train button is disabled. FilledButton.icon() is the only FilledButton
-    // on this screen, so byType + first is unambiguous and survives Flutter
-    // version-specific changes to find.widgetWithText for icon-style buttons.
-    final btn = tester.widget<FilledButton>(find.byType(FilledButton).first);
-    expect(btn.onPressed, isNull);
-
     // Connect prompt visible
     expect(find.text('기기 연결'), findsOneWidget);
     expect(find.text('기기를 먼저 연결해주세요'), findsOneWidget);
+
+    // Train button is disabled — tapping its label should NOT navigate.
+    // (Behavioral check is more robust than structural checks against
+    // FilledButton.icon() which wraps differently across Flutter versions.)
+    await tester.tap(find.text('훈련 시작'));
+    await tester.pumpAndSettle();
+    expect(find.text('STUB:training'), findsNothing);
   });
 
   testWidgets('tapping 기기 연결 navigates to /connect', (tester) async {
@@ -92,8 +93,7 @@ void main() {
     await tester.pumpWidget(_buildHarness(ble: fake));
     await tester.pump();
 
-    // OutlinedButton.icon() — same caveat as FilledButton above.
-    await tester.tap(find.byType(OutlinedButton).first);
+    await tester.tap(find.text('기기 연결'));
     await tester.pumpAndSettle();
 
     expect(find.text('STUB:connect'), findsOneWidget);
