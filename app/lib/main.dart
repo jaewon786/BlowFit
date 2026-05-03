@@ -12,10 +12,12 @@ import 'features/guide/guide_screen.dart';
 import 'features/history/history_screen.dart';
 import 'features/onboarding/onboarding_screen.dart';
 import 'features/profile/profile_screen.dart';
+import 'features/profile_setup/profile_setup_screen.dart';
 import 'features/result/result_screen.dart';
 import 'features/session_detail/session_detail_screen.dart';
 import 'features/settings/target_settings_screen.dart';
 import 'features/shell/main_shell.dart';
+import 'features/training/training_intro_screen.dart';
 import 'features/training/training_screen.dart';
 import 'features/trend/trend_screen.dart';
 
@@ -40,7 +42,12 @@ final _router = GoRouter(
         StatefulShellBranch(
           routes: [
             GoRoute(path: '/', builder: (_, __) => const DashboardScreen()),
-            // 훈련 화면을 홈 탭 안에 두어 하단 네비가 그대로 노출됨.
+            // 훈련 시작 전 페이지 (체크리스트 + 팁) — 홈 탭 안에서 push.
+            GoRoute(
+              path: '/training-intro',
+              builder: (_, __) => const TrainingIntroScreen(),
+            ),
+            // 실시간 훈련 — intro 의 시작 버튼에서 push.
             GoRoute(path: '/training', builder: (_, __) => const TrainingScreen()),
           ],
         ),
@@ -99,6 +106,12 @@ final _router = GoRouter(
       parentNavigatorKey: _rootNavKey,
       path: '/onboarding',
       builder: (_, __) => const OnboardingScreen(),
+    ),
+    // 디자인 v2 — 온보딩 끝 → 프로필 설정 → 페어링.
+    GoRoute(
+      parentNavigatorKey: _rootNavKey,
+      path: '/profile-setup',
+      builder: (_, __) => const ProfileSetupScreen(),
     ),
   ],
 );

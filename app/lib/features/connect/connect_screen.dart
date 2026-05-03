@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/ble/ble_error_translator.dart';
 import '../../core/ble/ble_permissions.dart';
 import '../../core/ble/ble_providers.dart';
 import '../../core/ble/discovered_device.dart';
@@ -33,9 +34,8 @@ class _Results extends _ConnectStatus {
 }
 class _Empty extends _ConnectStatus { const _Empty(); }
 class _Failed extends _ConnectStatus {
-  final String message;
-  final bool btOff;
-  const _Failed(this.message, {this.btOff = false});
+  final BleErrorMessage error;
+  const _Failed(this.error);
 }
 
 class ConnectScreen extends ConsumerStatefulWidget {
@@ -81,11 +81,7 @@ class _ConnectScreenState extends ConsumerState<ConnectScreen> {
       devices = await ref.read(bleManagerProvider).scan();
     } catch (e) {
       if (!mounted) return;
-      final msg = e.toString();
-      final btOff = msg.toLowerCase().contains('off') ||
-          msg.toLowerCase().contains('disabled') ||
-          msg.toLowerCase().contains('bluetoothoff');
-      setState(() => _status = _Failed(msg, btOff: btOff));
+      setState(() => _status = _Failed(BleErrorTranslator.translate(e)));
       return;
     }
 
@@ -210,8 +206,8 @@ class _ConnectScreenState extends ConsumerState<ConnectScreen> {
           onRetry: _retry,
           onOpenSettings: BlePermissions.openSettings,
         );
-      case _Failed(:final message, :final btOff):
-        return _FailedView(message: message, btOff: btOff, onRetry: _retry);
+      case _Failed(:final error):
+        return _FailedView(error: error, onRetry: _retry);
       case _Empty():
         return _EmptyView(onRetry: _retry);
       case _Results(:final devices):
@@ -221,6 +217,128 @@ class _ConnectScreenState extends ConsumerState<ConnectScreen> {
           onTap: _attemptConnect,
         );
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Shared layout — 온보딩 화면과 동일 (80 top spacer + 220×220 frame +
+// 32 gap + 140 minHeight 텍스트). Pairing / Permissions / Failed / Empty
+// 모두 이 레이아웃을 따라 로고와 텍스트가 같은 Y 위치에서 시작한다.
+// ---------------------------------------------------------------------------
+
+class _OnboardingStateLayout extends StatelessWidget {
+  const _OnboardingStateLayout({
+    required this.illustration,
+    required this.title,
+    required this.desc,
+    required this.bottom,
+  });
+
+  /// 220×220 frame 안에 들어갈 일러스트 (보통 140×140 circle).
+  final Widget illustration;
+  final String title;
+  final String desc;
+
+  /// 화면 하단 — 버튼 / 도움말 카드 등.
+  final Widget bottom;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Expanded(
+          // ListView 로 감싸서 작은 화면에서 스크롤 보호. 기본은 스크롤 잠김.
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
+            physics: const ClampingScrollPhysics(),
+            children: [
+              const SizedBox(height: 80),
+              SizedBox(
+                width: double.infinity,
+                height: 220,
+                child: Center(child: illustration),
+              ),
+              const SizedBox(height: 32),
+              ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: 140),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      title,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 28,
+                        fontWeight: FontWeight.w700,
+                        height: 1.3,
+                        letterSpacing: -0.84,
+                        color: BlowfitColors.ink,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      desc,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        color: BlowfitColors.ink2,
+                        fontWeight: FontWeight.w500,
+                        height: 1.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: bottom,
+        ),
+      ],
+    );
+  }
+}
+
+/// 140×140 원형 아이콘 컨테이너 — _OnboardingStateLayout 의 illustration
+/// 슬롯에 들어가 220×220 frame 의 정중앙에 위치.
+class _StateCircle extends StatelessWidget {
+  const _StateCircle({
+    required this.icon,
+    required this.color,
+    this.iconColor = Colors.white,
+    this.iconSize = 56,
+    this.glow,
+  });
+
+  final IconData icon;
+  final Color color;
+  final Color iconColor;
+  final double iconSize;
+  final Color? glow;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 140,
+      height: 140,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: color,
+        boxShadow: glow != null
+            ? [
+                BoxShadow(
+                  color: glow!,
+                  blurRadius: 40,
+                  offset: const Offset(0, 16),
+                ),
+              ]
+            : null,
+      ),
+      child: Icon(icon, size: iconSize, color: iconColor),
+    );
   }
 }
 
@@ -247,89 +365,43 @@ class _PairingHero extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
-      child: Column(
-        children: [
-          Expanded(
-            child: Center(
-              child: SizedBox(
-                width: 220,
-                height: 220,
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    if (state == _HeroState.scanning) ...[
-                      _PingRing(delayMs: 0),
-                      _PingRing(delayMs: 700),
-                      _PingRing(delayMs: 1400),
-                    ],
-                    Container(
-                      width: 140,
-                      height: 140,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: state == _HeroState.connected
-                            ? BlowfitColors.green500
-                            : BlowfitColors.blue500,
-                        boxShadow: [
-                          BoxShadow(
-                            color: state == _HeroState.connected
-                                ? const Color.fromRGBO(0, 191, 64, 0.30)
-                                : const Color.fromRGBO(0, 102, 255, 0.30),
-                            blurRadius: 40,
-                            offset: const Offset(0, 16),
-                          ),
-                        ],
-                      ),
-                      child: Icon(
-                        state == _HeroState.connected
-                            ? Icons.check
-                            : Icons.bluetooth,
-                        size: 64,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+    final connected = state == _HeroState.connected;
+    return _OnboardingStateLayout(
+      illustration: SizedBox(
+        width: 220,
+        height: 220,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            if (state == _HeroState.scanning) ...[
+              _PingRing(delayMs: 0),
+              _PingRing(delayMs: 700),
+              _PingRing(delayMs: 1400),
+            ],
+            _StateCircle(
+              icon: connected ? Icons.check : Icons.bluetooth,
+              color: connected
+                  ? BlowfitColors.green500
+                  : BlowfitColors.blue500,
+              iconSize: 64,
+              glow: connected
+                  ? const Color.fromRGBO(0, 191, 64, 0.30)
+                  : const Color.fromRGBO(0, 102, 255, 0.30),
             ),
-          ),
-          const SizedBox(height: 24),
-          Text(
-            title,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: 28,
-              fontWeight: FontWeight.w700,
-              height: 1.3,
-              letterSpacing: -0.84,
-              color: BlowfitColors.ink,
-            ),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            desc,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: 16,
-              color: BlowfitColors.ink2,
-              height: 1.5,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          const SizedBox(height: 24),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton(
-              // Hero button is informational-only in scanning / auto-reconnecting
-              // states. Action buttons live on Permissions / Failed / Empty
-              // views which have their own dedicated render path.
-              onPressed: buttonEnabled ? () {} : null,
-              child: Text(buttonLabel),
-            ),
-          ),
-        ],
+          ],
+        ),
+      ),
+      title: title,
+      desc: desc,
+      bottom: SizedBox(
+        width: double.infinity,
+        child: FilledButton(
+          // Hero button is informational-only in scanning / auto-reconnecting
+          // states. Action buttons live on Permissions / Failed / Empty
+          // views which have their own dedicated render path.
+          onPressed: buttonEnabled ? () {} : null,
+          child: Text(buttonLabel),
+        ),
       ),
     );
   }
@@ -584,135 +656,105 @@ class _PermissionsView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
-      child: Column(
-        children: [
-          Expanded(
-            child: Center(
-              child: Container(
-                width: 140,
-                height: 140,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: BlowfitColors.gray100,
-                ),
-                child: const Icon(
-                  Icons.bluetooth_disabled,
-                  size: 56,
-                  color: BlowfitColors.gray500,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 24),
-          const Text(
-            '블루투스 권한이 필요합니다',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.w700,
-              letterSpacing: -0.72,
-              color: BlowfitColors.ink,
-            ),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            permanent
-                ? '시스템 설정에서 블루투스 / 위치 권한을\n허용해주세요.'
-                : 'BlowFit 기기를 검색하려면 블루투스 권한을\n허용해야 합니다.',
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: 16,
-              color: BlowfitColors.ink2,
-              fontWeight: FontWeight.w500,
-              height: 1.5,
-            ),
-          ),
-          const SizedBox(height: 24),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              onPressed: permanent
-                  ? () async {
-                      await onOpenSettings();
-                    }
-                  : onRetry,
-              icon: Icon(permanent ? Icons.settings : Icons.check),
-              label: Text(permanent ? '설정 열기' : '권한 허용'),
-            ),
-          ),
-        ],
+    return _OnboardingStateLayout(
+      illustration: const _StateCircle(
+        icon: Icons.bluetooth_disabled,
+        color: BlowfitColors.gray100,
+        iconColor: BlowfitColors.gray500,
+      ),
+      title: '블루투스 권한이 필요합니다',
+      desc: permanent
+          ? '시스템 설정에서 블루투스 / 위치 권한을\n허용해주세요.'
+          : 'BlowFit 기기를 검색하려면 블루투스 권한을\n허용해야 합니다.',
+      bottom: SizedBox(
+        width: double.infinity,
+        child: FilledButton.icon(
+          onPressed: permanent
+              ? () async {
+                  await onOpenSettings();
+                }
+              : onRetry,
+          icon: Icon(permanent ? Icons.settings : Icons.check),
+          label: Text(permanent ? '설정 열기' : '권한 허용'),
+        ),
       ),
     );
   }
 }
 
-class _FailedView extends StatelessWidget {
-  const _FailedView({
-    required this.message,
-    required this.btOff,
-    required this.onRetry,
-  });
+class _FailedView extends StatefulWidget {
+  const _FailedView({required this.error, required this.onRetry});
 
-  final String message;
-  final bool btOff;
+  final BleErrorMessage error;
   final VoidCallback onRetry;
 
   @override
+  State<_FailedView> createState() => _FailedViewState();
+}
+
+class _FailedViewState extends State<_FailedView> {
+  bool _showDetails = false;
+
+  IconData get _icon {
+    return switch (widget.error.category) {
+      BleErrorCategory.btOff => Icons.bluetooth_disabled,
+      BleErrorCategory.permission => Icons.lock_outline,
+      BleErrorCategory.locationOff => Icons.location_off_outlined,
+      BleErrorCategory.scanThrottled => Icons.timer_outlined,
+      BleErrorCategory.timeout => Icons.hourglass_empty,
+      BleErrorCategory.generic => Icons.error_outline,
+    };
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
-      child: Column(
+    final err = widget.error;
+    return _OnboardingStateLayout(
+      illustration: _StateCircle(
+        icon: _icon,
+        color: BlowfitColors.amberBg,
+        iconColor: BlowfitColors.amber500,
+      ),
+      title: err.title,
+      desc: err.desc,
+      bottom: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Expanded(
-            child: Center(
-              child: Container(
-                width: 140,
-                height: 140,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: BlowfitColors.amberBg,
-                ),
-                child: Icon(
-                  btOff
-                      ? Icons.bluetooth_disabled
-                      : Icons.error_outline,
-                  size: 56,
-                  color: BlowfitColors.amber500,
-                ),
+          // 디버그용 raw 메시지 expandable — 진단을 위해 위치만 옮기고 유지.
+          TextButton(
+            onPressed: () =>
+                setState(() => _showDetails = !_showDetails),
+            child: Text(
+              _showDetails ? '자세히 닫기' : '자세히',
+              style: const TextStyle(
+                fontSize: 12,
+                color: BlowfitColors.ink3,
               ),
             ),
           ),
-          const SizedBox(height: 24),
-          Text(
-            btOff ? '블루투스가 꺼져 있습니다' : '스캔 중 오류가 발생했습니다',
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.w700,
-              letterSpacing: -0.72,
-              color: BlowfitColors.ink,
+          if (_showDetails) ...[
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: BlowfitColors.gray100,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: SelectableText(
+                err.details,
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: BlowfitColors.ink3,
+                  height: 1.4,
+                ),
+                textAlign: TextAlign.center,
+              ),
             ),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            btOff
-                ? '시스템 블루투스를 켠 뒤 다시 시도해주세요.'
-                : message,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: 16,
-              color: BlowfitColors.ink2,
-              fontWeight: FontWeight.w500,
-              height: 1.5,
-            ),
-          ),
-          const SizedBox(height: 24),
+            const SizedBox(height: 8),
+          ],
           SizedBox(
             width: double.infinity,
             child: FilledButton.icon(
-              onPressed: onRetry,
+              onPressed: widget.onRetry,
               icon: const Icon(Icons.refresh),
               label: const Text('다시 시도'),
             ),
@@ -730,39 +772,17 @@ class _EmptyView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
-      child: Column(
+    return _OnboardingStateLayout(
+      illustration: const _StateCircle(
+        icon: Icons.search_off,
+        color: BlowfitColors.gray100,
+        iconColor: BlowfitColors.gray500,
+      ),
+      title: '기기를 찾을 수 없습니다',
+      desc: '아래 사항을 확인하고 다시 시도해주세요.',
+      bottom: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Expanded(
-            child: Center(
-              child: Container(
-                width: 140,
-                height: 140,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: BlowfitColors.gray100,
-                ),
-                child: const Icon(
-                  Icons.search_off,
-                  size: 56,
-                  color: BlowfitColors.gray500,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          const Text(
-            '기기를 찾을 수 없습니다',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.w700,
-              letterSpacing: -0.72,
-              color: BlowfitColors.ink,
-            ),
-          ),
-          const SizedBox(height: 16),
           BlowfitCard(
             padding: const EdgeInsets.all(14),
             child: Column(
@@ -775,7 +795,7 @@ class _EmptyView extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           SizedBox(
             width: double.infinity,
             child: FilledButton.icon(

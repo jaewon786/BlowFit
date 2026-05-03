@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:collection';
+import 'dart:math' as math;
 
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
@@ -33,13 +34,15 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
   double _current = 0;
   bool _sessionActive = false;
   DateTime? _sessionStart;
-  Duration _enduranceMs = Duration.zero;
   Timer? _ticker;
   // Summary 모달이 떴는지 추적. _stop() 의 watchdog 이 모달이 안 뜬 케이스에서만
   // 강제로 홈 복귀하기 위해 사용.
   bool _summaryShown = false;
 
   DeviceStateCode _phase = DeviceStateCode.standby;
+
+  /// 현재 phase 가 시작된 시점. BreathOrb 의 elapsed 카운트업에 사용.
+  DateTime? _phaseStartedAt;
 
   @override
   void initState() {
@@ -51,7 +54,15 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
       next.whenData(_showSummary);
     });
     ref.listenManual<AsyncValue<DeviceSnapshot>>(deviceStateProvider, (_, next) {
-      next.whenData((s) => setState(() => _phase = DeviceStateCode.fromByte(s.stateCode)));
+      next.whenData((s) {
+        final newPhase = DeviceStateCode.fromByte(s.stateCode);
+        if (newPhase != _phase) {
+          setState(() {
+            _phase = newPhase;
+            _phaseStartedAt = DateTime.now();
+          });
+        }
+      });
     });
     ref.listenManual<AsyncValue<bool>>(connectionProvider, (_, next) {
       next.whenData(_onConnectionChange);
@@ -133,19 +144,13 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
       _sessionActive = true;
       _points.clear();
       _sessionStart = DateTime.now();
-      _enduranceMs = Duration.zero;
     });
     _ticker?.cancel();
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
+      // 1 초마다 setState — BreathOrb elapsed / chart elapsed 갱신.
+      // endurance 는 펌웨어 SessionSummary 에서 정확한 값으로 받음.
       setState(() {
-        // 매 초 단위로 endurance 누적. sample-단위 timestamp diff 보다 안정적
-        // (BLE packet jitter + 펌웨어 zero-padding 영향 안 받음).
-        if (_sessionActive &&
-            _current >= _targetLow &&
-            _current <= _targetHigh) {
-          _enduranceMs += const Duration(seconds: 1);
-        }
       });
     });
   }
@@ -218,8 +223,14 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
     const totalSets = 3;
     final currentSet = _sessionActive ? 1 : 1;
 
+    // phase 시작 후 elapsed 초 — BreathOrb 안 카운트업 숫자.
+    final phaseElapsedSec = _phaseStartedAt == null
+        ? 0
+        : DateTime.now().difference(_phaseStartedAt!).inSeconds;
+
     return Scaffold(
-      backgroundColor: BlowfitColors.bg,
+      // 디자인 v2 — phase 별 살짝 다른 배경색.
+      backgroundColor: _bgForPhase(_phase),
       body: SafeArea(
         child: Column(
           children: [
@@ -237,7 +248,15 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
               const SizedBox(height: 8),
               const _DegradedSignalBanner(),
             ],
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
+            // BreathOrb — 디자인 v2 의 핵심 비주얼. 펌웨어 phase 가 train/rest
+            // 일 때 호흡 애니메이션, prep/standby 일 때 정적.
+            _BreathOrb(
+              phase: _phase,
+              sessionActive: _sessionActive,
+              elapsedSec: phaseElapsedSec,
+            ),
+            const SizedBox(height: 8),
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -249,14 +268,6 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
                   targetLow: _targetLow,
                   targetHigh: _targetHigh,
                 ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: _BottomStats(
-                endurance: _enduranceMs,
-                elapsed: elapsed,
               ),
             ),
             const SizedBox(height: 12),
@@ -274,6 +285,18 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
         ),
       ),
     );
+  }
+
+  /// phase 별 살짝 다른 배경 — 디자인 v2.
+  Color _bgForPhase(DeviceStateCode p) {
+    switch (p) {
+      case DeviceStateCode.train:
+        return const Color(0xFFF0F6FF); // 살짝 파랑
+      case DeviceStateCode.rest:
+        return const Color(0xFFF0FAFF); // 살짝 시안
+      default:
+        return BlowfitColors.bg;
+    }
   }
 }
 
@@ -520,86 +543,185 @@ class _DegradedSignalBanner extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Bottom stats — endurance + elapsed
+// Breath orb — 디자인 v2 의 핵심 비주얼. 220×220 원형 + phase 별 호흡 애니메이션
 // ---------------------------------------------------------------------------
 
-class _BottomStats extends StatelessWidget {
-  const _BottomStats({required this.endurance, required this.elapsed});
-  final Duration endurance;
-  final Duration elapsed;
+class _BreathOrb extends StatefulWidget {
+  const _BreathOrb({
+    required this.phase,
+    required this.sessionActive,
+    required this.elapsedSec,
+  });
 
-  String _fmt(Duration d) {
-    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
-    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
-    return '$m:$s';
+  final DeviceStateCode phase;
+  final bool sessionActive;
+
+  /// 현재 phase 가 시작된 시점부터 경과한 초 — 큰 숫자로 표시.
+  final int elapsedSec;
+
+  @override
+  State<_BreathOrb> createState() => _BreathOrbState();
+}
+
+class _BreathOrbState extends State<_BreathOrb>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ac;
+
+  @override
+  void initState() {
+    super.initState();
+    // 디자인의 4초 ease-in-out — 호흡 리듬.
+    _ac = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 4),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _ac.dispose();
+    super.dispose();
+  }
+
+  /// phase 별 그라데이션 + 라벨.
+  ({List<Color> gradient, Color glow, String label, bool animate}) get _tokens {
+    switch (widget.phase) {
+      case DeviceStateCode.train:
+        return (
+          gradient: const [Color(0xFF5C8CFF), BlowfitColors.blue500],
+          glow: const Color.fromRGBO(0, 102, 255, 0.25),
+          label: '내쉬기',
+          animate: true,
+        );
+      case DeviceStateCode.rest:
+        return (
+          gradient: const [Color(0xFF66D2EE), Color(0xFF0099CC)],
+          glow: const Color.fromRGBO(0, 153, 204, 0.25),
+          label: '휴식',
+          animate: true,
+        );
+      case DeviceStateCode.prep:
+        return (
+          gradient: const [Color(0xFF5C8CFF), BlowfitColors.blue500],
+          glow: const Color.fromRGBO(0, 102, 255, 0.20),
+          label: '준비',
+          animate: false,
+        );
+      case DeviceStateCode.summary:
+        return (
+          gradient: const [BlowfitColors.green500, BlowfitColors.greenInk],
+          glow: const Color.fromRGBO(0, 191, 64, 0.25),
+          label: '완료',
+          animate: false,
+        );
+      case DeviceStateCode.standby:
+      case DeviceStateCode.boot:
+      case DeviceStateCode.weekly:
+      case DeviceStateCode.error:
+        return (
+          gradient: const [BlowfitColors.gray400, BlowfitColors.gray500],
+          glow: const Color.fromRGBO(17, 24, 39, 0.10),
+          label: widget.sessionActive ? '진행 중' : '대기',
+          animate: false,
+        );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: BlowfitCard(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+    final t = _tokens;
+    return Center(
+      child: SizedBox(
+        width: 200,
+        height: 200,
+        child: AnimatedBuilder(
+          animation: _ac,
+          builder: (_, __) {
+            // 0..1 사이클 → sin 기반 1±0.05 scale.
+            final pulse = t.animate
+                ? 1 + 0.05 * math.sin(_ac.value * 2 * math.pi)
+                : 1.0;
+            return Stack(
+              alignment: Alignment.center,
               children: [
-                const Text(
-                  '지구력 시간',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: BlowfitColors.ink3,
+                // 외곽 aura
+                Container(
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(
+                      colors: [
+                        t.glow,
+                        t.glow.withValues(alpha: 0),
+                      ],
+                    ),
                   ),
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  _fmt(endurance),
-                  style: const TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w700,
-                    color: BlowfitColors.ink,
-                    letterSpacing: -0.44,
-                    fontFeatures: [FontFeature.tabularFigures()],
+                // 메인 orb (호흡 scale)
+                Transform.scale(
+                  scale: pulse,
+                  child: Container(
+                    width: 156,
+                    height: 156,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: LinearGradient(
+                        colors: t.gradient,
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: t.glow,
+                          blurRadius: 40,
+                          offset: const Offset(0, 16),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          t.label,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white,
+                            letterSpacing: 0.4,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '${widget.elapsedSec}',
+                          style: const TextStyle(
+                            fontSize: 50,
+                            fontWeight: FontWeight.w700,
+                            height: 1,
+                            letterSpacing: -2,
+                            color: Colors.white,
+                            fontFeatures: [FontFeature.tabularFigures()],
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        const Text(
+                          '초',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: Color.fromRGBO(255, 255, 255, 0.85),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ],
-            ),
-          ),
+            );
+          },
         ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: BlowfitCard(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  '훈련 시간',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: BlowfitColors.ink3,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  _fmt(elapsed),
-                  style: const TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w700,
-                    color: BlowfitColors.ink,
-                    letterSpacing: -0.44,
-                    fontFeatures: [FontFeature.tabularFigures()],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
+      ),
     );
   }
+
 }
 
 // ---------------------------------------------------------------------------

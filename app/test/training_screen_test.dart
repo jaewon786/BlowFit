@@ -63,7 +63,7 @@ void main() {
     expect(btn.onPressed, isNull);
   });
 
-  testWidgets('endurance + elapsed counters render at 00:00 initially',
+  testWidgets('BreathOrb renders phase label initially',
       (tester) async {
     final fake = FakeBleManager();
     addTearDown(fake.dispose);
@@ -71,8 +71,9 @@ void main() {
     await tester.pumpWidget(_buildHarness(ble: fake));
     await tester.pump();
 
-    expect(find.text('지구력 시간'), findsOneWidget);
-    expect(find.text('훈련 시간'), findsOneWidget);
-    expect(find.text('00:00'), findsAtLeastNWidgets(2));
+    // 디자인 v2: BottomStats 제거되고 BreathOrb 가 그 자리. 초기 standby.
+    // "대기" 는 phase chip + orb 안 라벨 두 군데에 등장. "초" 단위는 orb 만.
+    expect(find.text('대기'), findsAtLeastNWidgets(1));
+    expect(find.text('초'), findsOneWidget);
   });
 }

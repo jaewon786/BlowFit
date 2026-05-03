@@ -25,7 +25,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     ),
     _Step(
       title: '마우스피스를\n입에 물어주세요',
-      desc: '어금니로 가볍게 물고,\n입술로 공기가 새지 않도록 감싸주세요.',
+      desc: '입으로 가볍게 물고,\n입술로 공기가 새지 않도록 감싸주세요.',
       illust: _IllustKind.mouthpiece,
     ),
     _Step(
@@ -42,8 +42,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   void _next() {
     if (_step >= _steps.length - 1) {
-      // 마지막 단계 → pairing 흐름. 현재는 connect 화면으로 push.
-      context.go('/connect');
+      // 디자인 v2 — 온보딩 끝 → 프로필 설정 → 페어링.
+      context.go('/profile-setup');
       return;
     }
     setState(() => _step += 1);
@@ -61,7 +61,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     setState(() => _step -= 1);
   }
 
-  void _skip() => context.go('/connect');
+  void _skip() => context.go('/profile-setup');
 
   @override
   Widget build(BuildContext context) {
@@ -80,40 +80,53 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               onSkip: _skip,
             ),
             Expanded(
-              child: Padding(
+              // 디자인 v2 — 4 step 모두 일러스트와 텍스트가 동일 위치.
+              // 80px top spacer + 220×220 frame + 32px gap + 140 minHeight 텍스트.
+              child: ListView(
                 padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
-                child: Column(
-                  children: [
-                    Expanded(
-                      child: Center(
-                        child: _Illustration(kind: cur.illust),
-                      ),
+                physics: const NeverScrollableScrollPhysics(),
+                children: [
+                  const SizedBox(height: 80),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 220,
+                    child: Center(
+                      child: _Illustration(kind: cur.illust),
                     ),
-                    const SizedBox(height: 24),
-                    Text(
-                      cur.title,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        fontSize: 28,
-                        fontWeight: FontWeight.w700,
-                        height: 1.3,
-                        letterSpacing: -0.84,
-                        color: BlowfitColors.ink,
-                      ),
+                  ),
+                  const SizedBox(height: 32),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(minHeight: 140),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(
+                          cur.title,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontSize: 28,
+                            fontWeight: FontWeight.w700,
+                            height: 1.3,
+                            letterSpacing: -0.84,
+                            color: BlowfitColors.ink,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          cur.desc,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            color: BlowfitColors.ink2,
+                            fontWeight: FontWeight.w500,
+                            height: 1.5,
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 12),
-                    Text(
-                      cur.desc,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        color: BlowfitColors.ink2,
-                        fontWeight: FontWeight.w500,
-                        height: 1.5,
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
             Padding(
@@ -122,7 +135,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 width: double.infinity,
                 child: FilledButton(
                   onPressed: _next,
-                  child: Text(last ? '기기 연결하기' : '다음'),
+                  child: Text(last ? '프로필 설정하기' : '다음'),
                 ),
               ),
             ),
@@ -291,19 +304,19 @@ class _MouthpieceIllust extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Simplified: lips icon + device block.
+    // 디자인 v2 — 4 step 모두 220×220 frame 안에 맞도록 220×183 으로 통일.
     return SizedBox(
-      width: 240,
-      height: 200,
+      width: 220,
+      height: 183,
       child: Stack(
         alignment: Alignment.center,
         children: [
           // lip stand-in
           Positioned(
-            left: 32,
+            left: 24,
             child: Container(
-              width: 84,
-              height: 36,
+              width: 78,
+              height: 32,
               decoration: BoxDecoration(
                 color: const Color(0xFFFB7185),
                 borderRadius: BorderRadius.circular(99),
@@ -312,10 +325,10 @@ class _MouthpieceIllust extends StatelessWidget {
           ),
           // mouthpiece tube
           Positioned(
-            left: 110,
+            left: 96,
             child: Container(
-              width: 36,
-              height: 24,
+              width: 34,
+              height: 22,
               decoration: BoxDecoration(
                 color: const Color(0xFFE5E7EB),
                 borderRadius: BorderRadius.circular(8),
@@ -324,10 +337,10 @@ class _MouthpieceIllust extends StatelessWidget {
           ),
           // device body
           Positioned(
-            right: 16,
+            right: 14,
             child: Container(
-              width: 96,
-              height: 64,
+              width: 88,
+              height: 60,
               decoration: BoxDecoration(
                 color: BlowfitColors.blue500,
                 borderRadius: BorderRadius.circular(14),
@@ -340,7 +353,7 @@ class _MouthpieceIllust extends StatelessWidget {
                 ],
               ),
               child: const Center(
-                child: Icon(Icons.tune, color: Colors.white, size: 28),
+                child: Icon(Icons.tune, color: Colors.white, size: 26),
               ),
             ),
           ),
@@ -438,32 +451,32 @@ class _BreathIllust extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Simplified: face icon + 2 colored arrows.
+    // 디자인 v2 — 220×183 으로 통일.
     return SizedBox(
-      width: 240,
-      height: 200,
+      width: 220,
+      height: 183,
       child: Stack(
         children: [
           // Face
           Positioned(
-            left: 30,
-            top: 50,
+            left: 24,
+            top: 42,
             child: Container(
-              width: 100,
-              height: 100,
+              width: 92,
+              height: 92,
               decoration: const BoxDecoration(
                 color: Color(0xFFFFE4D6),
                 shape: BoxShape.circle,
               ),
               child: const Center(
-                child: Icon(Icons.face, size: 56, color: Color(0xFF8A5A00)),
+                child: Icon(Icons.face, size: 52, color: Color(0xFF8A5A00)),
               ),
             ),
           ),
           // Inhale arrow (cyan, top)
           Positioned(
-            right: 18,
-            top: 56,
+            right: 14,
+            top: 52,
             child: Row(
               children: const [
                 Icon(Icons.arrow_back,
@@ -482,8 +495,8 @@ class _BreathIllust extends StatelessWidget {
           ),
           // Exhale arrow (blue, bottom)
           Positioned(
-            right: 18,
-            top: 116,
+            right: 14,
+            top: 108,
             child: Row(
               children: const [
                 Icon(Icons.arrow_forward,
