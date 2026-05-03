@@ -2,13 +2,13 @@
 
 작성일: 2026-05-03
 근거: Claude Design 핸드오프 번들 (9 화면, Wanted DS 토큰) +
-[ui-redesign-plan.md](ui-redesign-plan.md) 1차 리디자인 위에 누적
+[archive/ui-redesign-v1.md](archive/ui-redesign-v1.md) 1차 리디자인 위에 누적
 
 ---
 
 ## 0. 개요
 
-[ui-redesign-plan.md](ui-redesign-plan.md) 의 1차 리디자인 (4탭 셸 + 라이트 테마)
+[archive/ui-redesign-v1.md](archive/ui-redesign-v1.md) 의 1차 리디자인 (4탭 셸 + 라이트 테마)
 이 완료된 시점에서, Claude Design 도구로 만든 9 화면 핸드오프 번들이
 들어옴. 이것을 픽셀-수준에 가깝게 Flutter 로 재현 + 영속 데이터에 연결.
 

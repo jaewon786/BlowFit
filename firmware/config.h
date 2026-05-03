@@ -10,7 +10,7 @@
 // 하지 않을 때 활성 코드를 우회하기 위한 컴파일 시 토글. 1 로 바꾸면 해당
 // 모듈의 실제 하드웨어 코드가 빌드됨.
 #ifndef HAS_TFT
-#define HAS_TFT 1   // ST7735 0.96" TFT 활성. TFT_eSPI 라이브러리 + User_Setup.h 필요.
+#define HAS_TFT 1   // ST7735 0.96" TFT 활성. Adafruit_ST7735 + Adafruit_GFX 라이브러리 사용 (User_Setup.h 불필요).
 #endif
 #ifndef HAS_FLASH
 #define HAS_FLASH 0 // mbed BSP + Adafruit_LittleFS 환경 정리 후 1

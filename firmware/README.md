@@ -18,12 +18,22 @@ Tools → Board → `Seeed XIAO nRF52840 (Sense)` 선택 (non-Sense 도 가능).
 
 ### 3. 라이브러리 (Library Manager)
 - **ArduinoBLE** (Arduino 공식)
-- **TFT_eSPI** (Bodmer)
+- **Adafruit GFX Library** + **Adafruit ST7735 and ST7789 Library** — TFT 렌더링
 - **Adafruit_LittleFS**, **InternalFileSystem** (Seeed 보드 패키지에 포함)
 
-### 4. TFT_eSPI 설정
+### 4. TFT 드라이버 — Adafruit_ST7735
 
-> **TFT 가 아직 없다면**: [config.h](config.h) 의 `HAS_TFT` 가 기본값 0 이므로 TFT_eSPI 라이브러리 설치 자체가 불필요. `ui_tft::begin/render/invalidate` 가 모두 no-op 으로 컴파일됨. TFT 도착 후 `HAS_TFT 1` 로 토글하고 아래 User_Setup.h 적용.
+[ui_tft.cpp](ui_tft.cpp) 는 **Adafruit_ST7735** 를 사용한다 (TFT_eSPI 는 nRF52 mbed BSP 와 호환 안 되는 이슈로 사용 안 함). User_Setup.h 같은 별도 설정 파일이 필요 없고, 핀맵은 [config.h](config.h) 의 `pins::TFT_CS / TFT_DC / TFT_RST` 단일 출처:
+
+```cpp
+// ui_tft.cpp 발췌
+static Adafruit_ST7735 tft(pins::TFT_CS, pins::TFT_DC, pins::TFT_RST);
+// Hardware SPI: SCK=D8, MOSI=D10 자동.
+```
+
+ST7735 0.96" (80×160) 패널 가정. 다른 사이즈로 바뀌면 [ui_tft.cpp](ui_tft.cpp) 의 `SCREEN_W / SCREEN_H` 와 `tft.initR(INITR_MINI160x80)` 호출만 변경.
+
+> **TFT 가 아직 없다면**: [config.h](config.h) 의 `HAS_TFT` 를 0 으로 토글하면 `ui_tft::begin/render/invalidate` 모두 no-op 으로 컴파일됨 — Adafruit 라이브러리 설치 자체가 불필요.
 
 ### 4.5. Flash 영속화 (LittleFS)
 
@@ -32,26 +42,6 @@ Tools → Board → `Seeed XIAO nRF52840 (Sense)` 선택 (non-Sense 도 가능).
 > Flash 영속화 활성화 옵션:
 > - Adafruit-based Seeed BSP 로 전환 + Bluefruit BLE 라이브러리로 ble_service 재작성, 또는
 > - mbed core 의 `mbed::LittleFileSystem` + `FlashIAPBlockDevice` 로 storage.cpp 재작성 (추후 작업)
-
-`Arduino/libraries/TFT_eSPI/User_Setup.h` 를 수정해야 한다. 편의를 위해 본 저장소 `firmware/TFT_eSPI_User_Setup.h` (추후 추가 예정) 를 라이브러리 폴더에 복사.
-
-ST7735 80×160 세로 설정 핵심:
-```c
-#define ST7735_DRIVER
-#define TFT_WIDTH  80
-#define TFT_HEIGHT 160
-#define ST7735_GREENTAB160x80
-
-#define TFT_MOSI 10   // XIAO D10
-#define TFT_SCLK 8    // XIAO D8
-#define TFT_CS    4   // XIAO D4
-#define TFT_DC    5   // XIAO D5
-#define TFT_RST   6   // XIAO D6
-
-#define LOAD_GLCD
-#define LOAD_FONT2
-#define SPI_FREQUENCY 27000000
-```
 
 ## 빌드 & 업로드
 
@@ -83,17 +73,9 @@ bash firmware/tests/run_all.sh
 
 Tools → Serial Monitor 115200 baud. `Serial.print` 로 압력값/상태 확인.
 
-## 주차별 마일스톤
+## 주차별 진행 상황
 
-| 주 | 목표 | 상태 |
-|---|---|---|
-| 3 | Blink 업로드, 시리얼 출력, ADC 읽기 | ⏳ 기기 도착 후 |
-| 4 | `sensor::adcToCmH2O` 검증, EMA 필터 적용, 시리얼 플로터 | ⏳ 기기 도착 후 |
-| 5 | 100 Hz 샘플 루프, TFT 막대 그래프, LED/진동 | ⏳ 기기 도착 후 |
-| 6 | 상태 머신, 버튼 입력, 세션 플로우 | ✅ 코드 완료 + 호스트 테스트 |
-| 7 | BLE GATT 연동, 앱 연결 확인, Flash 세션 저장 | ✅ 코드 완료 (storage 단위 테스트 포함) |
-| 8 | 배터리 모니터, Deep sleep, 캘리브레이션 영구 저장 | ✅ 코드 완료 |
-| 9 | 버그 픽스만, 수요일 Code Freeze | — |
+PM 트래킹은 [docs/dev-plan.md](../docs/dev-plan.md) 의 작업 트래킹 표 (T1~T16) 를 단일 출처로 참조. 본 README 에 중복하지 않는다.
 
 ## 구조
 
@@ -116,4 +98,4 @@ firmware/
 
 - `loop()` 안 어디에도 `delay()` 사용 금지. 모든 주기 작업은 `millis()` 델타.
 - `ArduinoBLE.poll()` 을 주기적으로 호출해야 연결이 유지됨.
-- TFT_eSPI 는 SPI 충돌을 일으킬 수 있음 — BLE 스택과의 타이밍 검증 필수 (5주차).
+- TFT 렌더링은 SPI 충돌을 일으킬 수 있음 — BLE 스택과의 타이밍 검증 필수 (5주차).
