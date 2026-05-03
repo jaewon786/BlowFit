@@ -1,7 +1,12 @@
 # 개발 계획서 — 잔여 일정 (8주차 ~ 발표)
 
-작성일: 2026-04-25
+작성일: 2026-04-25 · **최종 업데이트: 2026-05-03**
 근거: `BlowFit_개발계획서_v3.docx` (리브랜딩 반영) ↔ 현재 코드 비교
+
+> **2026-05-03 업데이트**: T1~T3 + 디자인 v2 (Claude Design 핸드오프) +
+> 실데이터 연동 (Phase A/B) 모두 완료. 자세한 내역은
+> [docs/design-v2.md](design-v2.md). 잔여는 기기 도착 후 검증
+> (T4~T7) + 외부 사용자 (T9~T10) + 발표 자료 (T11~T13).
 
 ---
 
@@ -139,11 +144,14 @@
 
 | ID | 작업 | 담당 | 기한 | 상태 |
 |---|---|---|---|---|
-| T1 | 훈련 가이드 화면 | 컴공 | 04-27 일 | ⏳ |
-| T2 | Dashboard 통계 연동 | 컴공 | 04-27 일 | ⏳ |
-| T3 | FAKE_BLE 백업 시나리오 | 컴공 | 04-27 일 | ⏳ |
+| T1 | 훈련 가이드 화면 | 컴공 | 04-27 일 | ✅ — onboarding (4 step) + training_intro 로 재구성 |
+| T2 | Dashboard 통계 연동 | 컴공 | 04-27 일 | ✅ |
+| T3 | FAKE_BLE 백업 시나리오 | 컴공 | 04-27 일 | ✅ |
+| T14 | **디자인 v2 적용 (Claude Design)** | 컴공 | 05-02 | ✅ — 9 화면 + Pretendard + 토큰 |
+| T15 | **실데이터 연동 Phase A (인프라)** | 컴공 | 05-02 | ✅ — SessionRepository 집계 + Engine 2종 |
+| T16 | **실데이터 연동 Phase B (화면 wiring)** | 컴공 | 05-03 | ✅ — Trend / Profile / Dashboard / Result / SessionDetail |
 | — | 마무리 단계 제거 합의 | 전체 | 04-27 일 | ⏳ |
-| T4 | 펌웨어 부팅 + 영점 | 컴공 | 기기 도착 +1d | ⏳ |
+| T4 | 펌웨어 부팅 + 영점 | 컴공 | 기기 도착 +1d | ✅ — 부팅 + BLE 광고 + 사이즈 12 영점 동작 확인 |
 | T5 | 오리피스 압력 검증 | 기계공+컴공 | 기기 도착 +2d | ⏳ |
 | T6 | BLE 안정성 10분 | 컴공 | 기기 도착 +2d | ⏳ |
 | T7 | SessionRepository 회귀 | 컴공 | 기기 도착 +2d | ⏳ |
@@ -169,23 +177,33 @@
 - 12주 추세 + 페이징 ([history_screen.dart](../app/lib/features/history/history_screen.dart))
 - 펌웨어 모듈 8개 모두 코드 완료 + 호스트 테스트 4개 28 케이스
 
-### 3.2 갭 ❌
+### 3.2 갭 (해결 상태)
 
-| 항목 | 위치 | 우선순위 |
-|---|---|---|
-| 훈련 가이드 화면 | (없음) | 🔴 P0 — T1 |
-| Dashboard 통계 연동 | [dashboard_screen.dart:62](../app/lib/features/dashboard/dashboard_screen.dart#L62) (placeholder 0) | 🔴 P0 — T2 |
-| 마무리 단계 30s | `COOLDOWN_MS` 정의됐으나 state_machine 미사용 | 🟡 결정 — 문서 수정 |
-| sensor.cpp 호스트 테스트 | (없음) | 🟢 P1 — 발표 후 |
-| power.cpp 호스트 테스트 | (없음) | 🟢 P1 — 발표 후 |
+| 항목 | 위치 | 우선순위 | 상태 (2026-05-03) |
+|---|---|---|---|
+| 훈련 가이드 화면 | onboarding + training_intro | 🔴 P0 — T1 | ✅ 완료 |
+| Dashboard 통계 연동 | dashboard_screen.dart | 🔴 P0 — T2 | ✅ 완료 (Phase B-3) |
+| 마무리 단계 30s | `COOLDOWN_MS` 정의됐으나 state_machine 미사용 | 🟡 결정 — 문서 수정 | ⏳ 결정 대기 |
+| sensor.cpp 호스트 테스트 | (없음) | 🟢 P1 — 발표 후 | ⏳ |
+| power.cpp 호스트 테스트 | (없음) | 🟢 P1 — 발표 후 | ⏳ |
+| **Trend 화면 placeholder 데이터** | trend_screen.dart `_weeks` | 🟡 P0' | ✅ Phase B-1 (4탭 + bucketize) |
+| **Profile 화면 placeholder** | profile_screen.dart 김영호/16.2 | 🟡 P0' | ✅ Phase B-2 (UserProfile + firstSessionStats) |
+| **Result 코칭 노트 하드코딩** | result_screen.dart | 🟡 P0' | ✅ Phase B-4 (CoachingEngine) |
+| **펌웨어 setIndex BLE 노출** | Metrics payload | 🟢 P1 | ⏳ — 화면은 1 고정 + FIXME |
 
 ### 3.3 보너스 ✨ (문서엔 없으나 코드에 있음)
 
 - Settings 화면 (목표 압력대 / 영점 보정 트리거)
-- Connect 자동 재연결 + 권한 트러블슈팅
+- Connect 자동 재연결 + 권한 트러블슈팅 + **친화 에러 메시지** (BleErrorTranslator 6 카테고리)
 - BLE 패킷 손실 감지 + 경고 배너 → 문서 8.1 BLE 안정성 검증 자동화에 활용 가능
 - 배터리 부족 경고 (Dashboard / Training)
 - FAKE_BLE 모드 → 발표 시 기기 고장 시 백업 데모
+- **온보딩 4 step + 프로필 설정** (이름/나이/성별 영속화)
+- **Trend 4탭** (일/주/월/년) + 자동 변화율 계산
+- **5종 마일스톤** 자동 감지 (첫 훈련 / 7일 / 호기 20 / 30일 / 호기 25)
+- **CoachingEngine** (Dashboard 위클리 + Result 노트, 데이터 기반 분기)
+- **BreathOrb** + phase 별 배경색 (실시간 훈련 화면)
+- **DeviceStatusCard 3 metric** (배터리 / 다이얼 / 신호) — degraded 자동 빨강
 
 ---
 
