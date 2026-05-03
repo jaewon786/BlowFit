@@ -1,6 +1,7 @@
 import 'package:blowfit/core/db/app_database.dart';
 import 'package:blowfit/core/db/db_providers.dart';
 import 'package:blowfit/core/db/session_repository.dart';
+import 'package:blowfit/core/db/trend_bucketing.dart';
 import 'package:blowfit/core/models/pressure_sample.dart';
 import 'package:blowfit/core/theme/blowfit_theme.dart';
 import 'package:blowfit/features/history/history_screen.dart';
@@ -50,6 +51,29 @@ class _FakeRepo implements SessionRepository {
     if (_sessions.isEmpty) return null;
     return _sessions.first.receivedAt;
   }
+
+  @override
+  Future<FirstSessionStats?> firstSessionStats() async => null;
+
+  @override
+  Stream<List<WeeklyAggregate>> watchWeeklyAggregates({
+    int weeks = 12,
+    DateTime Function() now = _defaultNow,
+  }) =>
+      const Stream.empty();
+
+  @override
+  Stream<WeekPressureAvgPair> watchWeekAvgPressurePair({
+    DateTime Function() now = _defaultNow,
+  }) =>
+      Stream.value((thisWeek: null, lastWeek: null));
+
+  @override
+  Stream<List<TrendBucket>> watchTrendBuckets(
+    TrendPeriod period, {
+    DateTime Function() now = _defaultNow,
+  }) =>
+      const Stream.empty();
 
   @override
   Future<Session?> findById(int id) async =>

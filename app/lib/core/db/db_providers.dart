@@ -2,9 +2,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../ble/ble_providers.dart';
 import '../ble/discovered_device.dart';
+import '../coach/milestone_engine.dart';
 import '../storage/storage_providers.dart';
 import 'app_database.dart';
 import 'session_repository.dart';
+import 'trend_bucketing.dart';
 
 final appDatabaseProvider = Provider<AppDatabase>((ref) {
   final db = AppDatabase();
@@ -106,4 +108,45 @@ final firstSessionDateProvider = FutureProvider<DateTime?>((ref) {
 /// Single-session lookup by primary key. Drives the SessionDetail screen.
 final sessionByIdProvider = FutureProvider.family<Session?, int>((ref, id) {
   return ref.watch(sessionRepositoryProvider).findById(id);
+});
+
+/// 최근 N주 호기 평균/최대. Dashboard 등에서 가벼운 윈도우용.
+final weeklyAggregatesByWindowProvider =
+    StreamProvider.family<List<WeeklyAggregate>, int>((ref, weeks) {
+  return ref
+      .watch(sessionRepositoryProvider)
+      .watchWeeklyAggregates(weeks: weeks);
+});
+
+/// Trend 화면 — period 별 버킷.
+final trendBucketsProvider =
+    StreamProvider.family<List<TrendBucket>, TrendPeriod>((ref, period) {
+  return ref.watch(sessionRepositoryProvider).watchTrendBuckets(period);
+});
+
+/// 이번 주 / 지난 주 호기 평균. Dashboard quick stats.
+final weekAvgPressureProvider =
+    StreamProvider<WeekPressureAvgPair>((ref) {
+  return ref.watch(sessionRepositoryProvider).watchWeekAvgPressurePair();
+});
+
+/// 첫 세션 호기 통계. Profile 베이스라인 카드.
+final firstSessionStatsProvider =
+    FutureProvider<FirstSessionStats?>((ref) {
+  return ref.watch(sessionRepositoryProvider).firstSessionStats();
+});
+
+/// Trend 화면 마일스톤 카드용 — 최근 200일 세션 + 현재 streak 합쳐서
+/// MilestoneEngine 으로 5종 마일스톤 계산.
+final milestonesProvider = StreamProvider<List<Milestone>>((ref) {
+  final repo = ref.watch(sessionRepositoryProvider);
+  // 200일 윈도우 — 30일 streak / 호기 25 돌파 모두 안에 들어옴.
+  final since = DateTime.now().subtract(const Duration(days: 200));
+  return repo.watchSince(since).asyncMap((sessions) async {
+    final streak = await repo.watchConsecutiveDays().first;
+    return MilestoneEngine.compute(
+      sessions: sessions,
+      currentStreak: streak,
+    );
+  });
 });

@@ -217,10 +217,15 @@ void main() {
   });
 
   test('watchTodayDuration sums only today rows', () async {
+    // 자정 직후에 실행해도 안정적이도록 시드를 startOfDay 기준으로 작성.
     final now = DateTime.now();
-    await seedAt(now, id: 1, durationSec: 120);
-    await seedAt(now.subtract(const Duration(hours: 2)), id: 2, durationSec: 60);
-    await seedAt(now.subtract(const Duration(days: 1)), id: 3, durationSec: 999);
+    final today0 = DateTime(now.year, now.month, now.day);
+    await seedAt(today0.add(const Duration(hours: 9)),
+        id: 1, durationSec: 120);
+    await seedAt(today0.add(const Duration(hours: 11)),
+        id: 2, durationSec: 60);
+    await seedAt(today0.subtract(const Duration(hours: 1)),
+        id: 3, durationSec: 999);
 
     final d = await repo.watchTodayDuration().first;
     expect(d, const Duration(seconds: 180));
@@ -249,5 +254,213 @@ void main() {
 
     final earliest = await repo.firstSessionDate();
     expect(earliest!.isAtSameMomentAs(older), isTrue);
+  });
+
+  // ---------------------------------------------------------------
+  // Phase A-1: weekly aggregates + week pressure pair
+  // ---------------------------------------------------------------
+
+  Session sessionWith({
+    required DateTime receivedAt,
+    int id = 0,
+    double avgPressure = 22.0,
+    double maxPressure = 28.0,
+  }) =>
+      Session(
+        id: id,
+        deviceSessionId: id,
+        startedAt: null,
+        durationSec: 240,
+        maxPressure: maxPressure,
+        avgPressure: avgPressure,
+        enduranceSec: 180,
+        orificeLevel: 1,
+        targetHits: 3,
+        sampleCount: 24000,
+        crc32: 0,
+        receivedAt: receivedAt,
+      );
+
+  group('weeklyAggregatesFrom (pure)', () {
+    // 2026-04-25 Sat → 그 주 월요일 = 2026-04-20
+    DateTime now() => DateTime(2026, 4, 25, 12);
+    final thisMon = DateTime(2026, 4, 20);
+
+    test('returns exactly N weeks (default 12), oldest first', () {
+      final out = weeklyAggregatesFrom([], now: now);
+      expect(out, hasLength(12));
+      expect(out.first.weekStart,
+          thisMon.subtract(const Duration(days: 77))); // 11 weeks ago
+      expect(out.last.weekStart, thisMon);
+    });
+
+    test('all-empty when no sessions in window', () {
+      final out = weeklyAggregatesFrom([], now: now);
+      expect(out.every((w) => w.isEmpty), isTrue);
+      expect(out.every((w) => w.avgExhale == null), isTrue);
+    });
+
+    test('buckets sessions into the correct week', () {
+      // 이번 주 (Mon 4/20) 에 두 세션, 지난 주 (Mon 4/13) 에 한 세션.
+      final list = [
+        sessionWith(
+            receivedAt: DateTime(2026, 4, 21),
+            avgPressure: 20,
+            maxPressure: 25,
+            id: 1),
+        sessionWith(
+            receivedAt: DateTime(2026, 4, 23),
+            avgPressure: 30,
+            maxPressure: 35,
+            id: 2),
+        sessionWith(
+            receivedAt: DateTime(2026, 4, 14),
+            avgPressure: 18,
+            maxPressure: 22,
+            id: 3),
+      ];
+      final out = weeklyAggregatesFrom(list, now: now);
+
+      // 마지막 항목 = 이번 주
+      final thisWeek = out.last;
+      expect(thisWeek.sessionCount, 2);
+      expect(thisWeek.avgExhale, 25.0); // (20 + 30) / 2
+      expect(thisWeek.maxExhale, 35.0); // max of week
+
+      // 마지막 -2 = 지난 주 (out 길이 12, last index 11; index 10 = 지난 주)
+      final lastWeek = out[out.length - 2];
+      expect(lastWeek.sessionCount, 1);
+      expect(lastWeek.avgExhale, 18.0);
+      expect(lastWeek.maxExhale, 22.0);
+    });
+
+    test('window 밖 세션은 제외 (12주 이전)', () {
+      final old = DateTime(2026, 4, 20)
+          .subtract(const Duration(days: 7 * 12));
+      final list = [
+        sessionWith(receivedAt: old, avgPressure: 99, id: 1),
+      ];
+      final out = weeklyAggregatesFrom(list, now: now);
+      expect(out.every((w) => w.isEmpty), isTrue);
+    });
+
+    test('주 경계 (월요일 00:00) 정확히 처리', () {
+      // 4/20 00:00 = 이번 주 시작. 4/19 23:59 = 지난 주.
+      final list = [
+        sessionWith(
+            receivedAt: DateTime(2026, 4, 20, 0, 0, 0),
+            avgPressure: 10,
+            id: 1),
+        sessionWith(
+            receivedAt: DateTime(2026, 4, 19, 23, 59),
+            avgPressure: 20,
+            id: 2),
+      ];
+      final out = weeklyAggregatesFrom(list, now: now);
+      expect(out.last.avgExhale, 10.0); // 이번 주
+      expect(out[out.length - 2].avgExhale, 20.0); // 지난 주
+    });
+
+    test('weeks=4 옵션으로 짧은 윈도우', () {
+      final out = weeklyAggregatesFrom([], weeks: 4, now: now);
+      expect(out, hasLength(4));
+    });
+  });
+
+  group('weekAvgPressurePairFrom (pure)', () {
+    DateTime now() => DateTime(2026, 4, 25, 12); // Sat
+
+    test('both null when no sessions', () {
+      final p = weekAvgPressurePairFrom([], now: now);
+      expect(p.thisWeek, isNull);
+      expect(p.lastWeek, isNull);
+    });
+
+    test('this/last 주 구분 + 평균 계산', () {
+      final list = [
+        // 이번 주
+        sessionWith(
+            receivedAt: DateTime(2026, 4, 21),
+            avgPressure: 20,
+            id: 1),
+        sessionWith(
+            receivedAt: DateTime(2026, 4, 24),
+            avgPressure: 24,
+            id: 2),
+        // 지난 주
+        sessionWith(
+            receivedAt: DateTime(2026, 4, 14),
+            avgPressure: 18,
+            id: 3),
+        sessionWith(
+            receivedAt: DateTime(2026, 4, 16),
+            avgPressure: 16,
+            id: 4),
+      ];
+      final p = weekAvgPressurePairFrom(list, now: now);
+      expect(p.thisWeek, 22.0); // (20+24)/2
+      expect(p.lastWeek, 17.0); // (18+16)/2
+    });
+
+    test('this 만 있는 케이스 — last null', () {
+      final list = [
+        sessionWith(
+            receivedAt: DateTime(2026, 4, 21),
+            avgPressure: 20,
+            id: 1),
+      ];
+      final p = weekAvgPressurePairFrom(list, now: now);
+      expect(p.thisWeek, 20.0);
+      expect(p.lastWeek, isNull);
+    });
+
+    test('지지난주 세션은 무시 (last 만 봄)', () {
+      final list = [
+        sessionWith(
+            receivedAt: DateTime(2026, 4, 6),
+            avgPressure: 99,
+            id: 1),
+      ];
+      final p = weekAvgPressurePairFrom(list, now: now);
+      expect(p.thisWeek, isNull);
+      expect(p.lastWeek, isNull);
+    });
+  });
+
+  test('firstSessionStats returns first by receivedAt or null', () async {
+    expect(await repo.firstSessionStats(), isNull);
+
+    final older = DateTime(2026, 3, 1);
+    final newer = DateTime(2026, 4, 1);
+    await db.into(db.sessions).insert(SessionsCompanion.insert(
+          deviceSessionId: 100,
+          durationSec: 240,
+          maxPressure: 33.0,
+          avgPressure: 24.5,
+          enduranceSec: 180,
+          orificeLevel: 1,
+          targetHits: 3,
+          sampleCount: 24000,
+          crc32: 0,
+          receivedAt: Value(newer),
+        ));
+    await db.into(db.sessions).insert(SessionsCompanion.insert(
+          deviceSessionId: 101,
+          durationSec: 240,
+          maxPressure: 22.0,
+          avgPressure: 16.2,
+          enduranceSec: 180,
+          orificeLevel: 1,
+          targetHits: 3,
+          sampleCount: 24000,
+          crc32: 0,
+          receivedAt: Value(older),
+        ));
+
+    final stats = await repo.firstSessionStats();
+    expect(stats, isNotNull);
+    expect(stats!.avgPressure, closeTo(16.2, 0.001));
+    expect(stats.maxPressure, closeTo(22.0, 0.001));
+    expect(stats.receivedAt.isAtSameMomentAs(older), isTrue);
   });
 }
