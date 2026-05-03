@@ -4,6 +4,8 @@ import 'package:intl/intl.dart';
 
 import '../../core/db/app_database.dart';
 import '../../core/db/db_providers.dart';
+import '../../core/storage/storage_providers.dart';
+import '../../core/storage/target_settings_store.dart';
 
 class SessionDetailScreen extends ConsumerWidget {
   const SessionDetailScreen({super.key, required this.sessionId});
@@ -28,7 +30,12 @@ class SessionDetailScreen extends ConsumerWidget {
                 ),
               );
             }
-            return _SessionBody(session: s);
+            // 사용자가 현재 설정한 목표 zone (분석 코멘트의 cmH₂O 범위 동적).
+            final zone = ref
+                .watch(targetSettingsStoreProvider)
+                .valueOrNull
+                ?.load();
+            return _SessionBody(session: s, zone: zone);
           },
         ),
       ),
@@ -37,8 +44,12 @@ class SessionDetailScreen extends ConsumerWidget {
 }
 
 class _SessionBody extends StatelessWidget {
-  const _SessionBody({required this.session});
+  const _SessionBody({required this.session, required this.zone});
   final Session session;
+
+  /// 현재 사용자 설정 zone — 분석 코멘트의 "목표 구간(X-Y cmH₂O)" 동적.
+  /// null 이면 default (20-30) 로 fallback.
+  final TargetZone? zone;
 
   @override
   Widget build(BuildContext context) {
@@ -155,10 +166,13 @@ class _SessionBody extends StatelessWidget {
   }
 
   String _analysisComment(Session s) {
+    final low = zone?.low ?? TargetSettingsStore.defaultLow;
+    final high = zone?.high ?? TargetSettingsStore.defaultHigh;
+    final zoneLabel = '$low-$high';
     if (s.targetHits >= 4) {
       return '오늘도 목표를 잘 달성했어요! 꾸준한 훈련이 가장 중요합니다.';
     } else if (s.targetHits >= 2) {
-      return '준수한 결과입니다. 다음 세션에는 목표 구간(20-30 cmH₂O)을 더 길게 유지해보세요.';
+      return '준수한 결과입니다. 다음 세션에는 목표 구간($zoneLabel cmH₂O)을 더 길게 유지해보세요.';
     } else if (s.targetHits >= 1) {
       return '한 번 성공했네요. 어느 정도의 압력이 편한지 감을 잡았다면, 다음에는 시간을 늘려봅시다.';
     } else {

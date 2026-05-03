@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/coach/coaching_engine.dart';
+import '../../core/db/db_providers.dart';
 import '../../core/models/pressure_sample.dart';
 import '../../core/theme/blowfit_colors.dart';
 import '../../core/theme/blowfit_widgets.dart';
@@ -25,18 +27,34 @@ class ResultScreen extends ConsumerWidget {
     return (hitsPart + endPart).round().clamp(0, 100);
   }
 
-  int get _stars => (_score / 20).round().clamp(0, 5);
-
-  String get _scoreMessage {
-    final s = _score;
-    if (s >= 90) return '훌륭한 훈련이었어요!';
-    if (s >= 75) return '잘하셨어요!';
-    if (s >= 50) return '꾸준히 발전하고 있어요';
-    return '내일 다시 도전해봐요';
-  }
+  // 디자인 v2 에서 별 row 제거됨 — 점수 + 메시지만 남김.
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final score = _score;
+    final endurancePct = summary.duration.inMilliseconds > 0
+        ? (summary.endurance.inMilliseconds /
+                summary.duration.inMilliseconds)
+            .clamp(0.0, 1.0)
+        : 0.0;
+    // 지난 주 평균 호기와 이번 세션 호기 평균 비교 → coach note delta.
+    final lastWeekAvg =
+        ref.watch(weekAvgPressureProvider).valueOrNull?.lastWeek;
+    final delta = lastWeekAvg != null
+        ? summary.avgPressure - lastWeekAvg
+        : null;
+
+    final scoreMessage = CoachingEngine.resultScoreMessage(
+      score: score,
+      targetHits: summary.targetHits,
+    );
+    final note = CoachingEngine.resultNote(
+      score: score,
+      targetHits: summary.targetHits,
+      endurancePct: endurancePct,
+      deltaVsLastWeek: delta,
+    );
+
     return Scaffold(
       backgroundColor: BlowfitColors.bg,
       body: SafeArea(
@@ -48,16 +66,15 @@ class ResultScreen extends ConsumerWidget {
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
                 children: [
                   _HeroScore(
-                    score: _score,
-                    stars: _stars,
-                    message: _scoreMessage,
+                    score: score,
+                    message: scoreMessage,
                   ),
                   const SizedBox(height: 14),
                   _StatsGrid(summary: summary),
                   const SizedBox(height: 14),
                   _SessionSummary(summary: summary),
                   const SizedBox(height: 14),
-                  const _CoachNote(),
+                  _CoachNote(tip: note),
                 ],
               ),
             ),
@@ -135,18 +152,16 @@ class _TopBar extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Hero score — gradient blue card with circular progress + stars
+// Hero score — gradient blue card with circular progress (v2 에서 별 row 제거됨)
 // ---------------------------------------------------------------------------
 
 class _HeroScore extends StatelessWidget {
   const _HeroScore({
     required this.score,
-    required this.stars,
     required this.message,
   });
 
   final int score;
-  final int stars;
   final String message;
 
   @override
@@ -223,24 +238,8 @@ class _HeroScore extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(height: 10),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: List.generate(5, (i) {
-              final filled = i < stars;
-              return Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 1),
-                child: Icon(
-                  Icons.star,
-                  size: 20,
-                  color: filled
-                      ? const Color(0xFFFFD600)
-                      : const Color.fromRGBO(255, 255, 255, 0.3),
-                ),
-              );
-            }),
-          ),
-          const SizedBox(height: 6),
+          // 디자인 v2 에서 별 5개 row 제거 — 점수 + 메시지만 남김.
+          const SizedBox(height: 12),
           Text(
             message,
             style: const TextStyle(
@@ -369,17 +368,6 @@ class _StatTile extends StatelessWidget {
               ),
             ],
           ),
-          if (placeholder) ...[
-            const SizedBox(height: 6),
-            const Text(
-              '하드웨어 미지원',
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w500,
-                color: BlowfitColors.gray400,
-              ),
-            ),
-          ],
         ],
       ),
     );
@@ -514,14 +502,43 @@ class _SummaryRow extends StatelessWidget {
 // ---------------------------------------------------------------------------
 
 class _CoachNote extends StatelessWidget {
-  const _CoachNote();
+  const _CoachNote({required this.tip});
+  final CoachingTip tip;
+
+  /// 톤별 카드 배경/원형/텍스트 색.
+  ({Color cardBg, Color iconBg, Color text, IconData icon}) get _tokens {
+    switch (tip.tone) {
+      case CoachingTone.positive:
+        return (
+          cardBg: BlowfitColors.blue50,
+          iconBg: BlowfitColors.blue500,
+          text: BlowfitColors.blue700,
+          icon: Icons.emoji_events,
+        );
+      case CoachingTone.info:
+        return (
+          cardBg: BlowfitColors.blue50,
+          iconBg: BlowfitColors.blue500,
+          text: BlowfitColors.blue700,
+          icon: Icons.lightbulb_outline,
+        );
+      case CoachingTone.warning:
+        return (
+          cardBg: BlowfitColors.amberBg,
+          iconBg: BlowfitColors.amber500,
+          text: BlowfitColors.amberInk,
+          icon: Icons.warning_amber_outlined,
+        );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final t = _tokens;
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       decoration: BoxDecoration(
-        color: BlowfitColors.blue50,
+        color: t.cardBg,
         borderRadius: BorderRadius.circular(BlowfitRadius.md),
       ),
       child: Row(
@@ -530,20 +547,19 @@ class _CoachNote extends StatelessWidget {
           Container(
             width: 32,
             height: 32,
-            decoration: const BoxDecoration(
-              color: BlowfitColors.blue500,
+            decoration: BoxDecoration(
+              color: t.iconBg,
               shape: BoxShape.circle,
             ),
-            child: const Icon(Icons.emoji_events,
-                color: Colors.white, size: 16),
+            child: Icon(t.icon, color: Colors.white, size: 16),
           ),
           const SizedBox(width: 10),
-          const Expanded(
+          Expanded(
             child: Text(
-              '호흡근이 강해지고 있어요. 오늘처럼 꾸준히 훈련하면 효과가 커집니다.',
+              tip.body,
               style: TextStyle(
                 fontSize: 13,
-                color: BlowfitColors.blue700,
+                color: t.text,
                 fontWeight: FontWeight.w500,
                 height: 1.5,
               ),

@@ -1,14 +1,20 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 
+import '../../core/coach/milestone_engine.dart';
+import '../../core/db/db_providers.dart';
+import '../../core/db/trend_bucketing.dart';
 import '../../core/theme/blowfit_colors.dart';
 import '../../core/theme/blowfit_widgets.dart';
 
-/// 12주 호기/흡기 압력 추이 화면. 디자인 시안의 08 화면.
+/// 진행 추이 화면. 디자인 시안의 08 화면.
 ///
-/// 현재는 디자인 prototype 의 placeholder 데이터로 그래프 모양과 레이아웃을
-/// 검증한다. 실제 운용 단계에선 `weekly_summary` 같은 집계 provider 와 연결.
+/// 4개 탭 — 일간 (이번 주 월~일) / 주간 (이번 달 1~4주) / 월간 (최근 4개월) /
+/// 년간 (올해 1~12월). 기본은 일간.
+///
+/// Z안 적용 — 활성 데이터 < 2 면 변화율 숨김, 활성 데이터 0 이면 empty state.
 class TrendScreen extends ConsumerStatefulWidget {
   const TrendScreen({super.key});
 
@@ -17,86 +23,115 @@ class TrendScreen extends ConsumerStatefulWidget {
 }
 
 class _TrendScreenState extends ConsumerState<TrendScreen> {
-  // 현재 디자인은 4개 탭 (주간/월간/12주/전체) — 하단 동작은 추후. 12주 고정.
-  int _periodIndex = 2;
-  static const _periods = ['주간', '월간', '12주', '전체'];
-
-  // 12주 placeholder 데이터 — 실제 구현 시 SessionRepository 의 주간 평균
-  // 집계로 대체.
-  static const _weeks = <_WeekPoint>[
-    _WeekPoint(week: 1, exhale: 16.2, inhale: -14.0),
-    _WeekPoint(week: 2, exhale: 17.0, inhale: -14.6),
-    _WeekPoint(week: 3, exhale: 17.8, inhale: -15.3),
-    _WeekPoint(week: 4, exhale: 18.4, inhale: -16.1),
-    _WeekPoint(week: 5, exhale: 18.9, inhale: -16.8),
-    _WeekPoint(week: 6, exhale: 19.6, inhale: -17.4),
-    _WeekPoint(week: 7, exhale: 20.1, inhale: -18.0),
-    _WeekPoint(week: 8, exhale: 20.8, inhale: -18.7),
-    _WeekPoint(week: 9, exhale: 21.4, inhale: -19.3),
-    _WeekPoint(week: 10, exhale: 22.0, inhale: -19.9),
-    _WeekPoint(week: 11, exhale: 22.7, inhale: -20.6),
-    _WeekPoint(week: 12, exhale: 23.4, inhale: -21.2),
-  ];
+  // 기본은 일간 (index 0).
+  int _periodIndex = 0;
+  static const _periods = ['일간', '주간', '월간', '년간'];
+  static const _periodValues = TrendPeriod.values;
 
   @override
   Widget build(BuildContext context) {
+    final period = _periodValues[_periodIndex];
+    final bucketsAsync = ref.watch(trendBucketsProvider(period));
+    final milestonesAsync = ref.watch(milestonesProvider);
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('진행 추이'),
-        actions: [
-          TextButton(
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('내보내기 기능은 곧 출시됩니다')),
-              );
-            },
-            child: const Text(
-              '내보내기',
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: BlowfitColors.blue500,
-              ),
-            ),
-          ),
-        ],
       ),
       body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-          children: [
-            _PeriodTabs(
-              labels: _periods,
-              selected: _periodIndex,
-              onSelect: (i) => setState(() => _periodIndex = i),
-            ),
-            const SizedBox(height: 14),
-            _HeroChart(weeks: _weeks),
-            const SizedBox(height: 12),
-            _DirectionGrid(
-              exhaleFrom: _weeks.first.exhale,
-              exhaleTo: _weeks.last.exhale,
-              inhaleFrom: _weeks.first.inhale.abs(),
-              inhaleTo: _weeks.last.inhale.abs(),
-            ),
-            const SizedBox(height: 14),
-            const _MilestonesCard(),
-          ],
+        child: bucketsAsync.when(
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (_, __) =>
+              const Center(child: Text('추이를 불러올 수 없습니다.')),
+          data: (buckets) {
+            final active =
+                buckets.where((b) => !b.isEmpty).toList(growable: false);
+            return ListView(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+              children: [
+                _PeriodTabs(
+                  labels: _periods,
+                  selected: _periodIndex,
+                  onSelect: (i) => setState(() => _periodIndex = i),
+                ),
+                const SizedBox(height: 14),
+                if (active.isEmpty)
+                  const _EmptyTrendCard()
+                else
+                  _HeroChart(
+                    buckets: buckets,
+                    active: active,
+                    period: period,
+                  ),
+                if (active.length >= 2) ...[
+                  const SizedBox(height: 12),
+                  _DirectionGrid(
+                    exhaleFrom: active.first.avgExhale!,
+                    exhaleTo: active.last.avgExhale!,
+                  ),
+                ],
+                const SizedBox(height: 14),
+                _MilestonesCard(
+                  milestones: milestonesAsync.valueOrNull ?? const [],
+                  loading: milestonesAsync.isLoading,
+                ),
+              ],
+            );
+          },
         ),
       ),
     );
   }
 }
 
-class _WeekPoint {
-  const _WeekPoint({
-    required this.week,
-    required this.exhale,
-    required this.inhale,
-  });
-  final int week;
-  final double exhale;
-  final double inhale;
+// ---------------------------------------------------------------------------
+// Empty state — 세션 0개일 때
+// ---------------------------------------------------------------------------
+
+class _EmptyTrendCard extends StatelessWidget {
+  const _EmptyTrendCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return BlowfitCard(
+      padding: const EdgeInsets.fromLTRB(20, 28, 20, 28),
+      child: Column(
+        children: [
+          Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              color: BlowfitColors.blue50,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: const Icon(Icons.show_chart,
+                color: BlowfitColors.blue500, size: 28),
+          ),
+          const SizedBox(height: 14),
+          const Text(
+            '아직 추이를 그릴 데이터가 없어요',
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              color: BlowfitColors.ink,
+              letterSpacing: -0.3,
+            ),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            '첫 훈련을 완료하면\n주간 평균 호기 압력이 여기에 그려져요.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 13,
+              color: BlowfitColors.ink3,
+              height: 1.5,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -125,7 +160,8 @@ class _PeriodTabs extends StatelessWidget {
       ),
       child: Row(
         children: [
-          for (var i = 0; i < labels.length; i++)
+          for (var i = 0; i < labels.length; i++) ...[
+            if (i > 0) const SizedBox(width: 4),
             Expanded(
               child: _PeriodTab(
                 label: labels[i],
@@ -133,6 +169,7 @@ class _PeriodTabs extends StatelessWidget {
                 onTap: () => onSelect(i),
               ),
             ),
+          ],
         ],
       ),
     );
@@ -152,25 +189,40 @@ class _PeriodTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(9),
-        onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          decoration: BoxDecoration(
-            color: selected ? Colors.white : Colors.transparent,
-            borderRadius: BorderRadius.circular(9),
-            boxShadow: selected ? BlowfitColors.shadowLevel1 : null,
-          ),
-          alignment: Alignment.center,
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: selected ? BlowfitColors.ink : BlowfitColors.ink3,
+    // ClipRRect 로 splash 가 옆 탭으로 새지 않게 강제. selected 든 아니든
+    // 탭하면 InkWell 의 splash + highlight 가 보이도록 명시적 색 지정.
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(9),
+      child: Container(
+        decoration: BoxDecoration(
+          color: selected ? Colors.white : Colors.transparent,
+          borderRadius: BorderRadius.circular(9),
+          boxShadow: selected ? BlowfitColors.shadowLevel1 : null,
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onTap,
+            // selected 시 흰 배경 위에서도 보이도록 살짝 진한 splash.
+            splashColor: selected
+                ? BlowfitColors.blue500.withValues(alpha: 0.12)
+                : BlowfitColors.blue500.withValues(alpha: 0.10),
+            highlightColor: selected
+                ? BlowfitColors.blue500.withValues(alpha: 0.06)
+                : BlowfitColors.blue500.withValues(alpha: 0.04),
+            child: SizedBox(
+              height: double.infinity,
+              child: Center(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color:
+                        selected ? BlowfitColors.ink : BlowfitColors.ink3,
+                  ),
+                ),
+              ),
             ),
           ),
         ),
@@ -184,81 +236,168 @@ class _PeriodTab extends StatelessWidget {
 // ---------------------------------------------------------------------------
 
 class _HeroChart extends StatelessWidget {
-  const _HeroChart({required this.weeks});
-  final List<_WeekPoint> weeks;
+  const _HeroChart({
+    required this.buckets,
+    required this.active,
+    required this.period,
+  });
+
+  /// 모든 자리 (빈 자리 포함). 일간=7, 주간=4, 월간=4, 년간=12.
+  final List<TrendBucket> buckets;
+
+  /// 빈 자리 제외 — pct 계산용.
+  final List<TrendBucket> active;
+
+  final TrendPeriod period;
 
   static const _exhaleColor = BlowfitColors.blue500;
   static const _inhaleColor = Color(0xFF0099CC);
 
-  double get _improvementPct {
-    if (weeks.length < 2) return 0;
-    final first = weeks.first.exhale;
-    final last = weeks.last.exhale;
-    if (first <= 0) return 0;
-    return ((last - first) / first * 100);
+  /// 활성 데이터 < 2 면 변화율 계산 불가 (Z안).
+  int? get _improvementPct {
+    if (active.length < 2) return null;
+    final first = active.first.avgExhale;
+    final last = active.last.avgExhale;
+    if (first == null || last == null || first <= 0) return null;
+    return ((last - first) / first * 100).round();
+  }
+
+  /// 헤더 카피 — B안 통일.
+  String get _heroTitle {
+    switch (period) {
+      case TrendPeriod.daily:
+        return '일간 추이';
+      case TrendPeriod.weekly:
+        return '주간 추이';
+      case TrendPeriod.monthly:
+        return '월간 추이';
+      case TrendPeriod.yearly:
+        return '년간 추이';
+    }
+  }
+
+  /// x 축 메이저 tick 간격.
+  double get _xInterval => 1;
+
+  /// 차트 좌우 여백 — 첫 점과 마지막 점이 가장자리에 붙지 않도록.
+  /// 월간 (12개) 은 자리 많아 여유 적게, 나머지는 여유 충분히.
+  double get _xPadding {
+    switch (period) {
+      case TrendPeriod.daily:
+      case TrendPeriod.weekly:
+      case TrendPeriod.yearly:
+        return 0.4;
+      case TrendPeriod.monthly:
+        return 0.15;
+    }
+  }
+
+  double get _chartMinX => 1 - _xPadding;
+  double get _chartMaxX => buckets.length + _xPadding;
+
+  /// 변화율 라벨 — 모든 윈도우에서 첫 활성 자리 기준으로 동적.
+  /// 사용자가 화요일부터 훈련했으면 "화요일 대비", 2주차부터면 "2주차 대비".
+  /// 변화율은 active.length >= 2 일 때만 호출되니 active 비어있는 경우 없음.
+  String get _deltaLabel {
+    if (active.isEmpty) return '시작 시점 대비'; // safety net
+    final firstLabel = active.first.label;
+    switch (period) {
+      case TrendPeriod.daily:
+        // "월" → "월요일 대비"
+        return '$firstLabel요일 대비';
+      case TrendPeriod.weekly:
+        // "1주" → "1주차 대비"
+        return '$firstLabel차 대비';
+      case TrendPeriod.monthly:
+        // "1월" → "1월 대비"
+        return '$firstLabel 대비';
+      case TrendPeriod.yearly:
+        // "2024" → "2024년 대비"
+        return '$firstLabel년 대비';
+    }
+  }
+
+  /// 라벨 lookup — xPos → label.
+  String _labelAt(int xPos) {
+    final b = buckets.firstWhere(
+      (b) => b.xPos == xPos,
+      orElse: () => TrendBucket(
+        xPos: xPos,
+        label: '',
+        avgExhale: null,
+        maxExhale: null,
+        sessionCount: 0,
+        bucketStart: DateTime(0),
+      ),
+    );
+    return b.label;
   }
 
   @override
   Widget build(BuildContext context) {
-    final pct = _improvementPct.round();
-    final exhaleSpots =
-        weeks.map((w) => FlSpot(w.week.toDouble(), w.exhale)).toList();
-    final inhaleSpots =
-        weeks.map((w) => FlSpot(w.week.toDouble(), w.inhale)).toList();
+    final pct = _improvementPct;
+    // 차트 점은 bucket.xPos 를 x 좌표로. 빈 자리는 점 없음 (line 끊어짐).
+    final exhaleSpots = <FlSpot>[];
+    for (final b in buckets) {
+      final v = b.avgExhale;
+      if (v != null) exhaleSpots.add(FlSpot(b.xPos.toDouble(), v));
+    }
 
     return BlowfitCard(
       padding: const EdgeInsets.all(18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            '12주간 호흡근 강화',
-            style: TextStyle(
+          Text(
+            _heroTitle,
+            style: const TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w600,
               color: BlowfitColors.ink3,
             ),
           ),
           const SizedBox(height: 4),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
-            children: [
-              Text(
-                pct >= 0 ? '+$pct%' : '$pct%',
-                style: const TextStyle(
-                  fontSize: 30,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: -0.9,
-                  color: BlowfitColors.ink,
-                  fontFeatures: [FontFeature.tabularFigures()],
-                ),
-              ),
-              const SizedBox(width: 8),
-              Row(
-                children: [
-                  Icon(
-                    pct >= 0 ? Icons.arrow_upward : Icons.arrow_downward,
-                    size: 11,
-                    color: pct >= 0
-                        ? BlowfitColors.green500
-                        : BlowfitColors.red500,
+          // 변화율은 활성 데이터 >= 2 일 때만 표시. 미달 시 자리만 약간 비움.
+          if (pct != null)
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.baseline,
+              textBaseline: TextBaseline.alphabetic,
+              children: [
+                Text(
+                  pct >= 0 ? '+$pct%' : '$pct%',
+                  style: const TextStyle(
+                    fontSize: 30,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: -0.9,
+                    color: BlowfitColors.ink,
+                    fontFeatures: [FontFeature.tabularFigures()],
                   ),
-                  const SizedBox(width: 2),
-                  Text(
-                    '시작 시점 대비',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
+                ),
+                const SizedBox(width: 8),
+                Row(
+                  children: [
+                    Icon(
+                      pct >= 0 ? Icons.arrow_upward : Icons.arrow_downward,
+                      size: 11,
                       color: pct >= 0
                           ? BlowfitColors.green500
                           : BlowfitColors.red500,
                     ),
-                  ),
-                ],
-              ),
-            ],
-          ),
+                    const SizedBox(width: 2),
+                    Text(
+                      _deltaLabel,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: pct >= 0
+                            ? BlowfitColors.green500
+                            : BlowfitColors.red500,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           const SizedBox(height: 14),
           const Row(
             children: [
@@ -272,8 +411,8 @@ class _HeroChart extends StatelessWidget {
             height: 200,
             child: LineChart(
               LineChartData(
-                minX: 1,
-                maxX: 12,
+                minX: _chartMinX,
+                maxX: _chartMaxX,
                 minY: -30,
                 maxY: 30,
                 clipData: const FlClipData.all(),
@@ -321,18 +460,23 @@ class _HeroChart extends StatelessWidget {
                     sideTitles: SideTitles(
                       showTitles: true,
                       reservedSize: 22,
-                      interval: 2,
+                      interval: _xInterval,
                       getTitlesWidget: (v, meta) {
-                        final w = v.round();
-                        if (w < 1 || w > 12) return const SizedBox.shrink();
+                        final xPos = v.round();
+                        if (xPos < 1 || xPos > buckets.length) {
+                          return const SizedBox.shrink();
+                        }
+                        // 정수 좌표에만 라벨 — 비정수 (interpolation) 은 무시.
+                        if ((v - xPos).abs() > 0.001) {
+                          return const SizedBox.shrink();
+                        }
                         return Padding(
                           padding: const EdgeInsets.only(top: 6),
                           child: Text(
-                            '${w}w',
+                            _labelAt(xPos),
                             style: const TextStyle(
                               fontSize: 10,
                               color: BlowfitColors.ink3,
-                              fontFeatures: [FontFeature.tabularFigures()],
                             ),
                           ),
                         );
@@ -342,7 +486,7 @@ class _HeroChart extends StatelessWidget {
                 ),
                 lineBarsData: [
                   _line(exhaleSpots, _exhaleColor),
-                  _line(inhaleSpots, _inhaleColor),
+                  // 흡기는 하드웨어 미지원 — 차후 차압 센서 도입 시 활성화.
                 ],
               ),
             ),
@@ -353,17 +497,22 @@ class _HeroChart extends StatelessWidget {
   }
 
   LineChartBarData _line(List<FlSpot> spots, Color color) {
+    // 디자인 v2 의 trend-profile.jsx 는 SVG 마지막 점만 circle 로 그림
+    // (`<circle cx={xScale(data.length-1)} ...>`). 우리도 가장 최근 데이터
+    // 포인트에만 dot 을 표시 — 12주의 모든 주에 점이 찍히지 않도록.
     return LineChartBarData(
       spots: spots,
-      isCurved: true,
+      isCurved: spots.length >= 3, // 점 2개 이하는 직선 (curve 가 wobble 함)
       curveSmoothness: 0.3,
       preventCurveOverShooting: true,
       color: color,
       barWidth: 2.5,
       dotData: FlDotData(
-        show: true,
+        show: spots.isNotEmpty,
+        checkToShowDot: (spot, bar) =>
+            spot == bar.spots.last,
         getDotPainter: (spot, _, __, ___) => FlDotCirclePainter(
-          radius: 3,
+          radius: 4,
           color: color,
           strokeWidth: 2,
           strokeColor: Colors.white,
@@ -417,14 +566,11 @@ class _DirectionGrid extends StatelessWidget {
   const _DirectionGrid({
     required this.exhaleFrom,
     required this.exhaleTo,
-    required this.inhaleFrom,
-    required this.inhaleTo,
   });
 
+  /// 활성 첫 주 / 마지막 주 호기 평균. activeWeeks.length >= 2 일 때만 호출됨.
   final double exhaleFrom;
   final double exhaleTo;
-  final double inhaleFrom;
-  final double inhaleTo;
 
   int _delta(double from, double to) {
     if (from <= 0) return 0;
@@ -433,28 +579,89 @@ class _DirectionGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: _DirectionCard(
-            label: '호기 (내쉬기)',
-            color: BlowfitColors.blue500,
-            from: exhaleFrom,
-            to: exhaleTo,
-            deltaPct: _delta(exhaleFrom, exhaleTo),
+    // IntrinsicHeight + stretch — 두 카드의 높이를 호기 (긴 쪽) 기준으로 통일.
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: _DirectionCard(
+              label: '호기 (내쉬기)',
+              color: BlowfitColors.blue500,
+              from: exhaleFrom,
+              to: exhaleTo,
+              deltaPct: _delta(exhaleFrom, exhaleTo),
+            ),
           ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: _DirectionCard(
-            label: '흡기 (들이쉬기)',
-            color: const Color(0xFF0099CC),
-            from: inhaleFrom,
-            to: inhaleTo,
-            deltaPct: _delta(inhaleFrom, inhaleTo),
+          const SizedBox(width: 10),
+          const Expanded(
+            child: _PlaceholderDirectionCard(
+              label: '흡기 (들이쉬기)',
+              color: Color(0xFF0099CC),
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
+    );
+  }
+}
+
+/// 흡기 카드 — 하드웨어 미지원 placeholder.
+class _PlaceholderDirectionCard extends StatelessWidget {
+  const _PlaceholderDirectionCard({
+    required this.label,
+    required this.color,
+  });
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return BlowfitCard(
+      padding: const EdgeInsets.all(14),
+      // 박스 높이는 부모의 IntrinsicHeight 가 호기 카드에 맞춰 늘려줌.
+      // 내부 "—" 는 가운데 정렬로 자연스럽게 배치.
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  color: color,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: BlowfitColors.ink2,
+                ),
+              ),
+            ],
+          ),
+          // 단일 "—" 를 남은 공간 가운데에 둠.
+          const Expanded(
+            child: Center(
+              child: Text(
+                '—',
+                style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w700,
+                  color: BlowfitColors.gray400,
+                  letterSpacing: -0.44,
+                  fontFeatures: [FontFeature.tabularFigures()],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -533,14 +740,34 @@ class _DirectionCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 4),
-          Text(
-            '+$deltaPct%',
-            style: const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-              color: BlowfitColors.green500,
-            ),
-          ),
+          // 양수 → 초록 ↑, 음수 → 빨강 ↓, 0 → 회색.
+          Builder(builder: (_) {
+            final positive = deltaPct > 0;
+            final negative = deltaPct < 0;
+            final pctColor = positive
+                ? BlowfitColors.green500
+                : negative
+                    ? BlowfitColors.red500
+                    : BlowfitColors.ink3;
+            final sign = positive ? '+' : ''; // 음수는 toString 에 '-' 포함
+            return Row(
+              children: [
+                if (positive)
+                  Icon(Icons.arrow_upward, size: 11, color: pctColor)
+                else if (negative)
+                  Icon(Icons.arrow_downward, size: 11, color: pctColor),
+                if (positive || negative) const SizedBox(width: 2),
+                Text(
+                  '$sign$deltaPct%',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: pctColor,
+                  ),
+                ),
+              ],
+            );
+          }),
         ],
       ),
     );
@@ -552,18 +779,13 @@ class _DirectionCard extends StatelessWidget {
 // ---------------------------------------------------------------------------
 
 class _MilestonesCard extends StatelessWidget {
-  const _MilestonesCard();
+  const _MilestonesCard({required this.milestones, required this.loading});
+
+  final List<Milestone> milestones;
+  final bool loading;
 
   @override
   Widget build(BuildContext context) {
-    final milestones = [
-      _Milestone(achieved: true, title: '1주차 — 첫 훈련 완료', date: '2월 6일'),
-      _Milestone(achieved: true, title: '7일 연속 훈련', date: '2월 13일'),
-      _Milestone(achieved: true, title: '호기 20 cmH₂O 돌파', date: '3월 18일'),
-      _Milestone(
-          achieved: false, title: '30일 연속 훈련 (12 / 30)', date: '진행 중'),
-      _Milestone(achieved: false, title: '호기 25 cmH₂O 돌파', date: '—'),
-    ];
     return BlowfitCard(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -578,30 +800,39 @@ class _MilestonesCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 12),
-          for (var i = 0; i < milestones.length; i++) ...[
-            if (i > 0) const Divider(height: 1, color: BlowfitColors.gray150),
-            _MilestoneRow(milestone: milestones[i]),
-          ],
+          if (loading && milestones.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: Center(
+                child: SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+            )
+          else
+            for (var i = 0; i < milestones.length; i++) ...[
+              if (i > 0) const Divider(height: 1, color: BlowfitColors.gray150),
+              _MilestoneRow(milestone: milestones[i]),
+            ],
         ],
       ),
     );
   }
 }
 
-class _Milestone {
-  const _Milestone({
-    required this.achieved,
-    required this.title,
-    required this.date,
-  });
-  final bool achieved;
-  final String title;
-  final String date;
-}
-
 class _MilestoneRow extends StatelessWidget {
   const _MilestoneRow({required this.milestone});
-  final _Milestone milestone;
+  final Milestone milestone;
+
+  /// 미달성 + 진행 중 케이스만 별도 라벨; 그 외 미달성은 '—'.
+  String _dateLabel() {
+    final at = milestone.achievedAt;
+    if (at != null) return DateFormat('M월 d일', 'ko').format(at);
+    if (milestone.kind == MilestoneKind.thirtyDayStreak) return '진행 중';
+    return '—';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -640,7 +871,7 @@ class _MilestoneRow extends StatelessWidget {
             ),
           ),
           Text(
-            milestone.date,
+            _dateLabel(),
             style: const TextStyle(
               fontSize: 12,
               color: BlowfitColors.ink3,

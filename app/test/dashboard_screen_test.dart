@@ -2,6 +2,7 @@ import 'package:blowfit/core/ble/ble_manager.dart';
 import 'package:blowfit/core/ble/ble_providers.dart';
 import 'package:blowfit/core/ble/fake_ble_manager.dart';
 import 'package:blowfit/core/db/db_providers.dart';
+import 'package:blowfit/core/db/session_repository.dart';
 import 'package:blowfit/core/theme/blowfit_theme.dart';
 import 'package:blowfit/features/dashboard/dashboard_screen.dart';
 import 'package:flutter/material.dart';
@@ -9,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/date_symbol_data_local.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 GoRouter _stubRouter() => GoRouter(
       initialLocation: '/',
@@ -42,6 +44,13 @@ Widget _buildHarness({
       weekHitsProvider.overrideWith((ref) => Stream<int>.value(weekHits)),
       todayDurationProvider
           .overrideWith((ref) => Stream<Duration>.value(todayDuration)),
+      // 새 provider 들 — 실제 DB / SharedPreferences 안 건드리도록 빈 값으로.
+      weekAvgPressureProvider.overrideWith(
+        (ref) =>
+            Stream<WeekPressureAvgPair>.value(
+              (thisWeek: null, lastWeek: null),
+            ),
+      ),
     ],
     child: MaterialApp.router(
       theme: BlowfitTheme.light(),
@@ -60,6 +69,9 @@ void _useTallView(WidgetTester tester) {
 void main() {
   setUpAll(() async {
     await initializeDateFormatting('ko');
+    // userProfileStoreProvider 가 SharedPreferences.getInstance() 를 호출하므로
+    // 테스트에서 mock 채널 초기화. 빈 값 → 사용자 프로필 없음 (empty CTA 노출).
+    SharedPreferences.setMockInitialValues({});
   });
 
   testWidgets('Dashboard renders BlowFit header + 오늘의 훈련 CTA', (tester) async {
@@ -146,7 +158,8 @@ void main() {
     await tester.pumpWidget(_buildHarness(ble: fake));
     await tester.pump();
 
-    expect(find.text('이번 주 코칭'), findsOneWidget);
+    // 신규 사용자 (weekHits=0, streak=0) → CoachingEngine 의 시작 안내 분기.
+    expect(find.text('오늘 시작해보세요'), findsOneWidget);
     expect(find.text('자세히 보기'), findsOneWidget);
   });
 

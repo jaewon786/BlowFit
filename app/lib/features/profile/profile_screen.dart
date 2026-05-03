@@ -3,6 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/ble/ble_providers.dart';
+import '../../core/db/db_providers.dart';
+import '../../core/storage/storage_providers.dart';
+import '../../core/storage/user_profile_store.dart';
 import '../../core/theme/blowfit_colors.dart';
 import '../../core/theme/blowfit_widgets.dart';
 
@@ -85,7 +88,7 @@ class ProfileScreen extends ConsumerWidget {
                     icon: Icons.person_outline,
                     title: '개인 정보 수정',
                     subtitle: null,
-                    onTap: () => _comingSoon(context),
+                    onTap: () => context.push('/profile-setup'),
                   ),
                   const Divider(indent: 60, height: 1),
                   _SettingsRow(
@@ -126,73 +129,166 @@ class ProfileScreen extends ConsumerWidget {
 // Profile header — avatar + name + chips
 // ---------------------------------------------------------------------------
 
-class _ProfileHeader extends StatelessWidget {
+class _ProfileHeader extends ConsumerWidget {
   const _ProfileHeader();
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final storeAsync = ref.watch(userProfileStoreProvider);
+    final firstDateAsync = ref.watch(firstSessionDateProvider);
+    final streak = ref.watch(consecutiveDaysProvider).valueOrNull ?? 0;
+
+    final profile = storeAsync.valueOrNull?.load();
+    final isEmpty = profile == null;
+
     return BlowfitCard(
+      onTap: isEmpty ? () => context.push('/profile-setup') : null,
       padding: const EdgeInsets.all(20),
       child: Row(
         children: [
-          Container(
-            width: 64,
-            height: 64,
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                colors: [BlowfitColors.blue400, BlowfitColors.blue500],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              shape: BoxShape.circle,
-            ),
-            child: const Center(
-              child: Text(
-                '김',
-                style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.white,
-                ),
-              ),
-            ),
-          ),
+          _Avatar(profile: profile),
           const SizedBox(width: 14),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  '김영호',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                    color: BlowfitColors.ink,
-                    letterSpacing: -0.36,
+            child: isEmpty
+                ? const _EmptyHeaderBody()
+                : _FilledHeaderBody(
+                    profile: profile,
+                    firstSessionDate: firstDateAsync.valueOrNull,
+                    streak: streak,
                   ),
-                ),
-                const SizedBox(height: 2),
-                const Text(
-                  '56세 · 남성',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: BlowfitColors.ink3,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: const [
-                    BlowfitChip(label: '12주차', tone: BlowfitChipTone.blue),
-                    SizedBox(width: 6),
-                    BlowfitChip(
-                        label: '활성 사용자', tone: BlowfitChipTone.green),
-                  ],
-                ),
-              ],
-            ),
           ),
+          if (isEmpty)
+            const Icon(Icons.chevron_right,
+                size: 20, color: BlowfitColors.gray400),
         ],
       ),
+    );
+  }
+}
+
+/// 64×64 그라데이션 원형 아바타 — 이름 첫 글자 또는 placeholder.
+class _Avatar extends StatelessWidget {
+  const _Avatar({required this.profile});
+  final UserProfile? profile;
+
+  @override
+  Widget build(BuildContext context) {
+    final initial = profile != null && profile!.name.isNotEmpty
+        ? profile!.name.characters.first.toString()
+        : '?';
+    return Container(
+      width: 64,
+      height: 64,
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          colors: [BlowfitColors.blue400, BlowfitColors.blue500],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        shape: BoxShape.circle,
+      ),
+      child: Center(
+        child: Text(
+          initial,
+          style: const TextStyle(
+            fontSize: 24,
+            fontWeight: FontWeight.w700,
+            color: Colors.white,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _EmptyHeaderBody extends StatelessWidget {
+  const _EmptyHeaderBody();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: const [
+        Text(
+          '이름을 설정해주세요',
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w700,
+            color: BlowfitColors.ink,
+            letterSpacing: -0.32,
+          ),
+        ),
+        SizedBox(height: 4),
+        Text(
+          '맞춤 훈련을 위해\n프로필 정보를 입력해주세요',
+          style: TextStyle(
+            fontSize: 13,
+            color: BlowfitColors.ink3,
+            height: 1.4,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _FilledHeaderBody extends StatelessWidget {
+  const _FilledHeaderBody({
+    required this.profile,
+    required this.firstSessionDate,
+    required this.streak,
+  });
+  final UserProfile profile;
+  final DateTime? firstSessionDate;
+  final int streak;
+
+  /// firstSessionDate 기준 N주차 계산. 데이터 없으면 null.
+  int? get _weekIndex {
+    final start = firstSessionDate ?? profile.startedAt;
+    if (start == null) return null;
+    final days = DateTime.now().difference(start).inDays;
+    if (days < 0) return null;
+    return (days ~/ 7) + 1; // 0~6일 = 1주차
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final week = _weekIndex;
+    final isActive = streak >= 3;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          profile.name,
+          style: const TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w700,
+            color: BlowfitColors.ink,
+            letterSpacing: -0.36,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          '${profile.age}세 · ${profile.gender.label}',
+          style: const TextStyle(
+            fontSize: 13,
+            color: BlowfitColors.ink3,
+          ),
+        ),
+        if (week != null || isActive) ...[
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              if (week != null)
+                BlowfitChip(label: '$week주차', tone: BlowfitChipTone.blue),
+              if (week != null && isActive) const SizedBox(width: 6),
+              if (isActive)
+                const BlowfitChip(
+                    label: '활성 사용자', tone: BlowfitChipTone.green),
+            ],
+          ),
+        ],
+      ],
     );
   }
 }
@@ -201,11 +297,17 @@ class _ProfileHeader extends StatelessWidget {
 // Baseline card — 시작 시점 호기 / 흡기
 // ---------------------------------------------------------------------------
 
-class _BaselineCard extends StatelessWidget {
+class _BaselineCard extends ConsumerWidget {
   const _BaselineCard();
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final stats = ref.watch(firstSessionStatsProvider).valueOrNull;
+    // 호기: 첫 세션 avgPressure. 없으면 "—".
+    // 흡기: 하드웨어 미지원 — 항상 "—".
+    final exhaleLabel = stats != null
+        ? stats.avgPressure.toStringAsFixed(1)
+        : '—';
     return BlowfitCard(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -221,19 +323,19 @@ class _BaselineCard extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Row(
-            children: const [
+            children: [
               Expanded(
                 child: _BaselineTile(
                   label: '시작 시점 호기',
-                  value: '16.2',
+                  value: exhaleLabel,
                   unit: 'cmH₂O',
                 ),
               ),
-              SizedBox(width: 10),
-              Expanded(
+              const SizedBox(width: 10),
+              const Expanded(
                 child: _BaselineTile(
                   label: '시작 시점 흡기',
-                  value: '-14.0',
+                  value: '—',
                   unit: 'cmH₂O',
                 ),
               ),
