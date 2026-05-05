@@ -51,24 +51,22 @@ class DashboardScreen extends ConsumerWidget {
                     healthDegraded: health?.isDegraded ?? false,
                     onTap: () => context.push('/connect'),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 10),
                   _TrainingCta(
                     connected: connected,
                     orificeLevel: state?.orificeLevel,
                     onStart: () => context.push('/training-intro'),
                     onConnect: () => context.push('/connect'),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 10),
                   _QuickStats(
                     weekHits: weekHits,
-                    thisWeekAvg: pressurePair?.thisWeek,
-                    lastWeekAvg: pressurePair?.lastWeek,
                     onTap: () => context.push('/trend'),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 10),
                   if (lowBattery && connected)
                     _LowBatteryBanner(snapshot: state),
-                  if (lowBattery && connected) const SizedBox(height: 12),
+                  if (lowBattery && connected) const SizedBox(height: 10),
                   _CoachingCard(
                     tip: CoachingEngine.dashboardWeekly(
                       weekHits: weekHits,
@@ -502,7 +500,7 @@ class _TrainingCta extends StatelessWidget {
         : '흡기·호기 3세트';
 
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(13),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(BlowfitRadius.xl),
         gradient: const LinearGradient(
@@ -558,25 +556,25 @@ class _TrainingCta extends StatelessWidget {
                   letterSpacing: 0.24,
                 ),
               ),
-              const SizedBox(height: 5),
+              const SizedBox(height: 3),
               const Text(
                 '5분 호흡 훈련',
                 style: TextStyle(
-                  fontSize: 21,
+                  fontSize: 19,
                   fontWeight: FontWeight.w700,
                   color: Colors.white,
-                  letterSpacing: -0.42,
+                  letterSpacing: -0.38,
                 ),
               ),
-              const SizedBox(height: 3),
+              const SizedBox(height: 2),
               Text(
                 subtitle,
                 style: const TextStyle(
-                  fontSize: 14,
+                  fontSize: 13,
                   color: Color.fromRGBO(255, 255, 255, 0.85),
                 ),
               ),
-              const SizedBox(height: 14),
+              const SizedBox(height: 11),
               FilledButton.icon(
                 onPressed: action,
                 icon: Icon(actionIcon, size: 18),
@@ -584,13 +582,13 @@ class _TrainingCta extends StatelessWidget {
                 style: FilledButton.styleFrom(
                   backgroundColor: Colors.white,
                   foregroundColor: BlowfitColors.blue600,
-                  minimumSize: const Size(0, 46),
-                  padding: const EdgeInsets.symmetric(horizontal: 22),
+                  minimumSize: const Size(0, 42),
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(13),
+                    borderRadius: BorderRadius.circular(12),
                   ),
                   textStyle: const TextStyle(
-                    fontSize: 16,
+                    fontSize: 15,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
@@ -610,133 +608,101 @@ class _TrainingCta extends StatelessWidget {
 class _QuickStats extends StatelessWidget {
   const _QuickStats({
     required this.weekHits,
-    required this.thisWeekAvg,
-    required this.lastWeekAvg,
     required this.onTap,
   });
   final int weekHits;
+  final VoidCallback onTap;
 
-  /// 이번 주 평균 호기. 세션 없으면 null.
-  final double? thisWeekAvg;
+  @override
+  Widget build(BuildContext context) {
+    // 레이아웃 옵션 ③:
+    // 위 — "이번 주" 풀폭 1줄 얇은 카드 (라벨 + N/7회 + 진행바)
+    // 아래 — 호기 / 흡기 1:1 Row (IntrinsicHeight + stretch 로 동일 높이)
+    //
+    // 호기/흡기 모두 0 으로 하드코딩 — 차후 실데이터 연결 시
+    // _PressureCard.value 만 교체하면 됨 (보조 라인 위젯은 이미 제거됨).
+    return Column(
+      children: [
+        _WeekProgressBar(weekHits: weekHits, onTap: onTap),
+        const SizedBox(height: 8),
+        IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                child: _PressureCard(
+                  label: '평균 호기 압력',
+                  value: '0',
+                  onTap: onTap,
+                ),
+              ),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: _PressureCard(
+                  label: '평균 흡기 압력',
+                  value: '0',
+                  onTap: null,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
 
-  /// 지난 주 평균 호기. 비교 기준.
-  final double? lastWeekAvg;
+/// 풀폭 1줄 "이번 주" 진행바. 라벨 + N/7회 + 가로 progress bar.
+class _WeekProgressBar extends StatelessWidget {
+  const _WeekProgressBar({required this.weekHits, required this.onTap});
+  final int weekHits;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final ratio = (weekHits / 7).clamp(0.0, 1.0);
-    final delta = (thisWeekAvg != null && lastWeekAvg != null)
-        ? thisWeekAvg! - lastWeekAvg!
-        : null;
-    // IntrinsicHeight + stretch 로 두 카드의 높이를 가장 높은 카드 기준으로
-    // 통일. 이번 주 카드의 진행바는 Spacer 로 카드 하단에 정렬.
-    return IntrinsicHeight(
+    return BlowfitCard(
+      onTap: onTap,
+      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Expanded(
-            child: BlowfitCard(
-              onTap: onTap,
-              padding: const EdgeInsets.all(13),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    '이번 주',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: BlowfitColors.ink3,
-                    ),
-                  ),
-                  const SizedBox(height: 5),
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.baseline,
-                    textBaseline: TextBaseline.alphabetic,
-                    children: [
-                      Text(
-                        '$weekHits',
-                        style: const TextStyle(
-                          fontSize: 23,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: -0.46,
-                          color: BlowfitColors.ink,
-                          fontFeatures: [FontFeature.tabularFigures()],
-                        ),
-                      ),
-                      const Text(
-                        ' / 7회',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: BlowfitColors.ink3,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const Spacer(),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(999),
-                    child: LinearProgressIndicator(
-                      value: ratio,
-                      minHeight: 6,
-                      backgroundColor: BlowfitColors.gray150,
-                      valueColor: const AlwaysStoppedAnimation<Color>(
-                          BlowfitColors.blue500),
-                    ),
-                  ),
-                ],
-              ),
+          const Text(
+            '이번 주',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: BlowfitColors.ink3,
             ),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 8),
+          Text(
+            '$weekHits',
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              letterSpacing: -0.28,
+              color: BlowfitColors.ink,
+              fontFeatures: [FontFeature.tabularFigures()],
+            ),
+          ),
+          const Text(
+            ' / 7회',
+            style: TextStyle(
+              fontSize: 12,
+              color: BlowfitColors.ink3,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(width: 12),
           Expanded(
-            child: BlowfitCard(
-              onTap: onTap,
-              padding: const EdgeInsets.all(13),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    '평균 호기 압력',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: BlowfitColors.ink3,
-                    ),
-                  ),
-                  const SizedBox(height: 5),
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.baseline,
-                    textBaseline: TextBaseline.alphabetic,
-                    children: [
-                      Text(
-                        thisWeekAvg != null
-                            ? thisWeekAvg!.toStringAsFixed(1)
-                            : '—',
-                        style: const TextStyle(
-                          fontSize: 23,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: -0.46,
-                          color: BlowfitColors.ink,
-                          fontFeatures: [FontFeature.tabularFigures()],
-                        ),
-                      ),
-                      const SizedBox(width: 4),
-                      const Text(
-                        'cmH₂O',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: BlowfitColors.ink3,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const Spacer(),
-                  _DeltaRow(delta: delta),
-                ],
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(999),
+              child: LinearProgressIndicator(
+                value: ratio,
+                minHeight: 6,
+                backgroundColor: BlowfitColors.gray150,
+                valueColor: const AlwaysStoppedAnimation<Color>(
+                    BlowfitColors.blue500),
               ),
             ),
           ),
@@ -746,48 +712,63 @@ class _QuickStats extends StatelessWidget {
   }
 }
 
-/// 평균 호기 압력 카드의 델타 줄.
-/// 비교 데이터 부족하면 안내 텍스트.
-class _DeltaRow extends StatelessWidget {
-  const _DeltaRow({required this.delta});
-  final double? delta;
+/// 호기/흡기 공용 압력 카드 — 라벨 + 큰 숫자 + cmH₂O.
+/// 보조 라인(델타/안내) 없이 미니멀 placeholder 표시.
+class _PressureCard extends StatelessWidget {
+  const _PressureCard({
+    required this.label,
+    required this.value,
+    required this.onTap,
+  });
+
+  final String label;
+  final String value;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    if (delta == null) {
-      return const Text(
-        '비교 데이터 더 필요',
-        style: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-          color: BlowfitColors.ink3,
-        ),
-      );
-    }
-    final positive = delta! > 0;
-    final negative = delta! < 0;
-    final color = positive
-        ? BlowfitColors.green500
-        : negative
-            ? BlowfitColors.red500
-            : BlowfitColors.ink3;
-    final sign = positive ? '+' : '';
-    return Row(
-      children: [
-        if (positive)
-          Icon(Icons.arrow_upward, size: 11, color: color)
-        else if (negative)
-          Icon(Icons.arrow_downward, size: 11, color: color),
-        if (positive || negative) const SizedBox(width: 4),
-        Text(
-          '$sign${delta!.toStringAsFixed(1)} 지난주 대비',
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w700,
-            color: color,
+    return BlowfitCard(
+      onTap: onTap,
+      padding: const EdgeInsets.all(13),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: BlowfitColors.ink3,
+            ),
           ),
-        ),
-      ],
+          const SizedBox(height: 5),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Text(
+                value,
+                style: const TextStyle(
+                  fontSize: 23,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -0.46,
+                  color: BlowfitColors.ink,
+                  fontFeatures: [FontFeature.tabularFigures()],
+                ),
+              ),
+              const SizedBox(width: 4),
+              const Text(
+                'cmH₂O',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: BlowfitColors.ink3,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
