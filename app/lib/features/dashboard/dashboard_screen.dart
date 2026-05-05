@@ -346,18 +346,20 @@ class _DeviceStatusCard extends StatelessWidget {
                   Expanded(
                     child: _Metric(
                       label: '배터리',
-                      value: connected ? '$battery%' : '—',
+                      value: connected ? '$battery%' : '끊김',
                       icon: connected
                           ? _batteryIcon(battery, state?.charging ?? false)
-                          : Icons.battery_unknown,
+                          : Icons.battery_std,
                       warn: connected && lowBattery,
+                      dim: !connected,
                     ),
                   ),
                   const _MetricDivider(),
                   Expanded(
                     child: _Metric(
                       label: '저항 다이얼',
-                      value: connected ? '${orificeLevel + 1}단' : '—',
+                      value: connected ? '${orificeLevel + 1}단' : '2단',
+                      dim: !connected,
                     ),
                   ),
                   const _MetricDivider(),
@@ -366,9 +368,12 @@ class _DeviceStatusCard extends StatelessWidget {
                       label: '신호',
                       value: connected
                           ? (healthDegraded ? '약함' : '강함')
-                          : '—',
-                      icon: Icons.bluetooth,
+                          : '끊김',
+                      icon: connected
+                          ? Icons.bluetooth
+                          : Icons.bluetooth_disabled,
                       warn: connected && healthDegraded,
+                      dim: !connected,
                     ),
                   ),
                 ],
@@ -396,6 +401,7 @@ class _Metric extends StatelessWidget {
     required this.value,
     this.icon,
     this.warn = false,
+    this.dim = false,
   });
 
   final String label;
@@ -403,19 +409,28 @@ class _Metric extends StatelessWidget {
   final IconData? icon;
   final bool warn;
 
+  /// 비활성 상태 (예: 기기 미연결) — 라벨/값/아이콘 모두 회색 dim 처리.
+  /// dim 이 true 면 warn 은 무시된다 (끊긴 상태에선 빨강 경고가 의미 없음).
+  final bool dim;
+
   @override
   Widget build(BuildContext context) {
-    final valueColor =
-        warn ? BlowfitColors.red500 : BlowfitColors.ink;
+    final Color labelColor =
+        dim ? BlowfitColors.gray400 : BlowfitColors.gray500;
+    final Color valueColor = dim
+        ? BlowfitColors.gray400
+        : (warn ? BlowfitColors.red500 : BlowfitColors.ink);
+    final Color iconColor =
+        dim ? BlowfitColors.gray400 : BlowfitColors.blue500;
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(
           label,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 11,
             fontWeight: FontWeight.w500,
-            color: BlowfitColors.gray500,
+            color: labelColor,
           ),
         ),
         const SizedBox(height: 4),
@@ -425,7 +440,7 @@ class _Metric extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             if (icon != null) ...[
-              Icon(icon, size: 14, color: BlowfitColors.blue500),
+              Icon(icon, size: 14, color: iconColor),
               const SizedBox(width: 4),
             ],
             Text(
