@@ -237,11 +237,11 @@ class _StatsTriple extends StatelessWidget {
       children: [
         Expanded(
             child: _MiniStat(
-                label: '이번 달', value: '$monthCount', unit: '일')),
+                label: '이번 주', value: '$weekCount', unit: '회')),
         const SizedBox(width: 8),
         Expanded(
             child: _MiniStat(
-                label: '이번 주', value: '$weekCount', unit: '회')),
+                label: '이번 달', value: '$monthCount', unit: '일')),
         const SizedBox(width: 8),
         Expanded(
             child: _MiniStat(
@@ -341,6 +341,8 @@ class _CalendarCard extends StatelessWidget {
     final firstWeekday = DateTime(viewMonth.year, viewMonth.month, 1).weekday;
     final firstOffset = firstWeekday % 7; // Sun=0..Sat=6
 
+    // 항상 6행 × 7열 = 42 셀로 패딩 — 30/31/28/29일 달, 시작 요일 차이로 인한
+    // 카드 높이 변동 제거. 일자가 모자라면 trailing null 셀로 채움 (빈 공간).
     final cells = <int?>[];
     for (var i = 0; i < firstOffset; i++) {
       cells.add(null);
@@ -348,9 +350,14 @@ class _CalendarCard extends StatelessWidget {
     for (var d = 1; d <= daysInMonth; d++) {
       cells.add(d);
     }
+    while (cells.length < 42) {
+      cells.add(null);
+    }
 
     return BlowfitCard(
-      padding: const EdgeInsets.all(16),
+      // bottom 12 — 상하 padding 비대칭. legend 가 카드 하단 가까이 있어 16 은
+      // 다소 여유로움. 작은 폰에서 카드 하단이 잘리는 문제 완화.
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
       child: Column(
         children: [
           Row(
@@ -412,7 +419,9 @@ class _CalendarCard extends StatelessWidget {
             gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: 7,
               mainAxisSpacing: 4,
-              childAspectRatio: 1,
+              // 1.15 — 셀이 가로로 약간 길게 (원 36 크기에 거의 맞춤). 6행
+              // grid 높이 ~33px 절약, 작은 폰에서 카드 하단 잘림 완화.
+              childAspectRatio: 1.15,
             ),
             itemCount: cells.length,
             itemBuilder: (_, i) {
@@ -427,9 +436,9 @@ class _CalendarCard extends StatelessWidget {
               );
             },
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 8),
           const Divider(height: 1, color: BlowfitColors.gray150),
-          const SizedBox(height: 14),
+          const SizedBox(height: 8),
           const Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [

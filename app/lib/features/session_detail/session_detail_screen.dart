@@ -151,11 +151,12 @@ class _SessionBody extends StatelessWidget {
   static Widget _div() => const Divider(height: 1, indent: 56, endIndent: 16);
 
   String _orificeLabel(int level) {
+    // 0/1/2 (펌웨어 orificeLevel) → 사용자 친화 표기 "다이얼 N단" (1-base).
     switch (level) {
-      case 0: return '저강도 (4mm)';
-      case 1: return '중강도 (3mm)';
-      case 2: return '고강도 (2mm)';
-      default: return '단계 $level';
+      case 0: return '다이얼 1단';
+      case 1: return '다이얼 2단';
+      case 2: return '다이얼 3단';
+      default: return '다이얼 ${level + 1}단';
     }
   }
 

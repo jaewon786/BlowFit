@@ -87,7 +87,7 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('중강도'), findsOneWidget);
+    expect(find.textContaining('다이얼 2단'), findsOneWidget);
   });
 
   testWidgets('analysis comment for high targetHits → 잘 달성', (tester) async {

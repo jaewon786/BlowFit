@@ -189,8 +189,8 @@ class _PeriodTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // ClipRRect 로 splash 가 옆 탭으로 새지 않게 강제. selected 든 아니든
-    // 탭하면 InkWell 의 splash + highlight 가 보이도록 명시적 색 지정.
+    // 파란 splash/highlight 효과 제거. 이미 선택된 탭은 onTap 도 비활성화하여
+    // 시각/햅틱 모두 무반응 (불필요한 ripple 방지).
     return ClipRRect(
       borderRadius: BorderRadius.circular(9),
       child: Container(
@@ -202,14 +202,10 @@ class _PeriodTab extends StatelessWidget {
         child: Material(
           color: Colors.transparent,
           child: InkWell(
-            onTap: onTap,
-            // selected 시 흰 배경 위에서도 보이도록 살짝 진한 splash.
-            splashColor: selected
-                ? BlowfitColors.blue500.withValues(alpha: 0.12)
-                : BlowfitColors.blue500.withValues(alpha: 0.10),
-            highlightColor: selected
-                ? BlowfitColors.blue500.withValues(alpha: 0.06)
-                : BlowfitColors.blue500.withValues(alpha: 0.04),
+            onTap: selected ? null : onTap,
+            splashColor: Colors.transparent,
+            highlightColor: Colors.transparent,
+            hoverColor: Colors.transparent,
             child: SizedBox(
               height: double.infinity,
               child: Center(
@@ -826,12 +822,11 @@ class _MilestoneRow extends StatelessWidget {
   const _MilestoneRow({required this.milestone});
   final Milestone milestone;
 
-  /// 미달성 + 진행 중 케이스만 별도 라벨; 그 외 미달성은 '—'.
+  /// 달성 → 날짜, 미달성 → '진행 중' 으로 통일.
   String _dateLabel() {
     final at = milestone.achievedAt;
     if (at != null) return DateFormat('M월 d일', 'ko').format(at);
-    if (milestone.kind == MilestoneKind.thirtyDayStreak) return '진행 중';
-    return '—';
+    return '진행 중';
   }
 
   @override
