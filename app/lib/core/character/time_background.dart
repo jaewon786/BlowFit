@@ -1,10 +1,13 @@
 // 시간대별 동적 배경 — 6개 zone 그라데이션 (디자이너 일러스트 도착 전 임시).
 //
-// 30분마다 Timer.periodic 으로 zone 재계산. zone 이 바뀌면 AnimatedSwitcher
-// 가 부드럽게 페이드 (~600ms). 디자이너 일러스트 도착 후 _ZoneBackground 의
+// build() 마다 zone 을 즉시 계산. Training 등 자주 rebuild 되는 화면에서
+// 시간이 바뀌면 자연스럽게 갱신되고, AnimatedSwitcher 가 zone 변경 시
+// 부드럽게 페이드 (~600ms). 디자이너 일러스트 도착 후 _ZoneBackground 의
 // 그라데이션을 AssetImage 로 교체하면 됨 (외부 API 변경 없음).
-
-import 'dart:async';
+//
+// 자동 30분 타이머는 의도적으로 사용하지 않음 — Timer.periodic 이 위젯
+// 테스트에서 leak 되는 이슈 + Training 화면은 BLE 압력 stream 으로 거의
+// 매 frame rebuild 되므로 시각상 차이 없음.
 
 import 'package:flutter/material.dart';
 
@@ -59,60 +62,33 @@ TimeZone zoneForHour(int hour) {
 }
 
 /// 자식 위에 시간대별 배경을 깔아주는 컨테이너. body 가 child 안에 들어감.
-class TimeBackground extends StatefulWidget {
+///
+/// `clock` 은 테스트 전용 — 실제 동작에선 매 build 마다 `DateTime.now()` 로
+/// 현재 시각의 zone 계산. zone 이 바뀌면 [AnimatedSwitcher] 가 페이드 전환.
+class TimeBackground extends StatelessWidget {
   const TimeBackground({
     super.key,
     required this.child,
-    this.refreshInterval = const Duration(minutes: 30),
     this.transitionDuration = const Duration(milliseconds: 600),
     @visibleForTesting this.clock,
   });
 
   final Widget child;
-  final Duration refreshInterval;
   final Duration transitionDuration;
 
   /// 테스트 전용 — 시간 주입. null 이면 `DateTime.now()`.
   final DateTime Function()? clock;
 
   @override
-  State<TimeBackground> createState() => _TimeBackgroundState();
-}
-
-class _TimeBackgroundState extends State<TimeBackground> {
-  late TimeZone _zone;
-  Timer? _timer;
-
-  DateTime _now() => (widget.clock ?? DateTime.now)();
-
-  @override
-  void initState() {
-    super.initState();
-    _zone = zoneForHour(_now().hour);
-    _timer = Timer.periodic(widget.refreshInterval, (_) => _recompute());
-  }
-
-  void _recompute() {
-    final next = zoneForHour(_now().hour);
-    if (next != _zone) {
-      setState(() => _zone = next);
-    }
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final colors = _gradientColors(_zone);
+    final now = (clock ?? DateTime.now)();
+    final zone = zoneForHour(now.hour);
+    final colors = _gradientColors(zone);
     return AnimatedSwitcher(
-      duration: widget.transitionDuration,
+      duration: transitionDuration,
       child: Container(
         // ValueKey 로 zone 바뀔 때 새 자식으로 인식 → 페이드 트리거.
-        key: ValueKey<TimeZone>(_zone),
+        key: ValueKey<TimeZone>(zone),
         decoration: BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topCenter,
@@ -120,7 +96,7 @@ class _TimeBackgroundState extends State<TimeBackground> {
             colors: [colors.top, colors.bottom],
           ),
         ),
-        child: widget.child,
+        child: child,
       ),
     );
   }

@@ -72,25 +72,19 @@ void main() {
       expect(find.text('hello otter'), findsOneWidget);
     });
 
-    testWidgets('AnimatedSwitcher 로 페이드 트리거 가능 (key 변경 시)', (tester) async {
-      // refreshInterval 짧게, transition 짧게 — fast test.
-      var fakeNow = DateTime(2026, 5, 7, 16, 59);
-      await tester.pumpWidget(
-        MaterialApp(
-          home: TimeBackground(
-            clock: () => fakeNow,
-            refreshInterval: const Duration(milliseconds: 50),
-            transitionDuration: const Duration(milliseconds: 50),
-            child: const Text('zone-test'),
-          ),
-        ),
-      );
+    testWidgets('clock 다른 시각 → 다른 zone (build 시 매번 재계산)', (tester) async {
+      Widget make(DateTime t) => MaterialApp(
+            home: TimeBackground(
+              clock: () => t,
+              transitionDuration: const Duration(milliseconds: 50),
+              child: const Text('zone-test'),
+            ),
+          );
+      // 16:59 (afternoon)
+      await tester.pumpWidget(make(DateTime(2026, 5, 7, 16, 59)));
       expect(find.text('zone-test'), findsOneWidget);
-
-      // 16:59 (afternoon) → 17:00 (evening) 으로 시계 점프
-      fakeNow = DateTime(2026, 5, 7, 17, 0);
-      // 50ms 타이머 + 50ms 전환 → 200ms 펌프하면 충분
-      await tester.pump(const Duration(milliseconds: 100));
+      // 17:00 (evening) — 새 widget 으로 rebuild → key 변경 → 페이드
+      await tester.pumpWidget(make(DateTime(2026, 5, 7, 17, 0)));
       await tester.pump(const Duration(milliseconds: 100));
       expect(find.text('zone-test'), findsOneWidget);
     });

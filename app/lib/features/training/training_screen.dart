@@ -9,6 +9,10 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/ble/blowfit_uuids.dart';
 import '../../core/ble/ble_providers.dart';
+import '../../core/character/growth_stage.dart';
+import '../../core/character/otter_character.dart';
+import '../../core/character/time_background.dart';
+import '../../core/db/db_providers.dart';
 import '../../core/models/pressure_sample.dart';
 import '../../core/storage/storage_providers.dart';
 import '../../core/theme/blowfit_colors.dart';
@@ -228,74 +232,96 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
         ? 0
         : DateTime.now().difference(_phaseStartedAt!).inSeconds;
 
+    // 캐릭터 디자인 — Rive 수달 (도착 전 BreathOrb fallback).
+    final firstDate = ref.watch(firstSessionDateProvider).valueOrNull;
+    final growthStage = stageFromStartedAt(firstDate);
+    final targetReached =
+        _current >= _targetLow && _current <= _targetHigh;
+
     return Scaffold(
-      // 디자인 v2 — phase 별 살짝 다른 배경색.
-      backgroundColor: _bgForPhase(_phase),
-      body: SafeArea(
-        child: Column(
-          children: [
-            _TrainingTopBar(
-              currentSet: currentSet,
-              totalSets: totalSets,
-              onClose: () => context.pop(),
-            ),
-            const SizedBox(height: 4),
-            _PhaseGuide(
-              phase: _phase,
-              sessionActive: _sessionActive,
-            ),
-            if (degraded) ...[
+      // 시간대별 동적 배경 — 6 zone 그라데이션 (일러스트 도착 후 자동 교체).
+      body: TimeBackground(
+        child: SafeArea(
+          child: Column(
+            children: [
+              _TrainingTopBar(
+                currentSet: currentSet,
+                totalSets: totalSets,
+                onClose: () => context.pop(),
+              ),
+              const SizedBox(height: 4),
+              _PhaseGuide(
+                phase: _phase,
+                sessionActive: _sessionActive,
+              ),
+              if (degraded) ...[
+                const SizedBox(height: 8),
+                const _DegradedSignalBanner(),
+              ],
               const SizedBox(height: 8),
-              const _DegradedSignalBanner(),
+              // OtterCharacter — Rive 수달 .riv 도착 후 수달 표시,
+              // 도착 전 BreathOrb fallback (현재 시각상 동일).
+              SizedBox(
+                width: 200,
+                height: 200,
+                child: OtterCharacter(
+                  pressure: _current,
+                  targetReached: targetReached,
+                  sessionState: _toSessionState(_phase),
+                  stage: growthStage,
+                  fallback: _BreathOrb(
+                    phase: _phase,
+                    sessionActive: _sessionActive,
+                    elapsedSec: phaseElapsedSec,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: _LiveChart(
+                    points: _points,
+                    startX: startX,
+                    endX: endX,
+                    current: _current,
+                    targetLow: _targetLow,
+                    targetHigh: _targetHigh,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: connected && _sessionActive ? _stop : null,
+                    child: const Text('훈련 종료'),
+                  ),
+                ),
+              ),
             ],
-            const SizedBox(height: 8),
-            // BreathOrb — 디자인 v2 의 핵심 비주얼. 펌웨어 phase 가 train/rest
-            // 일 때 호흡 애니메이션, prep/standby 일 때 정적.
-            _BreathOrb(
-              phase: _phase,
-              sessionActive: _sessionActive,
-              elapsedSec: phaseElapsedSec,
-            ),
-            const SizedBox(height: 8),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: _LiveChart(
-                  points: _points,
-                  startX: startX,
-                  endX: endX,
-                  current: _current,
-                  targetLow: _targetLow,
-                  targetHigh: _targetHigh,
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-              child: SizedBox(
-                width: double.infinity,
-                child: FilledButton(
-                  onPressed: connected && _sessionActive ? _stop : null,
-                  child: const Text('훈련 종료'),
-                ),
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );
   }
 
-  /// phase 별 살짝 다른 배경 — 디자인 v2.
-  Color _bgForPhase(DeviceStateCode p) {
+  /// 펌웨어 [DeviceStateCode] → Rive `sessionState` 매핑.
+  SessionState _toSessionState(DeviceStateCode p) {
     switch (p) {
+      case DeviceStateCode.prep:
       case DeviceStateCode.train:
-        return const Color(0xFFF0F6FF); // 살짝 파랑
       case DeviceStateCode.rest:
-        return const Color(0xFFF0FAFF); // 살짝 시안
-      default:
-        return BlowfitColors.bg;
+        return SessionState.active;
+      case DeviceStateCode.summary:
+        return SessionState.complete;
+      case DeviceStateCode.boot:
+      case DeviceStateCode.standby:
+      case DeviceStateCode.error:
+      case DeviceStateCode.weekly:
+        return SessionState.idle;
     }
   }
 }

@@ -1,6 +1,7 @@
 import 'package:blowfit/core/ble/ble_manager.dart';
 import 'package:blowfit/core/ble/ble_providers.dart';
 import 'package:blowfit/core/ble/fake_ble_manager.dart';
+import 'package:blowfit/core/db/db_providers.dart';
 import 'package:blowfit/core/theme/blowfit_theme.dart';
 import 'package:blowfit/features/training/training_screen.dart';
 import 'package:flutter/material.dart';
@@ -18,7 +19,12 @@ GoRouter _stubRouter() => GoRouter(
 
 Widget _buildHarness({required BleManager ble}) {
   return ProviderScope(
-    overrides: [bleManagerProvider.overrideWithValue(ble)],
+    overrides: [
+      bleManagerProvider.overrideWithValue(ble),
+      // firstSessionDateProvider 우회 — 실 Drift DB 가 test 환경에서 Timer
+      // leak 을 일으키므로 null 로 stub. 캐릭터 성장 단계는 baby (기본).
+      firstSessionDateProvider.overrideWith((_) async => null),
+    ],
     child: MaterialApp.router(
       theme: BlowfitTheme.light(),
       routerConfig: _stubRouter(),
