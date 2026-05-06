@@ -22,6 +22,8 @@ dependencies:
   permission_handler: ^11.3.1
   intl: ^0.19.0
   shared_preferences: ^2.3.0
+  # Character animation — Rive State Machine. Loads assets/character/otter.riv.
+  rive: ^0.13.0
 
 dev_dependencies:
   flutter_test:
@@ -32,6 +34,9 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/character/
+    - assets/backgrounds/
   fonts:
     - family: Pretendard
       fonts:
