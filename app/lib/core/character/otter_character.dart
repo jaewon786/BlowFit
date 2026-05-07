@@ -122,7 +122,12 @@ class _OtterCharacterState extends State<OtterCharacter> {
   Widget build(BuildContext context) {
     final artboard = _artboard;
     if (artboard != null) {
-      return Rive(artboard: artboard, fit: BoxFit.contain);
+      // ClipRect — Rive artboard 가 부모 SizedBox 경계 밖으로 그려도 안 보이게
+      // 강제. 일부 .riv 파일은 자체 background fill 이나 outline 이 artboard
+      // 외부로 삐져나옴.
+      return ClipRect(
+        child: Rive(artboard: artboard, fit: BoxFit.contain),
+      );
     }
     // 로딩 중 / 실패 / asset 없음 — 모두 fallback (없으면 빈 SizedBox).
     return widget.fallback ?? const SizedBox.shrink();

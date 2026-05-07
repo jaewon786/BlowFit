@@ -44,20 +44,29 @@ TimeZone zoneForHour(int hour) {
 }
 
 /// zone 별 LinearGradient 색상 토큰 — 일러스트 도착 전 임시.
+/// 모든 zone 이 옅은 파스텔 (Material 100~200 shade) 로 통일 — 어두운 배경
+/// 에서 기존 UI(검정 텍스트, 차트 라인) 가독성 깨지는 문제 방지. 진한 색감
+/// 의 시간대 분위기는 디자이너 일러스트 도착 후 복원.
 ({Color top, Color bottom}) _gradientColors(TimeZone zone) {
   switch (zone) {
     case TimeZone.dawn:
-      return (top: const Color(0xFFB19CD9), bottom: const Color(0xFFFFB6C1));
+      // 새벽 — 옅은 분홍 → 옅 하늘
+      return (top: const Color(0xFFFCE4EC), bottom: const Color(0xFFE3F2FD));
     case TimeZone.morning:
-      return (top: const Color(0xFF87CEEB), bottom: const Color(0xFFFFE4B5));
+      // 아침 — 옅 하늘 → 옅 노랑
+      return (top: const Color(0xFFE3F2FD), bottom: const Color(0xFFFFF9C4));
     case TimeZone.noon:
-      return (top: const Color(0xFF4FC3F7), bottom: const Color(0xFFFFFFFF));
+      // 점심 — 옅 하늘 → 흰
+      return (top: const Color(0xFFE1F5FE), bottom: const Color(0xFFFFFFFF));
     case TimeZone.afternoon:
-      return (top: const Color(0xFFFFA726), bottom: const Color(0xFFFFE0B2));
+      // 오후 — 옅 노랑 → 살구
+      return (top: const Color(0xFFFFF8E1), bottom: const Color(0xFFFFE0B2));
     case TimeZone.evening:
-      return (top: const Color(0xFFFF6B6B), bottom: const Color(0xFF4A148C));
+      // 저녁 — 살구 → 라벤더 (노을 느낌, 가독성 유지)
+      return (top: const Color(0xFFFFCCBC), bottom: const Color(0xFFE1BEE7));
     case TimeZone.night:
-      return (top: const Color(0xFF1A237E), bottom: const Color(0xFF000051));
+      // 밤 — 옅 인디고 (밤 분위기 약간만 — 어두운 색 회피)
+      return (top: const Color(0xFFE8EAF6), bottom: const Color(0xFFC5CAE9));
   }
 }
 
