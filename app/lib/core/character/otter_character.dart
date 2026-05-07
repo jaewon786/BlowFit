@@ -184,7 +184,17 @@ base class _BreathingAnimationPainter extends rive.BasicArtboardPainter {
   set phase(_BreathPhase value) {
     if (_phase != value) {
       _phase = value;
-      // advance() 가 매 frame 호출되므로 별도 notifyListeners 불필요.
+      // 새 phase 의 animation 을 time = 0 에서 재시작. 이전 재생이 끝까지
+      // 갔으면 (One Shot) time 이 duration 에 멈춰 있어 재진입 시 진행
+      // 안 함 → 매 phase 전환 시 강제 리셋해 자연스러운 재생.
+      final newAnim = switch (value) {
+        _BreathPhase.idle => _idleAnim,
+        _BreathPhase.exhale => _exhaleAnim,
+        _BreathPhase.inhale => _inhaleAnim,
+      };
+      if (newAnim != null) {
+        newAnim.time = 0;
+      }
     }
   }
 
