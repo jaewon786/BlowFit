@@ -18,11 +18,8 @@ import 'growth_stage.dart';
 /// Rive 에셋 경로 — 테스트가 빈 문자열 또는 미존재 경로로 override 하면
 /// OtterCharacter 가 fallback 으로 안전 분기. 비동기 RiveFile 파싱 에러가
 /// 테스트 framework 로 전파되는 것을 방지.
-///
-/// 현재 빈 문자열로 임시 설정 — seal.riv 렌더링 문제 진단 중. BreathOrb
-/// fallback 만 표시. 진단 끝나면 'assets/character/seal.riv' 로 복원.
 final characterAssetPathProvider = Provider<String>((ref) {
-  return ''; // 임시: Rive 우회 → BreathOrb fallback
+  return 'assets/character/seal.riv';
 });
 
 /// 세션 진행 상태 — 차후 .riv 의 sessionState input 으로 매핑할 enum.
