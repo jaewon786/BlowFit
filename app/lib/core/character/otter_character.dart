@@ -1,28 +1,30 @@
-// Rive 수달 캐릭터 위젯 — 호흡 + 성장에 반응하는 메인 비주얼.
+// 호흡 캐릭터 위젯 — Rive 캐릭터 (Idle 자동 재생) + Flutter 풍선 오버레이.
 //
-// `assets/character/otter.riv` 가 등록되어 있고 로드 가능하면 Rive 애니메이션
-// 으로 렌더링. 디자이너 산출물이 아직 없거나 로드가 실패하면 [fallback] 위젯
-// 을 대신 보여줌 (없으면 빈 SizedBox).
+// 현재 [assetPath] 기본값은 임시 placeholder `seal.riv` (Rive Marketplace 의
+// Sappy seal). 이 .riv 는 풍선 size 입력이 없어, 풍선은 Flutter 로 별도
+// 오버레이 렌더링 (`balloonSize` prop 으로 크기 결정). 차후 디자이너가 풍선
+// 까지 포함된 .riv 를 만들면:
+//   1) assetPath 만 새 파일로 교체
+//   2) Stack 의 _BalloonOverlay 제거
+//   3) 새 .riv 의 Number input (예: `balloonSize`) 에 widget.balloonSize wiring
 //
-// Rive 측 계약 (디자이너 합의):
-//   - State Machine 이름: `BreathingState` (생성자 파라미터로 override 가능)
-//   - Inputs:
-//       pressure       (Number)  — BLE 호기 압력 (cmH₂O), 0~30 typical
-//       targetReached  (Bool)    — 목표 구간 진입 여부
-//       sessionState   (Number)  — SessionState.index (0=idle / 1=active / 2=complete)
-//       growthStage    (Number)  — GrowthStage.index (0=baby / 1=young / 2=adult / 3=master)
-//
-// Inputs 중 일부가 .riv 에 없어도 위젯은 정상 동작 (해당 input 만 무시).
-// 흡기(음압) 데이터는 차후 차압 센서 도입 후 pressure 가 음수로 들어올 예정.
+// .riv 가 없거나 로딩 실패하면 [fallback] 위젯으로 안전 분기 (예: BreathOrb).
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show rootBundle;
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rive/rive.dart';
 
 import 'growth_stage.dart';
 
-/// 세션 진행 상태 — Rive `sessionState` 입력에 매핑.
-/// 펌웨어 `DeviceStateCode` → 이 enum 매핑은 호출처(training_screen)에서 처리.
+/// Rive 에셋 경로 — 테스트가 빈 문자열 또는 미존재 경로로 override 하면
+/// OtterCharacter 가 fallback 으로 안전 분기. 비동기 RiveFile 파싱 에러가
+/// 테스트 framework 로 전파되는 것을 방지.
+final characterAssetPathProvider = Provider<String>((ref) {
+  return 'assets/character/seal.riv';
+});
+
+/// 세션 진행 상태 — 차후 .riv 의 sessionState input 으로 매핑할 enum.
+/// 펌웨어 `DeviceStateCode` 와의 매핑은 호출처에서 처리.
 enum SessionState {
   /// 0 — 세션 안 함 (BOOT/STANDBY).
   idle,
@@ -37,19 +39,19 @@ enum SessionState {
 class OtterCharacter extends StatefulWidget {
   const OtterCharacter({
     super.key,
-    required this.pressure,
+    required this.balloonSize,
     required this.targetReached,
     required this.sessionState,
     required this.stage,
     this.fallback,
-    this.assetPath = 'assets/character/otter.riv',
-    this.stateMachineName = 'BreathingState',
+    this.assetPath = 'assets/character/seal.riv',
+    this.stateMachineName = 'BreathingSM',
   });
 
-  /// 현재 호기 압력 (cmH₂O). 흡기 차후 활성화 시 음수도 허용.
-  final double pressure;
+  /// 풍선 크기 (0~1). 호기 누적 → 1, 흡기 누적 → 0. accumulateBalloon 으로 계산.
+  final double balloonSize;
 
-  /// 목표 구간 진입 여부 (예: 20~30 cmH₂O).
+  /// 목표 구간 진입 여부 — 차후 .riv 의 celebrate state 트리거용.
   final bool targetReached;
 
   /// 세션 단계 — idle / active / complete.
@@ -59,13 +61,9 @@ class OtterCharacter extends StatefulWidget {
   final GrowthStage stage;
 
   /// `.riv` 가 없거나 로드 실패 시 보여줄 대체 위젯. null 이면 빈 SizedBox.
-  /// 통상 BreathOrb 같은 기존 호흡 애니메이션을 주입.
   final Widget? fallback;
 
-  /// 에셋 경로 — 테스트 / 다른 캐릭터 디버그용 override 가능.
   final String assetPath;
-
-  /// State Machine 이름.
   final String stateMachineName;
 
   @override
@@ -73,86 +71,95 @@ class OtterCharacter extends StatefulWidget {
 }
 
 class _OtterCharacterState extends State<OtterCharacter> {
-  Future<bool>? _loadProbe;
-  StateMachineController? _controller;
-  SMINumber? _pressureInput;
-  SMIBool? _targetReachedInput;
-  SMINumber? _sessionStateInput;
-  SMINumber? _growthStageInput;
+  Artboard? _artboard;
+  bool _loadFailed = false;
 
   @override
   void initState() {
     super.initState();
-    _loadProbe = _probeAsset();
+    _loadRive();
   }
 
-  /// 에셋 존재/로드 가능 여부 사전 체크 — Rive 위젯이 직접 throw 하기 전에
-  /// fallback 으로 분기하기 위함.
-  Future<bool> _probeAsset() async {
-    try {
-      await rootBundle.load(widget.assetPath);
-      return true;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  /// `RiveAnimation` 로드 직후 — State Machine + inputs 바인딩.
-  void _onRiveInit(Artboard artboard) {
-    final ctrl = StateMachineController.fromArtboard(
-      artboard,
-      widget.stateMachineName,
-    );
-    if (ctrl == null) {
-      // State Machine 이름 불일치 — fallback 으로 떨어지지는 않고 그냥
-      // 정적 artboard 로 보여줌. 디자이너와 이름 합의 필요.
+  /// `.riv` 직접 파싱 — 에러 시 fallback 으로 안전 분기.
+  /// `RiveAnimation.asset` 가 build 도중 throw 하는 케이스를 막기 위함
+  /// (특히 test env 의 asset 환경 차이).
+  /// `assetPath` 가 비어 있으면 즉시 fallback (테스트가 Rive 우회용으로 쓸 수 있음).
+  Future<void> _loadRive() async {
+    if (widget.assetPath.isEmpty) {
+      if (!mounted) return;
+      setState(() => _loadFailed = true);
       return;
     }
-    artboard.addController(ctrl);
-    _controller = ctrl;
-    _pressureInput = ctrl.findInput<double>('pressure') as SMINumber?;
-    _targetReachedInput = ctrl.findInput<bool>('targetReached') as SMIBool?;
-    _sessionStateInput = ctrl.findInput<double>('sessionState') as SMINumber?;
-    _growthStageInput = ctrl.findInput<double>('growthStage') as SMINumber?;
-    _syncInputs();
-  }
-
-  /// 위젯 prop → Rive input 동기화. input 이 없으면 no-op.
-  void _syncInputs() {
-    _pressureInput?.value = widget.pressure;
-    _targetReachedInput?.value = widget.targetReached;
-    _sessionStateInput?.value = widget.sessionState.index.toDouble();
-    _growthStageInput?.value = widget.stage.index.toDouble();
-  }
-
-  @override
-  void didUpdateWidget(covariant OtterCharacter old) {
-    super.didUpdateWidget(old);
-    _syncInputs();
-  }
-
-  @override
-  void dispose() {
-    _controller?.dispose();
-    super.dispose();
+    try {
+      final file = await RiveFile.asset(widget.assetPath);
+      final artboard = file.mainArtboard.instance();
+      final ctrl = StateMachineController.fromArtboard(
+        artboard,
+        widget.stateMachineName,
+      );
+      if (ctrl != null) artboard.addController(ctrl);
+      if (!mounted) return;
+      setState(() => _artboard = artboard);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loadFailed = true);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<bool>(
-      future: _loadProbe,
-      builder: (context, snap) {
-        final loaded = snap.data ?? false;
-        if (!loaded) {
-          // 로딩 중 / 실패 / asset 없음 — 모두 fallback. 깜빡임 방지.
-          return widget.fallback ?? const SizedBox.shrink();
-        }
-        return RiveAnimation.asset(
-          widget.assetPath,
-          fit: BoxFit.contain,
-          onInit: _onRiveInit,
-        );
-      },
+    final Widget character;
+    final artboard = _artboard;
+    if (artboard != null) {
+      character = Rive(artboard: artboard, fit: BoxFit.contain);
+    } else if (_loadFailed) {
+      character = widget.fallback ?? const SizedBox.shrink();
+    } else {
+      // 로딩 중 — fallback 보여주기 (없으면 빈 SizedBox).
+      character = widget.fallback ?? const SizedBox.shrink();
+    }
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        Positioned.fill(child: character),
+        // 풍선 오버레이 — 캐릭터 우상단. balloonSize 비례로 크기 변화.
+        Align(
+          alignment: const Alignment(0.7, -0.8),
+          child: _BalloonOverlay(size: widget.balloonSize),
+        ),
+      ],
+    );
+  }
+}
+
+/// 풍선 placeholder — Flutter Container 로 그린 분홍 원. 차후 풍선까지 포함된
+/// .riv 가 도착하면 제거.
+class _BalloonOverlay extends StatelessWidget {
+  const _BalloonOverlay({required this.size});
+
+  /// 0~1 사이의 정규화된 크기.
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final clamped = size.clamp(0.0, 1.0);
+    final diameter = 18.0 + clamped * 60.0; // 18~78px
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 120),
+      curve: Curves.easeOut,
+      width: diameter,
+      height: diameter,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: const Color(0xFFFFB7C5).withValues(alpha: 0.85),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFFFF8A9A).withValues(alpha: 0.35),
+            blurRadius: 12,
+            spreadRadius: 1,
+          ),
+        ],
+      ),
     );
   }
 }

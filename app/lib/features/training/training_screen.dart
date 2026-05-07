@@ -9,6 +9,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/ble/blowfit_uuids.dart';
 import '../../core/ble/ble_providers.dart';
+import '../../core/character/breath_balloon.dart';
 import '../../core/character/growth_stage.dart';
 import '../../core/character/otter_character.dart';
 import '../../core/character/time_background.dart';
@@ -36,6 +37,11 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
   /// 무관하게 wall-clock 과 1:1 로 진행함.
   final Queue<FlSpot> _points = Queue();
   double _current = 0;
+
+  /// 캐릭터 풍선 크기 (0~1). 호기 시 점점 커지고, 흡기 시 작아지고, 멈춤 시
+  /// 유지. accumulateBalloon 으로 매 압력 샘플마다 갱신.
+  double _balloonSize = 0.5;
+
   bool _sessionActive = false;
   DateTime? _sessionStart;
   Timer? _ticker;
@@ -113,6 +119,7 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
         DateTime.now().difference(start).inMilliseconds / 1000.0;
     setState(() {
       _current = s.cmH2O;
+      _balloonSize = accumulateBalloon(_balloonSize, s.cmH2O);
       _points.add(FlSpot(elapsedSec, s.cmH2O));
       // 슬라이딩 윈도우: 가장 최근 30초만 유지.
       while (_points.isNotEmpty &&
@@ -259,16 +266,19 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
                 const _DegradedSignalBanner(),
               ],
               const SizedBox(height: 8),
-              // OtterCharacter — Rive 수달 .riv 도착 후 수달 표시,
-              // 도착 전 BreathOrb fallback (현재 시각상 동일).
+              // OtterCharacter — 임시 seal.riv (Idle 자동 재생) + Flutter
+              // 풍선 오버레이 (balloonSize 비례). .riv 미존재 시 BreathOrb
+              // fallback. 차후 풍선까지 포함된 수달 .riv 로 교체 시 Stack
+              // 의 Flutter 풍선 제거 + Rive input wiring.
               SizedBox(
                 width: 200,
                 height: 200,
                 child: OtterCharacter(
-                  pressure: _current,
+                  balloonSize: _balloonSize,
                   targetReached: targetReached,
                   sessionState: _toSessionState(_phase),
                   stage: growthStage,
+                  assetPath: ref.watch(characterAssetPathProvider),
                   fallback: _BreathOrb(
                     phase: _phase,
                     sessionActive: _sessionActive,

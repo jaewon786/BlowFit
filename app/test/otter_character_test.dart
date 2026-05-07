@@ -18,7 +18,7 @@ void main() {
             width: 200,
             height: 200,
             child: OtterCharacter(
-              pressure: 12.5,
+              balloonSize: 0.5,
               targetReached: false,
               sessionState: SessionState.idle,
               stage: GrowthStage.baby,
@@ -49,26 +49,26 @@ void main() {
   });
 
   testWidgets('widget prop 업데이트 시 throw 없이 재빌드', (tester) async {
-    Widget build({required double pressure}) => MaterialApp(
+    Widget build({required double balloon}) => MaterialApp(
           home: Scaffold(
             body: OtterCharacter(
-              pressure: pressure,
-              targetReached: pressure > 20,
+              balloonSize: balloon,
+              targetReached: balloon > 0.7,
               sessionState: SessionState.active,
               stage: GrowthStage.young,
               assetPath: 'assets/no-such-file.riv',
-              fallback: Text('p=$pressure'),
+              fallback: Text('b=$balloon'),
             ),
           ),
         );
 
-    await tester.pumpWidget(build(pressure: 5.0));
+    await tester.pumpWidget(build(balloon: 0.2));
     await tester.pumpAndSettle();
-    expect(find.text('p=5.0'), findsOneWidget);
+    expect(find.text('b=0.2'), findsOneWidget);
 
     // prop 변경
-    await tester.pumpWidget(build(pressure: 25.0));
+    await tester.pumpWidget(build(balloon: 0.9));
     await tester.pumpAndSettle();
-    expect(find.text('p=25.0'), findsOneWidget);
+    expect(find.text('b=0.9'), findsOneWidget);
   });
 }
