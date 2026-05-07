@@ -75,19 +75,42 @@ class _OtterCharacterState extends State<OtterCharacter> {
   }
 
   /// `.riv` 직접 파싱 — 에러 시 _artboard 가 null 로 남아 fallback 으로 안전
-  /// 분기. `RiveAnimation.asset` 가 build 도중 throw 하는 케이스를 막기 위함
-  /// (특히 test env 의 asset 환경 차이).
-  /// `assetPath` 가 비어 있으면 즉시 종료 (테스트가 Rive 우회용으로 쓸 수 있음).
+  /// 분기. 이름이 정확히 일치 안 해도 그림은 보이도록 다단계 폴백:
+  ///   1) [stateMachineName] 으로 SM controller 시도
+  ///   2) 실패 시 artboard 의 첫 번째 SM 으로 시도
+  ///   3) 그것도 없으면 첫 번째 animation 을 SimpleAnimation 으로 재생
+  ///   4) animation 도 없으면 controller 없이 artboard 만 (정적 렌더)
+  /// `assetPath` 빈 문자열 → 즉시 종료 (테스트 우회용).
   Future<void> _loadRive() async {
     if (widget.assetPath.isEmpty) return;
     try {
       final file = await RiveFile.asset(widget.assetPath);
       final artboard = file.mainArtboard.instance();
-      final ctrl = StateMachineController.fromArtboard(
+
+      // 1) 명시한 SM 이름 시도
+      var ctrl = StateMachineController.fromArtboard(
         artboard,
         widget.stateMachineName,
       );
-      if (ctrl != null) artboard.addController(ctrl);
+
+      // 2) 실패 → 첫 번째 SM
+      if (ctrl == null && artboard.stateMachines.isNotEmpty) {
+        ctrl = StateMachineController.fromArtboard(
+          artboard,
+          artboard.stateMachines.first.name,
+        );
+      }
+
+      if (ctrl != null) {
+        artboard.addController(ctrl);
+      } else if (artboard.animations.isNotEmpty) {
+        // 3) SM 없으면 첫 animation 을 SimpleAnimation 으로 직접 재생
+        artboard.addController(
+          SimpleAnimation(artboard.animations.first.name),
+        );
+      }
+      // 4) animation 도 없는 경우 controller 없이 artboard 만 — 정적 렌더.
+
       if (!mounted) return;
       setState(() => _artboard = artboard);
     } catch (_) {
