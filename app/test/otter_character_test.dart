@@ -18,6 +18,7 @@ void main() {
             width: 200,
             height: 200,
             child: OtterCharacter(
+              pressure: 0,
               targetReached: false,
               sessionState: SessionState.idle,
               stage: GrowthStage.baby,
@@ -48,25 +49,32 @@ void main() {
   });
 
   testWidgets('widget prop 업데이트 시 throw 없이 재빌드', (tester) async {
-    Widget build({required bool targetReached}) => MaterialApp(
+    Widget build({required double pressure}) => MaterialApp(
           home: Scaffold(
             body: OtterCharacter(
-              targetReached: targetReached,
+              pressure: pressure,
+              targetReached: pressure.abs() > 20,
               sessionState: SessionState.active,
               stage: GrowthStage.young,
               assetPath: 'assets/no-such-file.riv',
-              fallback: Text('t=$targetReached'),
+              fallback: Text('p=$pressure'),
             ),
           ),
         );
 
-    await tester.pumpWidget(build(targetReached: false));
+    // 호기 (양압)
+    await tester.pumpWidget(build(pressure: 15.0));
     await tester.pumpAndSettle();
-    expect(find.text('t=false'), findsOneWidget);
+    expect(find.text('p=15.0'), findsOneWidget);
 
-    // prop 변경
-    await tester.pumpWidget(build(targetReached: true));
+    // 흡기 (음압)
+    await tester.pumpWidget(build(pressure: -10.0));
     await tester.pumpAndSettle();
-    expect(find.text('t=true'), findsOneWidget);
+    expect(find.text('p=-10.0'), findsOneWidget);
+
+    // 멈춤 (threshold 안쪽)
+    await tester.pumpWidget(build(pressure: 2.0));
+    await tester.pumpAndSettle();
+    expect(find.text('p=2.0'), findsOneWidget);
   });
 }

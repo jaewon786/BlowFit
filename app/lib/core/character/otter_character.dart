@@ -1,20 +1,19 @@
-// 호흡 캐릭터 위젯 — Rive 캐릭터 자체에 모든 비주얼 (캐릭터 + 풍선) 포함.
+// 호흡 캐릭터 위젯 — Rive 캐릭터 + 호기/흡기 압력 기반 애니메이션 전환.
 //
-// 현재 [assetPath] 기본값은 임시 placeholder `seal.riv` (Rive Marketplace 의
-// Sappy seal — 물개가 풍선껌 부는 idle 애니메이션 포함). 풍선까지 .riv 안에
-// 그려져 있으므로 Flutter 측에서 추가 오버레이 없음.
+// seal.riv 가 다음 3개 standalone animation 노출:
+//   Idle        — 평소 (호흡 멈춤 또는 약한 호흡)
+//   Exhalation  — 호기 (pressure > +threshold)
+//   inhalation  — 흡기 (pressure < -threshold, 차후 차압 센서 활성화 후)
 //
-// rive 0.14.x API:
-//   File.asset(path, riveFactory: Factory.flutter) — 비동기 로드 (nullable)
-//   RiveWidgetController(file) — 기본 artboard + 기본 state machine
-//   RiveWidget(controller: ctrl, fit: Fit.contain) — 렌더
-//   file.dispose() + controller.dispose() — 위젯 dispose 시 호출 필수
+// 커스텀 [_BreathingAnimationPainter] 가 매 frame `_phase` 에 해당하는
+// animation 을 advanceAndApply. State Machine 은 사용 안 함 (BreathingSM
+// 에 호흡 input 이 노출되지 않아 직접 animation 전환이 더 깔끔).
 //
 // .riv 가 없거나 로딩 실패하면 [fallback] 위젯으로 안전 분기 (예: BreathOrb).
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:rive/rive.dart';
+import 'package:rive/rive.dart' as rive;
 
 import 'growth_stage.dart';
 
@@ -37,16 +36,25 @@ enum SessionState {
   complete,
 }
 
+/// 호흡 phase — pressure 값에서 도출.
+enum _BreathPhase { idle, exhale, inhale }
+
+/// pressure 절대값 < `_pressureThreshold` 면 호흡 정지로 간주.
+const double _pressureThreshold = 5.0;
+
 class OtterCharacter extends StatefulWidget {
   const OtterCharacter({
     super.key,
+    required this.pressure,
     required this.targetReached,
     required this.sessionState,
     required this.stage,
     this.fallback,
     this.assetPath = 'assets/character/seal.riv',
-    this.stateMachineName = 'BreathingSM',
   });
+
+  /// 현재 호흡 압력 (cmH₂O). 양수 = 호기, 음수 = 흡기, |값| < 5 = 정지.
+  final double pressure;
 
   /// 목표 구간 진입 여부 — 차후 .riv 의 celebrate state 트리거용.
   final bool targetReached;
@@ -62,45 +70,52 @@ class OtterCharacter extends StatefulWidget {
 
   final String assetPath;
 
-  /// 차후 입력 wiring 시 사용. 현재는 기본 state machine 사용 (StateMachineDefault).
-  final String stateMachineName;
-
   @override
   State<OtterCharacter> createState() => _OtterCharacterState();
 }
 
 class _OtterCharacterState extends State<OtterCharacter> {
-  File? _riveFile;
-  RiveWidgetController? _controller;
+  rive.File? _riveFile;
+  rive.Artboard? _artboard;
+  late final _BreathingAnimationPainter _painter;
 
   @override
   void initState() {
     super.initState();
+    _painter = _BreathingAnimationPainter(
+      fit: rive.Fit.contain,
+      alignment: Alignment.center,
+    );
     _loadRive();
   }
 
-  /// rive 0.14 API: File.asset → RiveWidgetController. 에러 시 _controller
-  /// 가 null 로 남아 build 에서 fallback 분기.
+  /// rive 0.14 API: File.asset → 기본 artboard. 에러 시 _artboard null →
+  /// build 에서 fallback 분기.
   Future<void> _loadRive() async {
     if (widget.assetPath.isEmpty) return;
     try {
-      final file = await File.asset(
+      final file = await rive.File.asset(
         widget.assetPath,
-        riveFactory: Factory.flutter,
+        riveFactory: rive.Factory.flutter,
       );
       if (file == null) {
         debugPrint('OtterCharacter: .riv decoded as null');
         return;
       }
-      final controller = RiveWidgetController(file);
+      final artboard = file.defaultArtboard();
+      if (artboard == null) {
+        debugPrint('OtterCharacter: .riv has no default artboard');
+        file.dispose();
+        return;
+      }
       if (!mounted) {
-        controller.dispose();
+        artboard.dispose();
         file.dispose();
         return;
       }
       setState(() {
         _riveFile = file;
-        _controller = controller;
+        _artboard = artboard;
       });
     } catch (e) {
       debugPrint('OtterCharacter: .riv load failed → $e');
@@ -108,30 +123,92 @@ class _OtterCharacterState extends State<OtterCharacter> {
   }
 
   @override
+  void didUpdateWidget(covariant OtterCharacter oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _syncPhase();
+  }
+
+  /// pressure → _phase 매핑. 양압 호기 / 음압 흡기 / threshold 안쪽이면 idle.
+  void _syncPhase() {
+    final p = widget.pressure;
+    final _BreathPhase next;
+    if (p > _pressureThreshold) {
+      next = _BreathPhase.exhale;
+    } else if (p < -_pressureThreshold) {
+      next = _BreathPhase.inhale;
+    } else {
+      next = _BreathPhase.idle;
+    }
+    _painter.phase = next;
+  }
+
+  @override
   void dispose() {
-    _controller?.dispose();
+    _painter.dispose();
+    _artboard?.dispose();
     _riveFile?.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final controller = _controller;
-    if (controller != null) {
-      // 투명 배경 — 부모의 TimeBackground 그라데이션이 그대로 보임. 캐릭터
-      // 몸통이 흰색에 가까워서 흰 backdrop 을 깔면 가려지는 문제 해결.
+    final artboard = _artboard;
+    if (artboard != null) {
+      _syncPhase();
       // Transform.translate 로 물리적 시프트 — RiveWidget 의 alignment
       // 파라미터가 일부 케이스에서 적용 안 되는 이슈 회피. 40px 우측 이동.
       return Transform.translate(
         offset: const Offset(40, 0),
-        child: RiveWidget(
-          controller: controller,
-          fit: Fit.contain,
-          alignment: Alignment.center,
+        child: rive.RiveArtboardWidget(
+          artboard: artboard,
+          painter: _painter,
         ),
       );
     }
     // 로딩 중 / 실패 / asset 없음 — 모두 fallback (없으면 빈 SizedBox).
     return widget.fallback ?? const SizedBox.shrink();
+  }
+}
+
+/// 호기/흡기/idle 3개 animation 사이를 [phase] 값에 따라 전환하는 painter.
+/// rive 0.14 의 [rive.BasicArtboardPainter] 확장 — 매 frame `advance` 가
+/// 현재 phase 의 animation 을 advanceAndApply. State Machine 사용 안 함.
+base class _BreathingAnimationPainter extends rive.BasicArtboardPainter {
+  _BreathingAnimationPainter({
+    super.fit,
+    super.alignment,
+  });
+
+  rive.Animation? _idleAnim;
+  rive.Animation? _exhaleAnim;
+  rive.Animation? _inhaleAnim;
+  _BreathPhase _phase = _BreathPhase.idle;
+
+  set phase(_BreathPhase value) {
+    if (_phase != value) {
+      _phase = value;
+      // advance() 가 매 frame 호출되므로 별도 notifyListeners 불필요.
+    }
+  }
+
+  @override
+  void artboardChanged(rive.Artboard artboard) {
+    super.artboardChanged(artboard);
+    // .riv 의 animation 이름 정확히 매칭 — 디자이너 합의:
+    //   'Idle', 'Exhalation', 'inhalation' (i 소문자 주의).
+    _idleAnim = artboard.animationNamed('Idle');
+    _exhaleAnim = artboard.animationNamed('Exhalation');
+    _inhaleAnim = artboard.animationNamed('inhalation');
+    notifyListeners();
+  }
+
+  @override
+  bool advance(double elapsedSeconds) {
+    final anim = switch (_phase) {
+      _BreathPhase.idle => _idleAnim,
+      _BreathPhase.exhale => _exhaleAnim,
+      _BreathPhase.inhale => _inhaleAnim,
+    };
+    return anim?.advanceAndApply(elapsedSeconds) ?? false;
   }
 }

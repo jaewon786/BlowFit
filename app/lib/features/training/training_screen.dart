@@ -234,10 +234,11 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
                 const _DegradedSignalBanner(),
               ],
               const SizedBox(height: 8),
-              // OtterCharacter — seal.riv 가 캐릭터 + 풍선껌 idle 애니메이션
-              // 모두 포함. 화면 가용 영역 전체를 채움.
+              // OtterCharacter — seal.riv 의 호기/흡기/Idle 애니메이션을
+              // 현재 압력 값으로 자동 전환. 화면 가용 영역 전체를 채움.
               Expanded(
                 child: OtterCharacter(
+                  pressure: _current,
                   targetReached: targetReached,
                   sessionState: _toSessionState(_phase),
                   stage: growthStage,
