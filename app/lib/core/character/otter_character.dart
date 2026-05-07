@@ -122,11 +122,20 @@ class _OtterCharacterState extends State<OtterCharacter> {
   Widget build(BuildContext context) {
     final artboard = _artboard;
     if (artboard != null) {
-      // ClipRect — Rive artboard 가 부모 SizedBox 경계 밖으로 그려도 안 보이게
-      // 강제. 일부 .riv 파일은 자체 background fill 이나 outline 이 artboard
-      // 외부로 삐져나옴.
-      return ClipRect(
-        child: Rive(artboard: artboard, fit: BoxFit.contain),
+      // ClipRRect — 부모 SizedBox 경계 강제. radius 24 로 둥글게 처리해서
+      // .riv 의 자체 background fill 이 검정/흑색이라도 시각적으로 부드럽게
+      // 분리됨.
+      // ColoredBox(white) — Rive 가 일부만 칠하거나 background 가 비어 있을
+      // 때를 대비해 흰 배경으로 채움. 사용자 보고 (검은 사각형) 회피.
+      // Center — artboard 가 SizedBox 보다 작으면 가운데 정렬.
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(24),
+        child: ColoredBox(
+          color: const Color(0xFFFFFFFF),
+          child: Center(
+            child: Rive(artboard: artboard, fit: BoxFit.contain),
+          ),
+        ),
       );
     }
     // 로딩 중 / 실패 / asset 없음 — 모두 fallback (없으면 빈 SizedBox).
