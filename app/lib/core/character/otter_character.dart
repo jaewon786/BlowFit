@@ -128,17 +128,14 @@ class _OtterCharacterState extends State<OtterCharacter> {
     _syncPhase();
   }
 
-  /// pressure → _phase 매핑. 양압 호기 / 음압 흡기 / threshold 안쪽이면 idle.
+  /// pressure → _phase 매핑. 양압 호기 / 그 외 모두 흡기.
+  /// 흡기 하드웨어가 없는 동안 "호흡 멈춤" 도 흡기 애니메이션으로 표시 →
+  /// 사용자에게 자연스러운 들숨↔날숨 사이클 시뮬레이션.
   void _syncPhase() {
     final p = widget.pressure;
-    final _BreathPhase next;
-    if (p > _pressureThreshold) {
-      next = _BreathPhase.exhale;
-    } else if (p < -_pressureThreshold) {
-      next = _BreathPhase.inhale;
-    } else {
-      next = _BreathPhase.idle;
-    }
+    final next = p > _pressureThreshold
+        ? _BreathPhase.exhale
+        : _BreathPhase.inhale;
     _painter.phase = next;
   }
 
