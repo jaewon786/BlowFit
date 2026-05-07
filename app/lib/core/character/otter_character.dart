@@ -1,13 +1,15 @@
 // 호흡 캐릭터 위젯 — Rive 캐릭터 + 호기/흡기 압력 기반 애니메이션 전환.
 //
 // seal.riv 가 다음 3개 standalone animation 노출:
-//   Idle        — 평소 (호흡 멈춤 또는 약한 호흡)
+//   Idle        — 평소 (현재 사용 안 함)
 //   Exhalation  — 호기 (pressure > +threshold)
-//   inhalation  — 흡기 (pressure < -threshold, 차후 차압 센서 활성화 후)
+//   inhalation  — 흡기 (휴리스틱: 호기 끝나면 자동 시작)
 //
-// 커스텀 [_BreathingAnimationPainter] 가 매 frame `_phase` 에 해당하는
-// animation 을 advanceAndApply. State Machine 은 사용 안 함 (BreathingSM
-// 에 호흡 input 이 노출되지 않아 직접 animation 전환이 더 깔끔).
+// 흡기 센서가 없으므로 휴리스틱으로 흡기 시점 추정:
+//   호기 (pressure > +5)        → Exhalation 재생, 풍선 커짐
+//   호기 직후 0.5초              → Exhalation 마지막 frame 유지 (풍선 hold)
+//   호기 후 0.5~4.5초            → inhalation 재생, 풍선 작아짐
+//   호기 후 4.5초+ (또는 미호기) → inhalation 마지막 frame 유지 (풍선 hold)
 //
 // .riv 가 없거나 로딩 실패하면 [fallback] 위젯으로 안전 분기 (예: BreathOrb).
 
@@ -36,11 +38,29 @@ enum SessionState {
   complete,
 }
 
-/// 호흡 phase — pressure 값에서 도출.
-enum _BreathPhase { idle, exhale, inhale }
+/// 호흡 phase — painter 내부에서 압력 + 시간으로 결정.
+enum _BreathPhase {
+  /// 호기 중 — Exhalation 애니 진행.
+  exhaling,
 
-/// pressure 절대값 < `_pressureThreshold` 면 호흡 정지로 간주.
+  /// 호기 직후 0.5초 — Exhalation 마지막 frame 유지.
+  holdAfterExhale,
+
+  /// 흡기 중 (휴리스틱) — inhalation 애니 진행.
+  inhaling,
+
+  /// 호흡 멈춤 또는 초기 상태 — 마지막 frame 유지.
+  rest,
+}
+
+/// pressure 절대값 < `_pressureThreshold` (cmH₂O) 면 호기 아님.
 const double _pressureThreshold = 5.0;
+
+/// 호기 끝난 후 풍선이 잠시 유지되는 시간.
+const double _holdAfterExhaleSec = 0.5;
+
+/// 휴리스틱 흡기 phase 지속 시간 (호기 끝난 후 holdAfterExhaleSec 만큼 지나서부터).
+const double _inhaleDurationSec = 4.0;
 
 class OtterCharacter extends StatefulWidget {
   const OtterCharacter({
@@ -53,7 +73,8 @@ class OtterCharacter extends StatefulWidget {
     this.assetPath = 'assets/character/seal.riv',
   });
 
-  /// 현재 호흡 압력 (cmH₂O). 양수 = 호기, 음수 = 흡기, |값| < 5 = 정지.
+  /// 현재 호흡 압력 (cmH₂O). 양수 = 호기, |값|<5 = 정지.
+  /// 음압 (흡기) 데이터는 차후 차압 센서 도입 후 활성화.
   final double pressure;
 
   /// 목표 구간 진입 여부 — 차후 .riv 의 celebrate state 트리거용.
@@ -89,8 +110,6 @@ class _OtterCharacterState extends State<OtterCharacter> {
     _loadRive();
   }
 
-  /// rive 0.14 API: File.asset → 기본 artboard. 에러 시 _artboard null →
-  /// build 에서 fallback 분기.
   Future<void> _loadRive() async {
     if (widget.assetPath.isEmpty) return;
     try {
@@ -125,18 +144,7 @@ class _OtterCharacterState extends State<OtterCharacter> {
   @override
   void didUpdateWidget(covariant OtterCharacter oldWidget) {
     super.didUpdateWidget(oldWidget);
-    _syncPhase();
-  }
-
-  /// pressure → _phase 매핑. 양압 호기 / 그 외 모두 흡기.
-  /// 흡기 하드웨어가 없는 동안 "호흡 멈춤" 도 흡기 애니메이션으로 표시 →
-  /// 사용자에게 자연스러운 들숨↔날숨 사이클 시뮬레이션.
-  void _syncPhase() {
-    final p = widget.pressure;
-    final next = p > _pressureThreshold
-        ? _BreathPhase.exhale
-        : _BreathPhase.inhale;
-    _painter.phase = next;
+    _painter.pressure = widget.pressure;
   }
 
   @override
@@ -151,7 +159,7 @@ class _OtterCharacterState extends State<OtterCharacter> {
   Widget build(BuildContext context) {
     final artboard = _artboard;
     if (artboard != null) {
-      _syncPhase();
+      _painter.pressure = widget.pressure;
       // Transform.translate 로 물리적 시프트 — RiveWidget 의 alignment
       // 파라미터가 일부 케이스에서 적용 안 되는 이슈 회피. 40px 우측 이동.
       return Transform.translate(
@@ -162,48 +170,50 @@ class _OtterCharacterState extends State<OtterCharacter> {
         ),
       );
     }
-    // 로딩 중 / 실패 / asset 없음 — 모두 fallback (없으면 빈 SizedBox).
     return widget.fallback ?? const SizedBox.shrink();
   }
 }
 
-/// 호기/흡기/idle 3개 animation 사이를 [phase] 값에 따라 전환하는 painter.
-/// rive 0.14 의 [rive.BasicArtboardPainter] 확장 — 매 frame `advance` 가
-/// 현재 phase 의 animation 을 advanceAndApply. State Machine 사용 안 함.
+/// 호기/흡기 휴리스틱 phase machine + animation 적용 painter.
+///
+/// 매 frame `advance` 가 다음을 수행:
+///   1) pressure 가 +threshold 초과면 호기 (exhaling)
+///   2) 호기 직후 0.5초는 hold (exhale 마지막 frame 유지)
+///   3) 호기 후 0.5~4.5초는 흡기 (inhaling, 휴리스틱)
+///   4) 그 외엔 rest (마지막 frame 유지)
+///
+/// 활성 phase (exhaling/inhaling) 에서는 animation time 진행 + 끝나면 멈춤.
+/// hold/rest phase 에서는 animation 을 advance 하지 않고 현재 time 의
+/// frame 만 apply → 풍선 크기 유지, 캐릭터 모션도 정지.
 base class _BreathingAnimationPainter extends rive.BasicArtboardPainter {
   _BreathingAnimationPainter({
     super.fit,
     super.alignment,
   });
 
-  rive.Animation? _idleAnim;
   rive.Animation? _exhaleAnim;
   rive.Animation? _inhaleAnim;
-  _BreathPhase _phase = _BreathPhase.idle;
 
-  set phase(_BreathPhase value) {
-    if (_phase != value) {
-      _phase = value;
-      // 새 phase 의 animation 을 time = 0 에서 재시작. 이전 재생이 끝까지
-      // 갔으면 (One Shot) time 이 duration 에 멈춰 있어 재진입 시 진행
-      // 안 함 → 매 phase 전환 시 강제 리셋해 자연스러운 재생.
-      final newAnim = switch (value) {
-        _BreathPhase.idle => _idleAnim,
-        _BreathPhase.exhale => _exhaleAnim,
-        _BreathPhase.inhale => _inhaleAnim,
-      };
-      if (newAnim != null) {
-        newAnim.time = 0;
-      }
-    }
-  }
+  /// 현재 호흡 압력 (cmH₂O). 위젯이 prop 변경 시 setter 로 주입.
+  double _pressure = 0.0;
+
+  set pressure(double value) => _pressure = value;
+
+  /// 직전 frame 에서 호기 중이었는지. 전환 감지용.
+  bool _wasExhaling = false;
+
+  /// 한 번이라도 호기 했는지. 첫 호기 전엔 흡기 휴리스틱 적용 안 함.
+  bool _hasExhaled = false;
+
+  /// 호기가 끝난 시점 이후 경과 초.
+  double _timeSinceExhaleEnd = 0.0;
+
+  /// 직전 frame 의 phase. 전환 시 새 애니 time=0 초기화 트리거.
+  _BreathPhase _previousPhase = _BreathPhase.rest;
 
   @override
   void artboardChanged(rive.Artboard artboard) {
     super.artboardChanged(artboard);
-    // .riv 의 animation 이름 정확히 매칭 — 디자이너 합의:
-    //   'Idle', 'Exhalation', 'inhalation' (i 소문자 주의).
-    _idleAnim = artboard.animationNamed('Idle');
     _exhaleAnim = artboard.animationNamed('Exhalation');
     _inhaleAnim = artboard.animationNamed('inhalation');
     notifyListeners();
@@ -211,18 +221,77 @@ base class _BreathingAnimationPainter extends rive.BasicArtboardPainter {
 
   @override
   bool advance(double elapsedSeconds) {
-    final anim = switch (_phase) {
-      _BreathPhase.idle => _idleAnim,
-      _BreathPhase.exhale => _exhaleAnim,
-      _BreathPhase.inhale => _inhaleAnim,
+    // 1) 시간 추적 — 호기 → 호기 종료 전환 감지 + 경과 초 누적.
+    final isExhaling = _pressure > _pressureThreshold;
+    if (_wasExhaling && !isExhaling) {
+      // 호기 → 호기 아님 전환: 타이머 리셋.
+      _timeSinceExhaleEnd = 0.0;
+      _hasExhaled = true;
+    } else if (!isExhaling) {
+      _timeSinceExhaleEnd += elapsedSeconds;
+    }
+    _wasExhaling = isExhaling;
+
+    // 2) 현재 phase 결정.
+    final phase = _computePhase(isExhaling);
+
+    // 3) phase 전환 시 새 애니 time=0 으로 리셋 (활성 phase 만).
+    if (phase != _previousPhase) {
+      _onPhaseEnter(phase);
+      _previousPhase = phase;
+    }
+
+    // 4) phase 별로 animation apply.
+    return _applyPhase(phase, elapsedSeconds);
+  }
+
+  _BreathPhase _computePhase(bool isExhaling) {
+    if (isExhaling) return _BreathPhase.exhaling;
+    if (!_hasExhaled) return _BreathPhase.rest;
+    if (_timeSinceExhaleEnd < _holdAfterExhaleSec) {
+      return _BreathPhase.holdAfterExhale;
+    }
+    if (_timeSinceExhaleEnd < _holdAfterExhaleSec + _inhaleDurationSec) {
+      return _BreathPhase.inhaling;
+    }
+    return _BreathPhase.rest;
+  }
+
+  /// phase 전환 시 — 활성 phase 진입이면 새 애니 time=0 리셋.
+  void _onPhaseEnter(_BreathPhase to) {
+    switch (to) {
+      case _BreathPhase.exhaling:
+        _exhaleAnim?.time = 0;
+      case _BreathPhase.inhaling:
+        _inhaleAnim?.time = 0;
+      case _BreathPhase.holdAfterExhale:
+      case _BreathPhase.rest:
+        // hold/rest — 애니 그대로 두고 마지막 frame 유지.
+        break;
+    }
+  }
+
+  bool _applyPhase(_BreathPhase phase, double elapsedSeconds) {
+    final anim = switch (phase) {
+      _BreathPhase.exhaling => _exhaleAnim,
+      _BreathPhase.holdAfterExhale => _exhaleAnim,
+      _BreathPhase.inhaling => _inhaleAnim,
+      _BreathPhase.rest => _inhaleAnim,
     };
     if (anim == null) return false;
-    // advanceAndApply 가 false 반환 = 애니메이션 끝남 (One Shot).
-    // 같은 phase 가 유지되는 동안 화면이 멈추지 않도록 강제 loop —
-    // time=0 으로 리셋해 다음 frame 부터 처음부터 재생.
-    final stillRunning = anim.advanceAndApply(elapsedSeconds);
-    if (!stillRunning) {
-      anim.time = 0;
+
+    final isActive = phase == _BreathPhase.exhaling ||
+        phase == _BreathPhase.inhaling;
+
+    if (isActive) {
+      // 활성 phase — 시간 진행 + 끝까지 가면 마지막 frame 유지 (loop 안 함).
+      final stillRunning = anim.advanceAndApply(elapsedSeconds);
+      if (!stillRunning) {
+        anim.time = anim.duration;
+      }
+    } else {
+      // hold/rest — 시간 진행 안 하고 현재 frame 만 apply (풍선 크기 유지).
+      anim.apply();
     }
     return true;
   }
