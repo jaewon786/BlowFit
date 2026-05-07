@@ -1,8 +1,6 @@
 import 'dart:async';
-import 'dart:collection';
 import 'dart:math' as math;
 
-import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -16,7 +14,6 @@ import '../../core/db/db_providers.dart';
 import '../../core/models/pressure_sample.dart';
 import '../../core/storage/storage_providers.dart';
 import '../../core/theme/blowfit_colors.dart';
-import '../../core/theme/blowfit_widgets.dart';
 
 class TrainingScreen extends ConsumerStatefulWidget {
   const TrainingScreen({super.key});
@@ -26,15 +23,12 @@ class TrainingScreen extends ConsumerStatefulWidget {
 }
 
 class _TrainingScreenState extends ConsumerState<TrainingScreen> {
-  static const _windowSec = 30;
   static const _defaultOrifice = OrificeLevel.medium;
   // 목표 압력 기본값 — Settings 에서 재정의되면 build() 에서 덮어씀.
   double _targetLow = 20.0;
   double _targetHigh = 30.0;
 
-  /// 차트 x = 세션 시작 후 경과 초. 샘플 도착 빈도(Real 200Hz / Fake 50Hz)와
-  /// 무관하게 wall-clock 과 1:1 로 진행함.
-  final Queue<FlSpot> _points = Queue();
+  /// 최신 호기 압력 (cmH₂O) — targetReached 계산용.
   double _current = 0;
   bool _sessionActive = false;
   DateTime? _sessionStart;
@@ -107,18 +101,9 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
   }
 
   void _addSample(PressureSample s) {
-    final start = _sessionStart;
-    if (start == null) return;
-    final elapsedSec =
-        DateTime.now().difference(start).inMilliseconds / 1000.0;
+    if (_sessionStart == null) return;
     setState(() {
       _current = s.cmH2O;
-      _points.add(FlSpot(elapsedSec, s.cmH2O));
-      // 슬라이딩 윈도우: 가장 최근 30초만 유지.
-      while (_points.isNotEmpty &&
-          _points.first.x < elapsedSec - _windowSec) {
-        _points.removeFirst();
-      }
       // endurance 는 _ticker (1s) 가 _current 기준으로 누적 — sample 단위 timing
       // 사용 안 함 (BLE packet jitter + zero-padding 영향 방지).
     });
@@ -146,7 +131,6 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
     }
     setState(() {
       _sessionActive = true;
-      _points.clear();
       _sessionStart = DateTime.now();
     });
     _ticker?.cancel();
@@ -213,21 +197,12 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
       _targetLow = zone.low.toDouble();
       _targetHigh = zone.high.toDouble();
     }
-    final elapsed = _sessionStart == null
-        ? Duration.zero
-        : DateTime.now().difference(_sessionStart!);
-    final elapsedSec = elapsed.inMilliseconds / 1000.0;
-    final visibleEnd =
-        elapsedSec < _windowSec ? _windowSec.toDouble() : elapsedSec;
-    final endX = visibleEnd.ceilToDouble();
-    final startX = (endX - _windowSec).clamp(0.0, double.infinity);
-
     // 펌웨어 set 진행도 — Metrics.setIndex / TOTAL_SETS. 디자인은 1/3 ~ 3/3.
     // 현재 firmware 가 setIndex 를 BLE 로 노출 안 해서 임시로 1 고정.
     const totalSets = 3;
     final currentSet = _sessionActive ? 1 : 1;
 
-    // phase 시작 후 elapsed 초 — BreathOrb 안 카운트업 숫자.
+    // phase 시작 후 elapsed 초 — BreathOrb (fallback) 안 카운트업 숫자.
     final phaseElapsedSec = _phaseStartedAt == null
         ? 0
         : DateTime.now().difference(_phaseStartedAt!).inSeconds;
@@ -260,10 +235,8 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
               ],
               const SizedBox(height: 8),
               // OtterCharacter — seal.riv 가 캐릭터 + 풍선껌 idle 애니메이션
-              // 모두 포함. .riv 미존재 시 BreathOrb fallback.
-              SizedBox(
-                width: 200,
-                height: 200,
+              // 모두 포함. 화면 가용 영역 전체를 채움.
+              Expanded(
                 child: OtterCharacter(
                   targetReached: targetReached,
                   sessionState: _toSessionState(_phase),
@@ -273,20 +246,6 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
                     phase: _phase,
                     sessionActive: _sessionActive,
                     elapsedSec: phaseElapsedSec,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: _LiveChart(
-                    points: _points,
-                    startX: startX,
-                    endX: endX,
-                    current: _current,
-                    targetLow: _targetLow,
-                    targetHigh: _targetHigh,
                   ),
                 ),
               ),
@@ -750,202 +709,3 @@ class _BreathOrbState extends State<_BreathOrb>
 
 }
 
-// ---------------------------------------------------------------------------
-// Bidirectional live chart — Y axis ±30 cmH2O, target zone band,
-// realtime current pressure label.
-// ---------------------------------------------------------------------------
-
-class _LiveChart extends StatelessWidget {
-  const _LiveChart({
-    required this.points,
-    required this.startX,
-    required this.endX,
-    required this.current,
-    required this.targetLow,
-    required this.targetHigh,
-  });
-
-  final Queue<FlSpot> points;
-  final double startX;
-  final double endX;
-  final double current;
-  final double targetLow;
-  final double targetHigh;
-
-  // 디자인의 ±30 cmH2O 양방향 시각화를 따른다. 현재 하드웨어 (XGZP6847A005KPG)
-  // 는 양압만 측정하므로 음수 영역은 항상 비어있고, 차후 차압 센서로 교체 시
-  // 흡기 데이터가 자동으로 그래프 하단에 들어옴.
-  static const double _yMin = -30.0;
-  static const double _yMax = 30.0;
-
-  @override
-  Widget build(BuildContext context) {
-    return BlowfitCard(
-      padding: const EdgeInsets.fromLTRB(8, 14, 12, 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // 헤더 — 라벨 + 현재값 + 목표 구간 범례
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            child: Row(
-              children: [
-                const Text(
-                  '실시간 압력',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: BlowfitColors.ink,
-                  ),
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  '${current.toStringAsFixed(1)} cmH₂O',
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: BlowfitColors.blue500,
-                    fontFeatures: [FontFeature.tabularFigures()],
-                  ),
-                ),
-                const Spacer(),
-                Container(
-                  width: 8,
-                  height: 8,
-                  decoration: BoxDecoration(
-                    color: BlowfitColors.green100,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-                const SizedBox(width: 6),
-                const Text(
-                  '목표 구간',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: BlowfitColors.ink3,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 4),
-          Expanded(
-            child: LineChart(
-              LineChartData(
-                minY: _yMin,
-                maxY: _yMax,
-                minX: startX,
-                maxX: endX,
-                clipData: const FlClipData.all(),
-                gridData: FlGridData(
-                  show: true,
-                  drawVerticalLine: false,
-                  horizontalInterval: 10,
-                  getDrawingHorizontalLine: (v) {
-                    // y=0 baseline 은 더 진하게.
-                    final isZero = v.abs() < 0.01;
-                    return FlLine(
-                      color: isZero
-                          ? BlowfitColors.gray400
-                          : BlowfitColors.gray150,
-                      strokeWidth: isZero ? 1.2 : 1,
-                    );
-                  },
-                ),
-                borderData: FlBorderData(show: false),
-                titlesData: FlTitlesData(
-                  leftTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      reservedSize: 32,
-                      interval: 10,
-                      getTitlesWidget: (v, meta) {
-                        // -30, -20, ..., +30
-                        final n = v.round();
-                        final label = n > 0 ? '+$n' : '$n';
-                        return Padding(
-                          padding: const EdgeInsets.only(right: 6),
-                          child: SizedBox(
-                            width: 24,
-                            child: Text(
-                              label,
-                              textAlign: TextAlign.right,
-                              style: const TextStyle(
-                                fontSize: 10,
-                                color: BlowfitColors.ink3,
-                                fontFeatures: [FontFeature.tabularFigures()],
-                              ),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                  bottomTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      reservedSize: 22,
-                      interval: 5,
-                      getTitlesWidget: (v, meta) {
-                        final sec = v.round();
-                        if (sec < 0 || sec % 5 != 0) {
-                          return const SizedBox.shrink();
-                        }
-                        return Padding(
-                          padding: const EdgeInsets.only(top: 4),
-                          child: Text(
-                            sec == 0 ? '0' : '${sec}s',
-                            style: const TextStyle(
-                              fontSize: 10,
-                              color: BlowfitColors.ink3,
-                              fontFeatures: [FontFeature.tabularFigures()],
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                  topTitles: const AxisTitles(
-                      sideTitles: SideTitles(showTitles: false)),
-                  rightTitles: const AxisTitles(
-                      sideTitles: SideTitles(showTitles: false)),
-                ),
-                rangeAnnotations: RangeAnnotations(
-                  horizontalRangeAnnotations: [
-                    // 호기 (양압) 목표 구간.
-                    HorizontalRangeAnnotation(
-                      y1: targetLow,
-                      y2: targetHigh,
-                      color: const Color.fromRGBO(0, 191, 64, 0.12),
-                    ),
-                    // 흡기 (음압) 목표 구간 — 차후 흡기 센서 추가 시 활용.
-                    HorizontalRangeAnnotation(
-                      y1: -targetHigh,
-                      y2: -targetLow,
-                      color: const Color.fromRGBO(0, 191, 64, 0.08),
-                    ),
-                  ],
-                ),
-                lineBarsData: [
-                  LineChartBarData(
-                    spots: points.toList(growable: false),
-                    isCurved: true,
-                    curveSmoothness: 0.25,
-                    preventCurveOverShooting: true,
-                    color: BlowfitColors.blue500,
-                    barWidth: 2.5,
-                    dotData: const FlDotData(show: false),
-                    belowBarData: BarAreaData(
-                      show: true,
-                      color: const Color.fromRGBO(0, 102, 255, 0.06),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}

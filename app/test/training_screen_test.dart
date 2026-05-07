@@ -49,9 +49,6 @@ void main() {
     expect(find.text('훈련을 시작하세요'), findsOneWidget);
     // 세트 chip.
     expect(find.text('세트 '), findsOneWidget);
-    // 차트 헤더.
-    expect(find.text('실시간 압력'), findsOneWidget);
-    expect(find.text('목표 구간'), findsOneWidget);
     // 종료 버튼.
     expect(find.text('훈련 종료'), findsOneWidget);
   });

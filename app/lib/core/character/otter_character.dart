@@ -118,20 +118,11 @@ class _OtterCharacterState extends State<OtterCharacter> {
   Widget build(BuildContext context) {
     final controller = _controller;
     if (controller != null) {
-      // ClipRRect (radius 24) — boundary 명확히. ColoredBox(white) — Rive 가
-      // 일부만 칠하거나 background 가 비어 있을 때 흰 배경 강제. Center —
-      // artboard 가 SizedBox 보다 작으면 가운데 정렬.
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(24),
-        child: ColoredBox(
-          color: const Color(0xFFFFFFFF),
-          child: Center(
-            child: RiveWidget(
-              controller: controller,
-              fit: Fit.contain,
-            ),
-          ),
-        ),
+      // 투명 배경 — 부모의 TimeBackground 그라데이션이 그대로 보임. 캐릭터
+      // 몸통이 흰색에 가까워서 흰 backdrop 을 깔면 가려지는 문제 해결.
+      return RiveWidget(
+        controller: controller,
+        fit: Fit.contain,
       );
     }
     // 로딩 중 / 실패 / asset 없음 — 모두 fallback (없으면 빈 SizedBox).
