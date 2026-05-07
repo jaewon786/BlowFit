@@ -120,12 +120,15 @@ class _OtterCharacterState extends State<OtterCharacter> {
     if (controller != null) {
       // 투명 배경 — 부모의 TimeBackground 그라데이션이 그대로 보임. 캐릭터
       // 몸통이 흰색에 가까워서 흰 backdrop 을 깔면 가려지는 문제 해결.
-      // alignment x — artboard 자체의 viewport 가 왼쪽으로 offset 되어
-      // 있어 보상. 0.5 = 우측 50% 시프트. 너무 우측이면 0.4, 부족하면 0.6/0.7.
-      return RiveWidget(
-        controller: controller,
-        fit: Fit.contain,
-        alignment: const Alignment(0.5, 0),
+      // Transform.translate 로 물리적 시프트 — RiveWidget 의 alignment
+      // 파라미터가 일부 케이스에서 적용 안 되는 이슈 회피. 60px 우측 이동.
+      return Transform.translate(
+        offset: const Offset(60, 0),
+        child: RiveWidget(
+          controller: controller,
+          fit: Fit.contain,
+          alignment: Alignment.center,
+        ),
       );
     }
     // 로딩 중 / 실패 / asset 없음 — 모두 fallback (없으면 빈 SizedBox).
