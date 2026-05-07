@@ -75,11 +75,10 @@ class _OtterCharacterState extends State<OtterCharacter> {
   }
 
   /// `.riv` 직접 파싱 — 에러 시 _artboard 가 null 로 남아 fallback 으로 안전
-  /// 분기. 이름이 정확히 일치 안 해도 그림은 보이도록 다단계 폴백:
-  ///   1) [stateMachineName] 으로 SM controller 시도
-  ///   2) 실패 시 artboard 의 첫 번째 SM 으로 시도
-  ///   3) 그것도 없으면 첫 번째 animation 을 SimpleAnimation 으로 재생
-  ///   4) animation 도 없으면 controller 없이 artboard 만 (정적 렌더)
+  /// 분기. State Machine 우회 — SimpleAnimation 으로 'Idle' (또는 첫
+  /// animation) 만 재생. 일부 .riv (예: 호버/클릭 인터랙션 포함) 의 SM
+  /// 멀티 레이어 구조가 rive 패키지에서 RangeError 를 일으키는 경우 회피.
+  /// 현재 우리 use case 에선 SM input wiring 이 없어 이 단순화로 충분.
   /// `assetPath` 빈 문자열 → 즉시 종료 (테스트 우회용).
   Future<void> _loadRive() async {
     if (widget.assetPath.isEmpty) return;
@@ -87,33 +86,19 @@ class _OtterCharacterState extends State<OtterCharacter> {
       final file = await RiveFile.asset(widget.assetPath);
       final artboard = file.mainArtboard.instance();
 
-      // 1) 명시한 SM 이름 시도
-      var ctrl = StateMachineController.fromArtboard(
-        artboard,
-        widget.stateMachineName,
-      );
-
-      // 2) 실패 → 첫 번째 SM
-      if (ctrl == null && artboard.stateMachines.isNotEmpty) {
-        ctrl = StateMachineController.fromArtboard(
-          artboard,
-          artboard.stateMachines.first.name,
+      // 'Idle' animation 우선 검색 — 대소문자 무시. 없으면 첫 animation.
+      if (artboard.animations.isNotEmpty) {
+        final idle = artboard.animations.firstWhere(
+          (a) => a.name.toLowerCase() == 'idle',
+          orElse: () => artboard.animations.first,
         );
+        artboard.addController(SimpleAnimation(idle.name));
       }
-
-      if (ctrl != null) {
-        artboard.addController(ctrl);
-      } else if (artboard.animations.isNotEmpty) {
-        // 3) SM 없으면 첫 animation 을 SimpleAnimation 으로 직접 재생
-        artboard.addController(
-          SimpleAnimation(artboard.animations.first.name),
-        );
-      }
-      // 4) animation 도 없는 경우 controller 없이 artboard 만 — 정적 렌더.
 
       if (!mounted) return;
       setState(() => _artboard = artboard);
-    } catch (_) {
+    } catch (e) {
+      debugPrint('OtterCharacter: .riv load failed → $e');
       // _artboard 그대로 null → build 에서 fallback 렌더.
     }
   }
