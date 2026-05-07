@@ -4,8 +4,11 @@
 // Sappy seal — 물개가 풍선껌 부는 idle 애니메이션 포함). 풍선까지 .riv 안에
 // 그려져 있으므로 Flutter 측에서 추가 오버레이 없음.
 //
-// 차후 풍선 size 를 호흡 압력에 비례하게 만들고 싶으면, 디자이너가 .riv 의
-// State Machine 에 Number input (예: `balloonSize`) 을 노출 → 여기서 wiring.
+// rive 0.14.x API:
+//   File.asset(path, riveFactory: Factory.flutter) — 비동기 로드 (nullable)
+//   RiveWidgetController(file) — 기본 artboard + 기본 state machine
+//   RiveWidget(controller: ctrl, fit: Fit.contain) — 렌더
+//   file.dispose() + controller.dispose() — 위젯 dispose 시 호출 필수
 //
 // .riv 가 없거나 로딩 실패하면 [fallback] 위젯으로 안전 분기 (예: BreathOrb).
 
@@ -16,14 +19,9 @@ import 'package:rive/rive.dart';
 import 'growth_stage.dart';
 
 /// Rive 에셋 경로 — 테스트가 빈 문자열 또는 미존재 경로로 override 하면
-/// OtterCharacter 가 fallback 으로 안전 분기. 비동기 RiveFile 파싱 에러가
-/// 테스트 framework 로 전파되는 것을 방지.
-///
-/// 현재 빈 문자열 — seal.riv 가 rive 0.13 에서 paint-time RangeError 를
-/// 일으키는 호환성 이슈로 임시 우회. BreathOrb fallback 만 표시. .riv 가
-/// 단순화되거나 rive 0.14 API 로 마이그레이션 후 복원.
+/// OtterCharacter 가 fallback 으로 안전 분기.
 final characterAssetPathProvider = Provider<String>((ref) {
-  return ''; // 임시 우회 — Rive 호환성 이슈, BreathOrb fallback 사용
+  return 'assets/character/seal.riv';
 });
 
 /// 세션 진행 상태 — 차후 .riv 의 sessionState input 으로 매핑할 enum.
@@ -63,6 +61,8 @@ class OtterCharacter extends StatefulWidget {
   final Widget? fallback;
 
   final String assetPath;
+
+  /// 차후 입력 wiring 시 사용. 현재는 기본 state machine 사용 (StateMachineDefault).
   final String stateMachineName;
 
   @override
@@ -70,7 +70,8 @@ class OtterCharacter extends StatefulWidget {
 }
 
 class _OtterCharacterState extends State<OtterCharacter> {
-  Artboard? _artboard;
+  File? _riveFile;
+  RiveWidgetController? _controller;
 
   @override
   void initState() {
@@ -78,51 +79,57 @@ class _OtterCharacterState extends State<OtterCharacter> {
     _loadRive();
   }
 
-  /// `.riv` 직접 파싱 — 에러 시 _artboard 가 null 로 남아 fallback 으로 안전
-  /// 분기. State Machine 우회 — SimpleAnimation 으로 'Idle' (또는 첫
-  /// animation) 만 재생. 일부 .riv (예: 호버/클릭 인터랙션 포함) 의 SM
-  /// 멀티 레이어 구조가 rive 패키지에서 RangeError 를 일으키는 경우 회피.
-  /// 현재 우리 use case 에선 SM input wiring 이 없어 이 단순화로 충분.
-  /// `assetPath` 빈 문자열 → 즉시 종료 (테스트 우회용).
+  /// rive 0.14 API: File.asset → RiveWidgetController. 에러 시 _controller
+  /// 가 null 로 남아 build 에서 fallback 분기.
   Future<void> _loadRive() async {
     if (widget.assetPath.isEmpty) return;
     try {
-      final file = await RiveFile.asset(widget.assetPath);
-      final artboard = file.mainArtboard.instance();
-
-      // 'Idle' animation 우선 검색 — 대소문자 무시. 없으면 첫 animation.
-      if (artboard.animations.isNotEmpty) {
-        final idle = artboard.animations.firstWhere(
-          (a) => a.name.toLowerCase() == 'idle',
-          orElse: () => artboard.animations.first,
-        );
-        artboard.addController(SimpleAnimation(idle.name));
+      final file = await File.asset(
+        widget.assetPath,
+        riveFactory: Factory.flutter,
+      );
+      if (file == null) {
+        debugPrint('OtterCharacter: .riv decoded as null');
+        return;
       }
-
-      if (!mounted) return;
-      setState(() => _artboard = artboard);
+      final controller = RiveWidgetController(file);
+      if (!mounted) {
+        controller.dispose();
+        file.dispose();
+        return;
+      }
+      setState(() {
+        _riveFile = file;
+        _controller = controller;
+      });
     } catch (e) {
       debugPrint('OtterCharacter: .riv load failed → $e');
-      // _artboard 그대로 null → build 에서 fallback 렌더.
     }
   }
 
   @override
+  void dispose() {
+    _controller?.dispose();
+    _riveFile?.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final artboard = _artboard;
-    if (artboard != null) {
-      // ClipRRect — 부모 SizedBox 경계 강제. radius 24 로 둥글게 처리해서
-      // .riv 의 자체 background fill 이 검정/흑색이라도 시각적으로 부드럽게
-      // 분리됨.
-      // ColoredBox(white) — Rive 가 일부만 칠하거나 background 가 비어 있을
-      // 때를 대비해 흰 배경으로 채움. 사용자 보고 (검은 사각형) 회피.
-      // Center — artboard 가 SizedBox 보다 작으면 가운데 정렬.
+    final controller = _controller;
+    if (controller != null) {
+      // ClipRRect (radius 24) — boundary 명확히. ColoredBox(white) — Rive 가
+      // 일부만 칠하거나 background 가 비어 있을 때 흰 배경 강제. Center —
+      // artboard 가 SizedBox 보다 작으면 가운데 정렬.
       return ClipRRect(
         borderRadius: BorderRadius.circular(24),
         child: ColoredBox(
           color: const Color(0xFFFFFFFF),
           child: Center(
-            child: Rive(artboard: artboard, fit: BoxFit.contain),
+            child: RiveWidget(
+              controller: controller,
+              fit: Fit.contain,
+            ),
           ),
         ),
       );
