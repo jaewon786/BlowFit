@@ -120,9 +120,11 @@ class _OtterCharacterState extends State<OtterCharacter> {
     if (controller != null) {
       // 투명 배경 — 부모의 TimeBackground 그라데이션이 그대로 보임. 캐릭터
       // 몸통이 흰색에 가까워서 흰 backdrop 을 깔면 가려지는 문제 해결.
+      // alignment 명시 — artboard 가 약간 왼쪽으로 치우쳐 보이는 케이스 방어.
       return RiveWidget(
         controller: controller,
         fit: Fit.contain,
+        alignment: Alignment.center,
       );
     }
     // 로딩 중 / 실패 / asset 없음 — 모두 fallback (없으면 빈 SizedBox).
