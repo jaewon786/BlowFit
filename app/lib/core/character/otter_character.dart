@@ -121,9 +121,9 @@ class _OtterCharacterState extends State<OtterCharacter> {
       // 투명 배경 — 부모의 TimeBackground 그라데이션이 그대로 보임. 캐릭터
       // 몸통이 흰색에 가까워서 흰 backdrop 을 깔면 가려지는 문제 해결.
       // Transform.translate 로 물리적 시프트 — RiveWidget 의 alignment
-      // 파라미터가 일부 케이스에서 적용 안 되는 이슈 회피. 60px 우측 이동.
+      // 파라미터가 일부 케이스에서 적용 안 되는 이슈 회피. 40px 우측 이동.
       return Transform.translate(
-        offset: const Offset(60, 0),
+        offset: const Offset(40, 0),
         child: RiveWidget(
           controller: controller,
           fit: Fit.contain,
