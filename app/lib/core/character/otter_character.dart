@@ -18,8 +18,12 @@ import 'growth_stage.dart';
 /// Rive 에셋 경로 — 테스트가 빈 문자열 또는 미존재 경로로 override 하면
 /// OtterCharacter 가 fallback 으로 안전 분기. 비동기 RiveFile 파싱 에러가
 /// 테스트 framework 로 전파되는 것을 방지.
+///
+/// 현재 빈 문자열 — seal.riv 가 rive 0.13 에서 paint-time RangeError 를
+/// 일으키는 호환성 이슈로 임시 우회. BreathOrb fallback 만 표시. .riv 가
+/// 단순화되거나 rive 0.14 API 로 마이그레이션 후 복원.
 final characterAssetPathProvider = Provider<String>((ref) {
-  return 'assets/character/seal.riv';
+  return ''; // 임시 우회 — Rive 호환성 이슈, BreathOrb fallback 사용
 });
 
 /// 세션 진행 상태 — 차후 .riv 의 sessionState input 으로 매핑할 enum.
