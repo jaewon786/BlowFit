@@ -215,8 +215,11 @@ base class _BreathingAnimationPainter extends rive.BasicArtboardPainter {
   /// 호기가 끝난 시점 이후 경과 초.
   double _timeSinceExhaleEnd = 0.0;
 
-  /// 직전 frame 의 phase. 전환 시 새 애니 time=0 초기화 트리거.
+  /// 직전 frame 의 phase. 전환 시 active 애니 time=0 초기화 트리거.
   _BreathPhase _previousPhase = _BreathPhase.rest;
+
+  /// 직전 frame 에 실제로 apply 한 애니 — "active → after" 전환 감지용.
+  rive.Animation? _lastAppliedAnim;
 
   @override
   void artboardChanged(rive.Artboard artboard) {
@@ -266,40 +269,71 @@ base class _BreathingAnimationPainter extends rive.BasicArtboardPainter {
     return _BreathPhase.rest;
   }
 
-  /// phase 전환 시 — 새 애니 time=0 리셋해서 처음부터 재생.
+  /// phase 전환 시 — 액티브 phase 에 진입할 때만 active 애니 time=0 리셋.
+  /// hold/rest phase 에선 active 애니가 끝날 때까지 계속 재생 → 자연스러운
+  /// 마무리 후 after 애니로 자동 전환.
   void _onPhaseEnter(_BreathPhase to) {
     switch (to) {
       case _BreathPhase.exhaling:
         _exhaleAnim?.time = 0;
-      case _BreathPhase.holdAfterExhale:
-        _exhaleAfterAnim?.time = 0;
       case _BreathPhase.inhaling:
         _inhaleAnim?.time = 0;
+      case _BreathPhase.holdAfterExhale:
       case _BreathPhase.rest:
-        _inhaleAfterAnim?.time = 0;
+        // 즉시 리셋 안 함 — active 애니가 끝까지 재생된 후 after 애니
+        // 첫 진입 시 _applyPhase 가 자동 리셋.
+        break;
     }
   }
 
   bool _applyPhase(_BreathPhase phase, double elapsedSeconds) {
-    final anim = switch (phase) {
-      _BreathPhase.exhaling => _exhaleAnim,
-      _BreathPhase.holdAfterExhale => _exhaleAfterAnim,
-      _BreathPhase.inhaling => _inhaleAnim,
-      _BreathPhase.rest => _inhaleAfterAnim,
-    };
+    // exhaling/holdAfterExhale 은 같은 "호기 트랙" — Exhalation 미완이면
+    // 그것 계속 재생, 완료됐으면 Exhalation after 로 전환.
+    // inhaling/rest 는 같은 "흡기 트랙" — 동일 패턴.
+    final isExhaleTrack = phase == _BreathPhase.exhaling ||
+        phase == _BreathPhase.holdAfterExhale;
+
+    rive.Animation? anim;
+    bool isAfterAnim;
+    if (isExhaleTrack) {
+      final exhAnim = _exhaleAnim;
+      if (exhAnim != null && exhAnim.time < exhAnim.duration) {
+        anim = exhAnim;
+        isAfterAnim = false;
+      } else {
+        anim = _exhaleAfterAnim;
+        isAfterAnim = true;
+      }
+    } else {
+      final inhAnim = _inhaleAnim;
+      if (inhAnim != null && inhAnim.time < inhAnim.duration) {
+        anim = inhAnim;
+        isAfterAnim = false;
+      } else {
+        anim = _inhaleAfterAnim;
+        isAfterAnim = true;
+      }
+    }
+
     if (anim == null) return false;
 
-    final isActive = phase == _BreathPhase.exhaling ||
-        phase == _BreathPhase.inhaling;
+    // active → after 첫 전환 시 after 애니 time=0 리셋해서 처음부터.
+    if (anim != _lastAppliedAnim) {
+      if (isAfterAnim) {
+        anim.time = 0;
+      }
+      _lastAppliedAnim = anim;
+    }
 
     final stillRunning = anim.advanceAndApply(elapsedSeconds);
     if (!stillRunning) {
-      if (isActive) {
-        // 활성 phase — 풍선 max/min 에서 멈춤 (loop 안 함).
-        anim.time = anim.duration;
-      } else {
-        // hold/rest — "after" 애니는 캐릭터 idle 모션이라 계속 loop.
+      if (isAfterAnim) {
+        // hold/rest "after" 애니는 캐릭터 idle 이라 계속 loop.
         anim.time = 0;
+      } else {
+        // 액티브 애니는 풍선 max/min 에서 멈춤 — 다음 frame 에 자동으로
+        // after 애니로 분기.
+        anim.time = anim.duration;
       }
     }
     return true;
