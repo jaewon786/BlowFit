@@ -216,6 +216,14 @@ base class _BreathingAnimationPainter extends rive.BasicArtboardPainter {
       _BreathPhase.exhale => _exhaleAnim,
       _BreathPhase.inhale => _inhaleAnim,
     };
-    return anim?.advanceAndApply(elapsedSeconds) ?? false;
+    if (anim == null) return false;
+    // advanceAndApply 가 false 반환 = 애니메이션 끝남 (One Shot).
+    // 같은 phase 가 유지되는 동안 화면이 멈추지 않도록 강제 loop —
+    // time=0 으로 리셋해 다음 frame 부터 처음부터 재생.
+    final stillRunning = anim.advanceAndApply(elapsedSeconds);
+    if (!stillRunning) {
+      anim.time = 0;
+    }
+    return true;
   }
 }
