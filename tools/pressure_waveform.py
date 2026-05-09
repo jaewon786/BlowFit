@@ -1,17 +1,19 @@
-"""Realistic expiratory pressure waveform generator.
+"""Realistic bidirectional respiratory pressure waveform generator.
 
-Models one breathing cycle:
-  - Inhale (2.0 s): pressure stays near 0 (passive intake through flap valve)
-  - Exhale onset ramp (0.6 s): 0 -> peak
+Models one breathing cycle (v4.0 양방향 — XGZP6847A010KPGPN33 ±102 cmH₂O):
+  - Inhale (2.0 s): negative pressure (suction) bell curve 0 → -peak*0.75 → 0
+  - Exhale onset ramp (0.6 s): 0 → peak
   - Exhale hold (3.5 s): near peak with small jitter (target zone)
-  - Exhale release (0.5 s): peak -> 0
-  - Pause (0.8 s): 0
+  - Exhale release (0.5 s): peak → 0
+  - Pause (0.8 s): ~0
 
-Peak is configurable per orifice level.
+Peak is configurable per orifice level. v3.2 backward compat: set
+`bidirectional=False` to suppress negative pressure (양압 전용 시뮬레이션).
 """
 
 from __future__ import annotations
 
+import math
 import random
 from dataclasses import dataclass
 
@@ -26,6 +28,10 @@ class BreathingConfig:
     hold_sec: float = 3.5
     ramp_down_sec: float = 0.5
     pause_sec: float = 0.8
+    # v4.0 양방향 — 흡기 phase 에 음압 발생. False 면 v3.2 (양압 전용) 동작.
+    bidirectional: bool = True
+    # 흡기 peak 는 호기 peak 의 비율로 — 일반적으로 흡기근이 약함.
+    inhale_peak_ratio: float = 0.75
 
     @property
     def cycle_sec(self) -> float:
@@ -55,8 +61,13 @@ class WaveformGenerator:
         c = self.cfg
         start = 0.0
 
-        # Inhale
+        # Inhale — v4.0 양방향: bell curve 음압. v3.2: 거의 0 (passive).
         if t < start + c.inhale_sec:
+            if c.bidirectional:
+                # 0 → -peak*ratio → 0 over inhale_sec, smooth sin-bell.
+                x = (t - start) / c.inhale_sec  # 0 ~ 1
+                inhale_val = -math.sin(x * math.pi) * c.peak_cmh2o * c.inhale_peak_ratio
+                return inhale_val + self._noise(0.5)
             return self._noise(0.3)
         start += c.inhale_sec
 

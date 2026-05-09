@@ -124,10 +124,15 @@ class Device:
         return self.samples_sum / self.samples_active if self.samples_active else 0.0
 
     def tick_samples(self, dt_sec: float) -> list[float]:
-        """Advance waveform and update statistics."""
+        """Advance waveform and update statistics.
+
+        v4.0 양방향 — pressure 가 음수 (흡기) 도 가능. max_pressure / avg 통계는
+        호기 (양압) 기준으로 유지 (펌웨어 SessionSummary 의 maxPressure 가
+        호기 max). 흡기 통계는 차후 protocol 확장 시 분리.
+        """
         out = []
         for _ in range(SAMPLES_PER_PACKET):
-            p = max(0.0, self.wave.next_sample())
+            p = self.wave.next_sample()  # 양/음 모두 허용 — 양방향 차압 센서.
             out.append(p)
             if self.state == STATE_TRAIN:
                 if p > self.max_pressure:
