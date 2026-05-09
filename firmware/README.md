@@ -1,4 +1,16 @@
-# Firmware — BlowFit
+# Firmware — BlowFit (v3.2 / Legacy XIAO)
+
+> **⚠️ 하드웨어 마이그레이션 진행 중 (v3.2 → v4.0)**:
+> 본 폴더 (`firmware/`) 는 **v3.2 XIAO BLE nRF52840 + ST7735 0.96" + 양압
+> 전용 센서 (XGZP6847A005KPG)** 기반 코드. v4.0 으로 다음과 같이 변경됨:
+> - 보드: XIAO BLE nRF52840 → **LILYGO T-Display S3 (ESP32-S3, 240MHz, 16MB)**
+> - 디스플레이: 별도 ST7735 0.96" → **일체형 1.9" IPS 170×320 (ST7789V)**
+> - 센서: XGZP6847A005KPG (양압) → **XGZP6847A010KPGPN33 (양방향 ±102 cmH₂O)**
+> - GUI: 직접 그림 → **LVGL 9.x**
+> - BLE: ArduinoBLE (mbed) → **ESP32 BLE Arduino / NimBLE**
+>
+> v4.0 펌웨어는 `firmware-esp32/` 폴더에 별도 작업 (scaffold 진행 중).
+> 본 폴더는 v3.2 backup / reference 로 유지.
 
 Target: **Seeed XIAO BLE nRF52840** via Arduino IDE.
 

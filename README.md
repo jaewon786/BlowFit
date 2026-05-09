@@ -9,7 +9,7 @@
 
 ## 주요 기능
 
-- **펌웨어**: nRF52840 + 차압 센서 100Hz 샘플링, BLE 5.0 GATT (22B/패킷, 4종 char), 호스트 g++ 단위 테스트 28 케이스
+- **펌웨어 (v4.0 마이그레이션 중)**: ESP32-S3 (LILYGO T-Display S3) + **양방향 차압 센서** (XGZP6847A010KPGPN33, ±102 cmH₂O) + 1.9" IPS 일체형, BLE 5.0 GATT, LVGL 9.x. (현재 코드는 v3.2 XIAO BLE nRF52840 기준 — `firmware-esp32/` 로 마이그레이션 진행)
 - **앱**: 4탭 셸 (홈/기록/추이/프로필), 디자인 v2 (Pretendard + Wanted DS 토큰), Drift SQLite 영속화, 위젯·DB·pure 테스트 139 케이스
 - **실시간 훈련**: BreathOrb 호흡 가이드 + 압력 그래프 + phase 별 배경, 세션 종료 후 점수·통계·코칭 노트 자동 생성
 - **추이·마일스톤**: 일/주/월/년 4탭 + 5종 마일스톤 자동 감지 (첫 훈련, 7일 연속, 호기 20·25 cmH₂O 돌파, 30일 연속)
@@ -23,8 +23,9 @@ BlowFit/
 ├── app/               Flutter 앱 (Android 우선, lib/ + test/)
 │   ├── lib/core/      ble · db · coach · theme · storage
 │   └── lib/features/  9개 화면 (onboarding/connect/dashboard/training/...)
-├── firmware/          nRF52840 펌웨어 (Arduino IDE)
+├── firmware/          v3.2 펌웨어 — XIAO BLE nRF52840 (Arduino IDE, mbed BSP)
 │   └── tests/         g++ 호스트 단위 테스트 (CI 통과)
+├── firmware-esp32/    v4.0 펌웨어 — ESP32-S3 + LVGL (마이그레이션 중)
 ├── tools/             Python BLE 시뮬레이터 + 압력 파형 검증
 └── docs/              프로토콜 · 디자인 · 운영 SOP · 잔여 일정
     └── archive/       (히스토리)
