@@ -16,12 +16,11 @@
 #include "sensor.h"
 #include "display/lvgl_port.h"
 #include "display/theme.h"
+#include "display/screens/screen_standby.h"
 
-// ----- 전역 LVGL 위젯 핸들 (M3 부터 screens/ 모듈로 분리 예정) -----
-namespace {
-  lv_obj_t* g_label_pressure = nullptr;
-  lv_obj_t* g_label_status   = nullptr;
-}
+// ----- 전역 상태 -----
+// (M3 까지의 hello 화면 전역 핸들은 screens/screen_standby.cpp 로 이동. M5+ 의
+// training 화면 등에서 필요시 별도 모듈로 분리.)
 
 // ----- 시리얼 + 디스플레이 전원 부트 보조 -----
 static void bootHardware() {
@@ -34,68 +33,9 @@ static void bootHardware() {
 }
 
 // ----- LVGL 초기 화면 빌드 -----
-static void buildHelloScreen() {
-#if HAS_LVGL
-  lv_obj_t* scr = lv_screen_active();
-  lv_obj_set_style_bg_color(scr, theme::color(theme::GRAY_900), 0);
-
-  // Title — BlowFit (영문, Pretendard Bold 28pt)
-  lv_obj_t* lbl_title = lv_label_create(scr);
-  lv_label_set_text(lbl_title, "BlowFit");
-  lv_obj_set_style_text_font(lbl_title, theme::font_28(), 0);
-  lv_obj_set_style_text_color(lbl_title, theme::color(0xFFFFFF), 0);
-  lv_obj_align(lbl_title, LV_ALIGN_TOP_MID, 0, 16);
-
-  // Subtitle — v4.0 (Pretendard Bold 20pt)
-  lv_obj_t* lbl_ver = lv_label_create(scr);
-  lv_label_set_text(lbl_ver, "v4.0");
-  lv_obj_set_style_text_font(lbl_ver, theme::font_20(), 0);
-  lv_obj_set_style_text_color(lbl_ver, theme::color(theme::BLUE_400), 0);
-  lv_obj_align(lbl_ver, LV_ALIGN_TOP_MID, 0, 52);
-
-  // M3 한글 status label — Pretendard
-  g_label_status = lv_label_create(scr);
-  lv_label_set_text(g_label_status, "준비 중");
-  lv_obj_set_style_text_font(g_label_status, theme::font_20(), 0);
-  lv_obj_set_style_text_color(g_label_status, theme::color(theme::GREEN_500), 0);
-  lv_obj_align(g_label_status, LV_ALIGN_TOP_MID, 0, 84);
-
-  // 한글 안내문 — 14pt
-  lv_obj_t* lbl_hint = lv_label_create(scr);
-  lv_label_set_text(lbl_hint, "강하게 내쉬세요");
-  lv_obj_set_style_text_font(lbl_hint, theme::font_14(), 0);
-  lv_obj_set_style_text_color(lbl_hint, theme::color(theme::GRAY_400), 0);
-  lv_obj_align(lbl_hint, LV_ALIGN_TOP_MID, 0, 116);
-
-  // Pressure live label — 가운데 큰 영문/숫자 (Montserrat 48pt)
-  g_label_pressure = lv_label_create(scr);
-  lv_label_set_text(g_label_pressure, "+0.0");
-  lv_obj_set_style_text_font(g_label_pressure, theme::font_big(), 0);
-  lv_obj_set_style_text_color(g_label_pressure, theme::color(theme::BLUE_400), 0);
-  lv_obj_align(g_label_pressure, LV_ALIGN_CENTER, 0, 20);
-
-  // cmH2O unit (영문/숫자)
-  lv_obj_t* lbl_unit = lv_label_create(scr);
-  lv_label_set_text(lbl_unit, "cmH2O");
-  lv_obj_set_style_text_font(lbl_unit, theme::font_14(), 0);
-  lv_obj_set_style_text_color(lbl_unit, theme::color(theme::GRAY_400), 0);
-  lv_obj_align(lbl_unit, LV_ALIGN_CENTER, 0, 78);
-
-  // 하단 한글 — "실시간 압력"
-  lv_obj_t* lbl_caption = lv_label_create(scr);
-  lv_label_set_text(lbl_caption, "실시간 압력");
-  lv_obj_set_style_text_font(lbl_caption, theme::font_14(), 0);
-  lv_obj_set_style_text_color(lbl_caption, theme::color(theme::INK_3), 0);
-  lv_obj_align(lbl_caption, LV_ALIGN_BOTTOM_MID, 0, -34);
-
-  // Footer — build time (영문)
-  lv_obj_t* lbl_build = lv_label_create(scr);
-  lv_label_set_text(lbl_build, __DATE__ " " __TIME__);
-  lv_obj_set_style_text_font(lbl_build, theme::font_14(), 0);
-  lv_obj_set_style_text_color(lbl_build, theme::color(theme::INK_3), 0);
-  lv_obj_align(lbl_build, LV_ALIGN_BOTTOM_MID, 0, -10);
-#endif
-}
+// buildHelloScreen() 는 M3 까지의 데모 화면. M4 부터는 screens/screen_standby
+// 가 담당. 이 함수는 호출하지 않음 (삭제 대신 reference 로 history 유지하려면
+// 별도 archive). 현재는 제거.
 
 // ----- Setup -----
 void setup() {
@@ -112,7 +52,10 @@ void setup() {
 
 #if HAS_LVGL
   lvgl_port::begin();
-  buildHelloScreen();
+  screens::standby_show();
+  // 부팅 직후엔 BLE 연결 없음, 배터리 측정 전 — 기본값.
+  screens::standby_set_connected(false);
+  screens::standby_set_battery(-1);
 #endif
 
   // 센서 영점 보정 (5초)
@@ -122,12 +65,6 @@ void setup() {
 
   pinMode(pins::VIBRATION, OUTPUT);
   pinMode(pins::LED_STATUS, OUTPUT);
-
-#if HAS_LVGL
-  if (g_label_status) {
-    lv_label_set_text(g_label_status, "대기");
-  }
-#endif
 
   Serial.println("Setup complete.");
 }
@@ -143,23 +80,12 @@ void loop() {
     sensor::tick();
   }
 
-  // 5Hz 시리얼 + LVGL label 갱신.
+  // 5Hz 시리얼 로깅 (디버그용). 화면 갱신은 각 screen 모듈이 담당.
   static uint32_t lastUpdateMs = 0;
   if (now - lastUpdateMs >= 200) {
     lastUpdateMs = now;
     const float p = sensor::currentCmH2O();
     Serial.printf("[%lu] P=%+6.2f cmH2O\n", now, p);
-
-#if HAS_LVGL
-    if (g_label_pressure) {
-      char buf[16];
-      snprintf(buf, sizeof(buf), "%+5.1f", p);
-      lv_label_set_text(g_label_pressure, buf);
-      // 부호에 따라 컬러 변경 — 호기=파랑, 흡기=보라
-      const uint32_t hex = (p >= 0) ? theme::BLUE_400 : theme::PURPLE_400;
-      lv_obj_set_style_text_color(g_label_pressure, theme::color(hex), 0);
-    }
-#endif
   }
 
   // LVGL tick — 60FPS 목표.
