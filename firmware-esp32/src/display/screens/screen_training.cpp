@@ -17,6 +17,8 @@ namespace {
   lv_obj_t* g_lbl_phase     = nullptr;
   lv_obj_t* g_lbl_remaining = nullptr;
   lv_obj_t* g_arc           = nullptr;     // Arc 게이지 — 압력 표시
+  lv_obj_t* g_zone_pos      = nullptr;     // 양압 zone marker (초록)
+  lv_obj_t* g_zone_neg      = nullptr;     // 음압 zone marker (초록)
   lv_obj_t* g_lbl_value     = nullptr;     // 게이지 중앙 큰 숫자
   lv_obj_t* g_lbl_unit      = nullptr;     // cmH2O
   lv_obj_t* g_lbl_hint      = nullptr;     // "강하게 내쉬세요" 안내문
@@ -32,6 +34,22 @@ namespace {
   // -300 ~ +300 range. value = pressure * 10.
   constexpr int16_t ARC_MIN = -300;
   constexpr int16_t ARC_MAX = +300;
+
+  // Arc bg track 각도 = 135° (왼쪽 아래) → 시계방향 270° → 45° (오른쪽 아래).
+  // 위쪽 90° 만 비움. v=-300 → 135°, v=0 → 270° (12시), v=+300 → 405° (= 45°).
+  constexpr int ARC_START_ANGLE = 135;
+  constexpr int ARC_TOTAL_DEG   = 270;
+
+  /// 압력값 (×10) → LVGL arc 각도 (도) 변환.
+  int angle_for_value(int v_x10) {
+    if (v_x10 < ARC_MIN) v_x10 = ARC_MIN;
+    if (v_x10 > ARC_MAX) v_x10 = ARC_MAX;
+    return ARC_START_ANGLE +
+           (v_x10 - ARC_MIN) * ARC_TOTAL_DEG / (ARC_MAX - ARC_MIN);
+  }
+
+  /// 압력 0 근처 deadzone — 정지로 간주 (시각적 회색).
+  constexpr float DEADZONE_CMH2O = 1.5f;
 
   /// Phase 별 색상 결정.
   uint32_t phase_color(TrainingPhase p) {
@@ -111,6 +129,31 @@ void training_show() {
   lv_obj_remove_style(g_arc, NULL, LV_PART_KNOB);
   lv_obj_clear_flag(g_arc, LV_OBJ_FLAG_CLICKABLE);
 
+  // ---------- 목표 zone marker (양압/음압 각각 별도 arc) ----------
+  auto make_zone_arc = [](lv_obj_t* parent) {
+    lv_obj_t* z = lv_arc_create(parent);
+    lv_obj_set_size(z, 150, 150);
+    lv_obj_align(z, LV_ALIGN_TOP_MID, 0, 64);
+    // 메인 arc 와 같은 box position. bg/box 모두 투명, indicator 만 표시.
+    lv_obj_set_style_bg_opa(z, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(z, 0, 0);
+    lv_obj_set_style_arc_opa(z, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_arc_color(z, theme::color(theme::GREEN_500), LV_PART_INDICATOR);
+    lv_obj_set_style_arc_width(z, 4, LV_PART_INDICATOR);
+    lv_obj_remove_style(z, NULL, LV_PART_KNOB);
+    lv_obj_clear_flag(z, LV_OBJ_FLAG_CLICKABLE);
+    return z;
+  };
+  g_zone_pos = make_zone_arc(scr);
+  g_zone_neg = make_zone_arc(scr);
+  // 각도 설정 — 양압 [low, high], 음압 [-high, -low].
+  const int a_pos_lo = angle_for_value((int)(g_target_low  * 10));
+  const int a_pos_hi = angle_for_value((int)(g_target_high * 10));
+  const int a_neg_lo = angle_for_value((int)(-g_target_high * 10));
+  const int a_neg_hi = angle_for_value((int)(-g_target_low  * 10));
+  lv_arc_set_angles(g_zone_pos, a_pos_lo, a_pos_hi);
+  lv_arc_set_angles(g_zone_neg, a_neg_lo, a_neg_hi);
+
   // 게이지 중앙 큰 압력 숫자
   g_lbl_value = lv_label_create(scr);
   lv_label_set_text(g_lbl_value, "+0.0");
@@ -137,8 +180,8 @@ void training_show() {
   lv_obj_align(g_progress_bar, LV_ALIGN_BOTTOM_MID, 0, -26);
   lv_bar_set_range(g_progress_bar, 0, 100);
   lv_bar_set_value(g_progress_bar, 0, LV_ANIM_OFF);
-  lv_obj_set_style_bg_color(g_progress_bar, theme::color(theme::GRAY_700), LV_PART_MAIN);
-  lv_obj_set_style_bg_color(g_progress_bar, theme::color(theme::BLUE_500), LV_PART_INDICATOR);
+  lv_obj_set_style_bg_color(g_progress_bar, theme::color(theme::GRAY_500), LV_PART_MAIN);
+  lv_obj_set_style_bg_color(g_progress_bar, theme::color(theme::BLUE_400), LV_PART_INDICATOR);
   lv_obj_set_style_radius(g_progress_bar, 3, LV_PART_MAIN);
   lv_obj_set_style_radius(g_progress_bar, 3, LV_PART_INDICATOR);
 
@@ -163,13 +206,18 @@ void training_set_pressure(float cmH2O) {
   std::snprintf(buf, sizeof(buf), "%+.1f", cmH2O);
   lv_label_set_text(g_lbl_value, buf);
 
+  // 압력 0 근처 — deadzone (정지).
+  const bool stopped = (cmH2O > -DEADZONE_CMH2O && cmH2O < DEADZONE_CMH2O);
   // 목표 zone 안인지 판정 (양압/음압 모두).
-  const bool in_zone =
-      (cmH2O >= g_target_low  && cmH2O <= g_target_high) ||
-      (cmH2O <= -g_target_low && cmH2O >= -g_target_high);
+  const bool in_zone = !stopped &&
+      ((cmH2O >= g_target_low  && cmH2O <= g_target_high) ||
+       (cmH2O <= -g_target_low && cmH2O >= -g_target_high));
 
-  // indicator 컬러 — zone 안이면 초록, 밖이면 phase 컬러.
-  const uint32_t color = in_zone ? theme::GREEN_500 : phase_color(g_phase);
+  // indicator + 숫자 컬러 — 정지=회색 / zone 안=초록 / 밖=phase 색.
+  uint32_t color;
+  if (stopped)        color = theme::GRAY_400;
+  else if (in_zone)   color = theme::GREEN_500;
+  else                color = phase_color(g_phase);
   lv_obj_set_style_arc_color(g_arc, theme::color(color), LV_PART_INDICATOR);
   lv_obj_set_style_text_color(g_lbl_value, theme::color(color), 0);
 }
@@ -210,7 +258,16 @@ void training_set_progress(uint8_t percent, uint8_t current_set, uint8_t total_s
 void training_set_target(float low, float high) {
   g_target_low  = low;
   g_target_high = high;
-  // M6+ 에서 arc 의 zone 강조 area 추가 예정 (lv_arc 의 secondary indicator).
+  if (g_zone_pos) {
+    const int a_lo = angle_for_value((int)(low  * 10));
+    const int a_hi = angle_for_value((int)(high * 10));
+    lv_arc_set_angles(g_zone_pos, a_lo, a_hi);
+  }
+  if (g_zone_neg) {
+    const int a_lo = angle_for_value((int)(-high * 10));
+    const int a_hi = angle_for_value((int)(-low  * 10));
+    lv_arc_set_angles(g_zone_neg, a_lo, a_hi);
+  }
 }
 
 }  // namespace screens
