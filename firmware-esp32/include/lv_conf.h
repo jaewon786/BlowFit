@@ -16,6 +16,15 @@
 #define LV_USE_DRAW_SW         1
 #define LV_DRAW_SW_COMPLEX     1
 
+// SW renderer ASM 가속 = NONE (ESP32-S3 Xtensa 는 ARM NEON/Helium 미지원 →
+// 명시 안 하면 LVGL 빌드 시스템이 helium .S 파일을 Xtensa 어셈블러로 컴파일
+// 시도하면서 "unknown opcode 'typedef'" 에러 발생.)
+#define LV_DRAW_SW_ASM_NONE    0
+#define LV_DRAW_SW_ASM_NEON    1
+#define LV_DRAW_SW_ASM_HELIUM  2
+#define LV_DRAW_SW_ASM_CUSTOM  255
+#define LV_DRAW_SW_ASM         LV_DRAW_SW_ASM_NONE
+
 // LVGL 내부 메모리 풀 — PSRAM 활용 가능하지만 일단 internal heap 48KB.
 #define LV_MEM_CUSTOM          0
 #define LV_MEM_SIZE            (48 * 1024)
@@ -64,8 +73,11 @@
 #define LV_LOG_LEVEL           LV_LOG_LEVEL_WARN
 #define LV_LOG_PRINTF          1     // printf() 로 출력 → 시리얼
 
-#define LV_USE_PERF_MONITOR    1     // FPS / CPU% 화면 우하단 표시 (개발용)
-#define LV_USE_MEM_MONITOR     0     // (M2 이후 필요시 켬)
+// PERF_MONITOR / MEM_MONITOR — M2 (LVGL 통합) 단계에서 활성 예정. M1 빌드 통과
+// 우선이라 default 0 으로 둠. (1 로 두면 LVGL internal default 와 redefine
+// 경고 발생 — 본질적 문제는 아니지만 로그 노이즈)
+#define LV_USE_PERF_MONITOR    0
+#define LV_USE_MEM_MONITOR     0
 
 // ============================================================================
 // 기타
