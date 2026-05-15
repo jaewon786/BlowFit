@@ -1,64 +1,84 @@
-// BlowFit v4.0 펌웨어 — M1 milestone (PlatformIO + TFT_eSPI hello world).
+// BlowFit v4.0 펌웨어 — M2 milestone (LVGL 통합).
 //
-// 이 단계 (M1) 의 목표:
-//   - PlatformIO 빌드 통과
-//   - T-Display S3 세로 화면 (170×320) 켜짐
-//   - "BlowFit v4.0" + 빌드 시각 표시
-//   - 100Hz 센서 tick 동작 + 시리얼로 현재 압력 출력
+// 이 단계 (M2) 의 목표:
+//   - lvgl_port 모듈로 LVGL <-> TFT_eSPI 결합
+//   - 더블 버퍼링 (PSRAM 우선) + 60FPS 목표
+//   - "BlowFit v4.0 / Hello LVGL" 라벨 위젯 표시
+//   - 실시간 압력값을 LVGL label 로 갱신 (5Hz)
+//   - 우상단 LVGL perf monitor (FPS / CPU%) 표시
 //
-// 다음 단계 (M2): LVGL 통합 — flush 콜백 + 더블 버퍼 + perf monitor.
+// 다음 단계 (M3): 한글 폰트 (Pretendard subset) + theme tokens + screen 모듈화.
 
 #include <Arduino.h>
+#include <lvgl.h>
+
 #include "config.h"
 #include "sensor.h"
+#include "display/lvgl_port.h"
 
-#if HAS_DISPLAY
-  #include <TFT_eSPI.h>
-  static TFT_eSPI tft;
-#endif
-
-#if HAS_BLE
-  // M8 에서 ble_service.cpp 로 분리. 지금은 placeholder.
-  // #include <BLEDevice.h>
-#endif
+// ----- 전역 LVGL 위젯 핸들 (M3 부터 screens/ 모듈로 분리 예정) -----
+namespace {
+  lv_obj_t* g_label_pressure = nullptr;
+  lv_obj_t* g_label_status   = nullptr;
+}
 
 // ----- 시리얼 + 디스플레이 전원 부트 보조 -----
 static void bootHardware() {
 #if HAS_DISPLAY
-  // 1. LDO 전원 enable (GPIO15 HIGH) — 배터리 모드 필수.
-  //    USB 전원만 쓸 때는 이미 HIGH 일 수 있지만 명시적으로 한다.
+  // LDO 전원 enable (GPIO15 HIGH) — 배터리 모드 필수.
   pinMode(pins::TFT_POWER_ON, OUTPUT);
   digitalWrite(pins::TFT_POWER_ON, HIGH);
   delay(50);  // LDO 안정화 대기
-
-  // 2. TFT 초기화 + 세로 모드.
-  tft.init();
-  tft.setRotation(display::ROTATION);
-  tft.fillScreen(TFT_BLACK);
-
-  // 3. 백라이트는 TFT_eSPI 가 Setup206 의 TFT_BL 핀으로 자동 ON.
 #endif
 }
 
-// ----- 디버그 화면 그리기 (M2 에서 LVGL 로 대체) -----
-static void drawBootScreen() {
-#if HAS_DISPLAY
-  tft.fillScreen(TFT_BLACK);
-  tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.setTextSize(2);
-  tft.setTextDatum(TC_DATUM);  // top-center
+// ----- LVGL 초기 화면 빌드 -----
+static void buildHelloScreen() {
+#if HAS_LVGL
+  lv_obj_t* scr = lv_screen_active();
+  lv_obj_set_style_bg_color(scr, lv_color_hex(0x111111), 0);
 
-  const int cx = display::SCREEN_W / 2;
+  // Title — BlowFit
+  lv_obj_t* lbl_title = lv_label_create(scr);
+  lv_label_set_text(lbl_title, "BlowFit");
+  lv_obj_set_style_text_font(lbl_title, &lv_font_montserrat_28, 0);
+  lv_obj_set_style_text_color(lbl_title, lv_color_hex(0xFFFFFF), 0);
+  lv_obj_align(lbl_title, LV_ALIGN_TOP_MID, 0, 16);
 
-  tft.drawString("BlowFit", cx, 24);
-  tft.drawString("v4.0", cx, 50);
+  // Subtitle — v4.0
+  lv_obj_t* lbl_ver = lv_label_create(scr);
+  lv_label_set_text(lbl_ver, "v4.0");
+  lv_obj_set_style_text_font(lbl_ver, &lv_font_montserrat_16, 0);
+  lv_obj_set_style_text_color(lbl_ver, lv_color_hex(0x5C8CFF), 0);
+  lv_obj_align(lbl_ver, LV_ALIGN_TOP_MID, 0, 54);
 
-  tft.setTextSize(1);
-  tft.drawString("M1: TFT_eSPI OK", cx, 90);
-  tft.drawString(__DATE__, cx, 110);
-  tft.drawString(__TIME__, cx, 124);
+  // M2 status label
+  g_label_status = lv_label_create(scr);
+  lv_label_set_text(g_label_status, "M2: LVGL Hello");
+  lv_obj_set_style_text_font(g_label_status, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(g_label_status, lv_color_hex(0x00BF40), 0);
+  lv_obj_align(g_label_status, LV_ALIGN_TOP_MID, 0, 84);
 
-  tft.drawString("Calibrating zero...", cx, 160);
+  // Pressure live label — 가운데 큰 글씨.
+  g_label_pressure = lv_label_create(scr);
+  lv_label_set_text(g_label_pressure, "+0.0");
+  lv_obj_set_style_text_font(g_label_pressure, &lv_font_montserrat_48, 0);
+  lv_obj_set_style_text_color(g_label_pressure, lv_color_hex(0x5C8CFF), 0);
+  lv_obj_align(g_label_pressure, LV_ALIGN_CENTER, 0, 20);
+
+  // cmH2O unit
+  lv_obj_t* lbl_unit = lv_label_create(scr);
+  lv_label_set_text(lbl_unit, "cmH2O");
+  lv_obj_set_style_text_font(lbl_unit, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(lbl_unit, lv_color_hex(0xA1A1A1), 0);
+  lv_obj_align(lbl_unit, LV_ALIGN_CENTER, 0, 80);
+
+  // Footer — build time
+  lv_obj_t* lbl_build = lv_label_create(scr);
+  lv_label_set_text(lbl_build, __DATE__ " " __TIME__);
+  lv_obj_set_style_text_font(lbl_build, &lv_font_montserrat_12, 0);
+  lv_obj_set_style_text_color(lbl_build, lv_color_hex(0x6B7280), 0);
+  lv_obj_align(lbl_build, LV_ALIGN_BOTTOM_MID, 0, -10);
 #endif
 }
 
@@ -68,28 +88,30 @@ void setup() {
   delay(200);
   Serial.println();
   Serial.println("=========================================");
-  Serial.println("BlowFit v4.0 — ESP32-S3 / T-Display S3");
+  Serial.println("BlowFit v4.0 - ESP32-S3 / T-Display S3");
   Serial.println("Build: " __DATE__ " " __TIME__);
+  Serial.println("M2: LVGL integration");
   Serial.println("=========================================");
 
   bootHardware();
-  drawBootScreen();
 
-  // 센서 영점 보정 (5초, 사용자가 마우스피스 안 물고 있어야 함)
-  Serial.println("Calibrating zero (5s, do not breathe into mouthpiece)...");
+#if HAS_LVGL
+  lvgl_port::begin();
+  buildHelloScreen();
+#endif
+
+  // 센서 영점 보정 (5초)
+  Serial.println("Calibrating zero (5s)...");
   sensor::calibrateZero();
   Serial.printf("Zero offset = %.2f cmH2O\n", sensor::zeroOffset());
 
   pinMode(pins::VIBRATION, OUTPUT);
   pinMode(pins::LED_STATUS, OUTPUT);
 
-#if HAS_DISPLAY
-  tft.fillRect(0, 150, display::SCREEN_W, 50, TFT_BLACK);
-  tft.setTextDatum(TC_DATUM);
-  tft.setTextSize(1);
-  tft.setTextColor(TFT_GREEN, TFT_BLACK);
-  tft.drawString("Ready.", display::SCREEN_W / 2, 160);
-  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+#if HAS_LVGL
+  if (g_label_status) {
+    lv_label_set_text(g_label_status, "Ready");
+  }
 #endif
 
   Serial.println("Setup complete.");
@@ -106,28 +128,29 @@ void loop() {
     sensor::tick();
   }
 
-  // 5Hz 시리얼 출력 + 디스플레이 디버그.
-  static uint32_t lastDrawMs = 0;
-  if (now - lastDrawMs >= 200) {
-    lastDrawMs = now;
+  // 5Hz 시리얼 + LVGL label 갱신.
+  static uint32_t lastUpdateMs = 0;
+  if (now - lastUpdateMs >= 200) {
+    lastUpdateMs = now;
     const float p = sensor::currentCmH2O();
     Serial.printf("[%lu] P=%+6.2f cmH2O\n", now, p);
 
-#if HAS_DISPLAY
-    // 화면 가운데에 큰 글씨로 현재 압력 표시 (M2 LVGL 도착 전 임시).
-    tft.fillRect(0, 200, display::SCREEN_W, 60, TFT_BLACK);
-    tft.setTextDatum(MC_DATUM);
-    tft.setTextSize(3);
-    tft.setTextColor(p >= 0 ? TFT_CYAN : TFT_PINK, TFT_BLACK);
-    char buf[16];
-    snprintf(buf, sizeof(buf), "%+5.1f", p);
-    tft.drawString(buf, display::SCREEN_W / 2, 230);
-    tft.setTextSize(1);
-    tft.setTextColor(TFT_WHITE, TFT_BLACK);
-    tft.drawString("cmH2O", display::SCREEN_W / 2, 260);
+#if HAS_LVGL
+    if (g_label_pressure) {
+      char buf[16];
+      snprintf(buf, sizeof(buf), "%+5.1f", p);
+      lv_label_set_text(g_label_pressure, buf);
+      // 부호에 따라 컬러 변경 — exhale=blue, inhale=purple
+      lv_color_t color = (p >= 0) ? lv_color_hex(0x5C8CFF) : lv_color_hex(0xB084F2);
+      lv_obj_set_style_text_color(g_label_pressure, color, 0);
+    }
 #endif
   }
 
-  // 짧은 delay — BLE / WiFi 스택 시간 양보.
+  // LVGL tick — 60FPS 목표.
+#if HAS_LVGL
+  lvgl_port::tick();
+#endif
+
   delay(2);
 }
