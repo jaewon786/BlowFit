@@ -1,8 +1,26 @@
 # Firmware v4.0 — BlowFit (ESP32-S3)
 
-Target: **LILYGO T-Display S3 Touch** (ESP32-S3R8, 듀얼코어 240MHz, 16MB Flash, 8MB PSRAM, 1.9" IPS 170×320, 정전식 터치) via Arduino IDE.
+Target: **LILYGO T-Display S3** (ESP32-S3R8, 듀얼코어 240MHz, 16MB Flash, 8MB PSRAM, 1.9" IPS 170×320) — **PlatformIO** + Arduino framework.
+
+화면 방향: **세로 (170 × 320)** — `setRotation(0)`.
 
 > v3.2 (XIAO BLE nRF52840) 펌웨어는 [`../firmware/`](../firmware/) 에 backup 으로 유지. 본 폴더는 v4.0 마이그레이션 작업 디렉토리.
+
+## 개발 흐름 (마일스톤)
+
+| M | 내용 | 상태 |
+|---|---|---|
+| **M1** | PlatformIO 변환 + Setup206 + TFT_eSPI hello world | ✅ 현재 |
+| M2 | LVGL 통합 (flush 콜백 + 더블 버퍼 + perf monitor) | ⏳ |
+| M3 | 한글 폰트 (Pretendard subset) + theme tokens | ⏳ |
+| M4 | screen_standby 정적 UI | ⏳ |
+| M5 | screen_training + 압력 게이지 (시뮬레이션 입력) | ⏳ |
+| M6 | 실 sensor 통합 | ⏳ |
+| M7 | State machine + 화면 전환 | ⏳ |
+| M8 | BLE GATT service | ⏳ |
+| M9 | NVS + 영점 보정 화면 | ⏳ |
+| M10 | 햅틱 / LED / 버튼 입력 | ⏳ |
+| M11 | 폴리싱 + 전력 최적화 | ⏳ |
 
 ## 하드웨어 변경 요약 (v3.2 → v4.0)
 
@@ -16,55 +34,53 @@ Target: **LILYGO T-Display S3 Touch** (ESP32-S3R8, 듀얼코어 240MHz, 16MB Fla
 | Flash 영속화 | mbed BSP 미지원 → 미사용 | **NVS / LittleFS** (ESP32 native) |
 | 가격 | 122,600원 | **104,600원** (-18,000원) |
 
-## 1. Arduino IDE 설정
+## 1. PlatformIO 빌드 환경
 
-### 1.1 ESP32 보드 매니저 추가
+### 1.1 사전 설치
 
-File → Preferences → Additional Boards Manager URLs 에 추가:
+- **VSCode + PlatformIO IDE 확장** (가장 쉬움) 또는
+- **PlatformIO Core CLI** (`pip install platformio`)
+
+USB-Serial 드라이버는 ESP32-S3 의 USB-CDC 내장이라 별도 불필요 (Windows 가 자동 인식).
+
+### 1.2 디렉토리 구조
+
 ```
-https://espressif.github.io/arduino-esp32/package_esp32_index.json
-```
-
-Tools → Board → Boards Manager → `esp32 by Espressif Systems` 설치 (3.0+ 권장).
-
-### 1.2 보드 선택
-
-Tools → Board → ESP32 Arduino → **`Lilygo T Display S3`**
-
-### 1.3 빌드 설정
-
-| 항목 | 값 |
-|---|---|
-| Partition Scheme | 16M Flash (3MB APP / 9.9MB FATFS) |
-| USB CDC On Boot | **Enabled** |
-| Upload Speed | 921600 |
-| PSRAM | OPI PSRAM |
-
-## 2. 라이브러리 (Library Manager)
-
-| 라이브러리 | 용도 |
-|---|---|
-| **TFT_eSPI** (Bodmer) | 1.9" IPS 디스플레이 드라이버 |
-| **lvgl** (≥9.x) | GUI 위젯 (Arc, Bar, Label) |
-| ESP32 BLE Arduino (보드 패키지 포함) | BLE GATT |
-| Preferences (보드 패키지 포함) | NVS 영속화 |
-
-### 2.1 TFT_eSPI 설정
-
-`Arduino/libraries/TFT_eSPI/User_Setup_Select.h` 에서:
-```c
-//#include <User_Setup.h>          // 기본 비활성화
-#include <User_Setups/Setup206_LilyGo_T_Display_S3.h>  // 이거 활성화
+firmware-esp32/
+├── platformio.ini          ← 빌드 설정 (board, libs, build_flags)
+├── lv_conf.h               ← LVGL 설정 (외부 파일 — LV_CONF_PATH 로 참조)
+├── include/
+│   ├── config.h            ← 핀맵 + 상수 + enum
+│   └── sensor.h
+├── src/
+│   ├── main.cpp            ← setup() / loop()
+│   └── sensor.cpp          ← 압력 센서 + EMA + 영점 보정
+└── lib/
+    └── TFT_eSPI_Setup/
+        └── Setup206_LilyGo_T_Display_S3.h   ← TFT_eSPI 핀맵
 ```
 
-### 2.2 LVGL 9.x 설정
+### 1.3 빌드 / 업로드
 
-`Arduino/libraries/lvgl/src/lv_conf.h` 또는 `lv_conf_template.h` 복사 후 활성화:
-```c
-#define LV_COLOR_DEPTH 16
-#define LV_TICK_CUSTOM 1
-#define LV_USE_PERF_MONITOR 0
+```bash
+cd firmware-esp32
+
+pio run                     # 빌드
+pio run -t upload           # 빌드 + USB 업로드
+pio device monitor          # 시리얼 모니터 (115200)
+pio run -t clean            # 클린
+
+# VSCode: PlatformIO 좌측 사이드바의 Build / Upload / Monitor 버튼
 ```
+
+### 1.4 사용 라이브러리 (`platformio.ini` 의 `lib_deps`)
+
+| 라이브러리 | 버전 | 용도 |
+|---|---|---|
+| `bodmer/TFT_eSPI` | ^2.5.43 | 1.9" IPS 디스플레이 드라이버 (Setup206) |
+| `lvgl/lvgl` | ^9.2.2 | GUI 위젯 (M2 이후) |
+
+ESP32 BLE Arduino + Preferences 는 framework (arduino-esp32) 에 포함되어 별도 설치 불요.
 
 ## 3. 핀 매핑 (LILYGO T-Display S3)
 
@@ -83,11 +99,14 @@ Tools → Board → ESP32 Arduino → **`Lilygo T Display S3`**
 | 핀 | 용도 |
 |---|---|
 | GPIO5 | 디스플레이 RST |
-| GPIO6 | 디스플레이 CS |
 | GPIO7 | 디스플레이 DC |
-| **GPIO15** | **백라이트 — 배터리 모드 시 HIGH 필수** ⚠️ |
-| GPIO38 | 백라이트 PWM |
+| GPIO8 | 디스플레이 WR (쓰기 strobe) |
+| GPIO9 | 디스플레이 RD |
+| **GPIO15** | **LDO 전원 enable — 배터리 모드 HIGH 필수** ⚠️ (`pins::TFT_POWER_ON`) |
+| GPIO38 | 백라이트 PWM (TFT_eSPI 자동 제어) |
 | GPIO39~48 | 디스플레이 데이터 (8-bit 병렬) |
+| GPIO0 | 부트 버튼 (사용자 입력 활용 가능) |
+| GPIO14 | 사용자 버튼 |
 
 ## 4. 압력 센서 — XGZP6847A010KPGPN33
 
@@ -133,35 +152,37 @@ float cmH2O = kPa * 10.197;
 
 프로토콜 자체는 호환 — 앱 측 별도 변경 불필요.
 
-## 6. 폴더 구조 (계획)
+## 6. 폴더 구조 (M1 완료, 점진적 확장)
 
 ```
 firmware-esp32/
-├── firmware-esp32.ino        스케치 진입점 + LVGL 메인 루프
-├── config.h                  핀맵 + 상수 + enum
-├── ble_uuids.h              UUID (v3.2 firmware/ble_uuids.h 와 동일)
-├── sensor.{h,cpp}            압력 센서 + EMA + 영점 보정 (양방향)
-├── ui_lvgl.{h,cpp}           LVGL 위젯 (Arc 게이지, 압력값, 정보 라벨)
-├── state_machine.{h,cpp}     훈련 세션 상태·지표 (v3.2 와 거의 동일)
-├── feedback.{h,cpp}          진동 + LED 패턴
-├── ble_service.{h,cpp}       ESP32 BLE Arduino GATT
-├── storage.{h,cpp}           NVS (Preferences) 세션 이력 + 설정
-└── tests/                    호스트 g++ 단위 테스트 (v3.2 그대로 활용 가능)
+├── platformio.ini              빌드 설정
+├── lv_conf.h                   LVGL 설정 (M2~)
+├── include/
+│   ├── config.h                핀맵 + 상수 + enum + display::SCREEN_W/H (세로 170x320)
+│   └── sensor.h
+├── src/
+│   ├── main.cpp                setup() / loop() — M1: TFT_eSPI hello world
+│   ├── sensor.cpp              압력 센서 + EMA + 영점 보정 (양방향) — v3.2 그대로 포팅
+│   ├── display/                (M2~) LVGL 통합 layer + 화면들
+│   │   ├── lvgl_port.{h,cpp}
+│   │   ├── theme.{h,cpp}
+│   │   └── screens/
+│   │       ├── screen_standby.{h,cpp}
+│   │       ├── screen_calibrate.{h,cpp}
+│   │       ├── screen_training.{h,cpp}
+│   │       ├── screen_rest.{h,cpp}
+│   │       └── screen_summary.{h,cpp}
+│   ├── ble/                    (M8) BLE GATT service
+│   │   ├── ble_service.{h,cpp}
+│   │   └── ble_uuids.h
+│   ├── state_machine.{h,cpp}   (M7) 훈련 세션 상태·지표 (v3.2 firmware/state_machine.cpp 포팅)
+│   ├── feedback.{h,cpp}        (M10) 진동 + LED 패턴
+│   └── storage.{h,cpp}         (M9) NVS (Preferences) 세션 이력 + 설정
+└── lib/
+    └── TFT_eSPI_Setup/
+        └── Setup206_LilyGo_T_Display_S3.h   TFT_eSPI 핀맵 (build_flags 로 자동 include)
 ```
-
-## 7. 마이그레이션 작업 항목 (TODO)
-
-| 항목 | 상태 | 메모 |
-|---|---|---|
-| Arduino IDE + ESP32 보드 매니저 설치 | ⏳ 보드 도착 후 | |
-| TFT_eSPI Setup206 활성화 | ⏳ | LilyGo T-Display S3 |
-| Hello World — USB-C 인식 + 화면 출력 | ⏳ | Phase 1 |
-| 압력 센서 wiring + adcToCmH2O 검증 | ⏳ | Phase 2 |
-| LVGL 메인 화면 (원형 게이지) | ⏳ | Phase 3 |
-| BLE GATT — Pressure Stream + Session Control + State + Summary | ⏳ | Phase 4 |
-| State machine 포팅 (firmware/ 에서 그대로) | ⏳ | Phase 4 |
-| 케이스 통합 + 호흡 부품 + 누설 테스트 | ⏳ | Phase 5 |
-| Flutter 앱 BLE 연결 검증 | ⏳ | Phase 6 |
 
 ## 8. 주요 학습 항목 (컴공 팀원)
 

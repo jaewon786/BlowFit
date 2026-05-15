@@ -38,12 +38,17 @@ namespace pins {
 
   // 내장 — TFT_eSPI Setup206 가 자동 처리. 참고용으로만 명시:
   //   GPIO5  — TFT_RST
-  //   GPIO6  — TFT_CS
   //   GPIO7  — TFT_DC
-  //   GPIO15 — 백라이트 enable (배터리 모드 HIGH 필수)
-  //   GPIO38 — 백라이트 PWM
+  //   GPIO8  — TFT_WR (쓰기 strobe)
+  //   GPIO9  — TFT_RD
   //   GPIO39~48 — 8-bit 병렬 데이터
-  constexpr uint8_t TFT_BACKLIGHT_ENABLE = 15;
+  //   GPIO38 — 백라이트 PWM (TFT_BL, TFT_eSPI 가 직접 제어)
+  //   GPIO15 — LDO 전원 enable (배터리 모드 HIGH 필수, firmware setup() 직접 처리)
+  constexpr uint8_t TFT_POWER_ON = 15;  // LDO enable — 배터리 모드 필수
+
+  // 사용자 입력 버튼 (T-Display S3 내장)
+  constexpr uint8_t BUTTON_BOOT = 0;   // 부트 버튼
+  constexpr uint8_t BUTTON_USER = 14;  // 사용자 버튼
 
 }  // namespace pins
 
@@ -99,11 +104,14 @@ namespace ble {
 }  // namespace ble
 
 // ----- Display (LVGL) -----
+// 세로 모드 native — TFT_eSPI 의 setRotation(0) 기준.
+// (가로 모드 필요 시 setRotation(1) + SCREEN_W/H 스왑.)
 namespace display {
 
-  constexpr int16_t SCREEN_W = 320;  // T-Display S3 가로 모드
-  constexpr int16_t SCREEN_H = 170;
+  constexpr int16_t SCREEN_W = 170;  // T-Display S3 세로 모드
+  constexpr int16_t SCREEN_H = 320;
   constexpr uint8_t TARGET_FPS = 60;
+  constexpr uint8_t ROTATION   = 0;  // 0=세로 (USB 아래), 2=세로 뒤집힘
 
 }  // namespace display
 
