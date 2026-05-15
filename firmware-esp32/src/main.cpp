@@ -17,10 +17,20 @@
 #include "display/lvgl_port.h"
 #include "display/theme.h"
 #include "display/screens/screen_standby.h"
+#include "display/screens/screen_training.h"
 
 // ----- 전역 상태 -----
-// (M3 까지의 hello 화면 전역 핸들은 screens/screen_standby.cpp 로 이동. M5+ 의
-// training 화면 등에서 필요시 별도 모듈로 분리.)
+
+// 간이 state machine — M7 의 정식 state_machine 도입 전까지의 placeholder.
+// boot 후 standby 화면, 영점 보정 끝나면 일정 시간 후 자동으로 training 화면.
+enum class AppPhase : uint8_t { Standby, Training };
+static AppPhase g_app_phase = AppPhase::Standby;
+static uint32_t g_phase_started_ms = 0;
+
+// Training 화면 데모용 — 호기/흡기 turn 30s 씩 사이클.
+constexpr uint32_t TURN_EXHALE_MS = 30000;
+constexpr uint32_t TURN_INHALE_MS = 30000;
+constexpr uint32_t CYCLE_MS = TURN_EXHALE_MS + TURN_INHALE_MS;
 
 // ----- 시리얼 + 디스플레이 전원 부트 보조 -----
 static void bootHardware() {
@@ -66,6 +76,17 @@ void setup() {
   pinMode(pins::VIBRATION, OUTPUT);
   pinMode(pins::LED_STATUS, OUTPUT);
 
+#if HAS_LVGL
+  // 영점 보정 끝나면 바로 training 화면으로 전환 (데모 — M7 의 정식 state
+  // machine 이 도착하면 사용자 트리거 / BLE start_session opcode 로 전환).
+  screens::training_show();
+  screens::training_set_target(20.0f, 30.0f);
+  screens::training_set_phase(screens::TrainingPhase::Exhale, TURN_EXHALE_MS / 1000);
+  screens::training_set_progress(0, 1, 3);
+  g_app_phase = AppPhase::Training;
+  g_phase_started_ms = millis();
+#endif
+
   Serial.println("Setup complete.");
 }
 
@@ -80,12 +101,54 @@ void loop() {
     sensor::tick();
   }
 
-  // 5Hz 시리얼 로깅 (디버그용). 화면 갱신은 각 screen 모듈이 담당.
+  // 20Hz 압력 라벨/게이지 갱신 — LVGL 의 partial render 가 부드럽게 처리.
   static uint32_t lastUpdateMs = 0;
-  if (now - lastUpdateMs >= 200) {
+  if (now - lastUpdateMs >= 50) {
     lastUpdateMs = now;
     const float p = sensor::currentCmH2O();
+#if HAS_LVGL
+    if (g_app_phase == AppPhase::Training) {
+      screens::training_set_pressure(p);
+    }
+#endif
+  }
+
+  // 1Hz 시리얼 디버그 + phase 사이클 처리.
+  static uint32_t lastSecMs = 0;
+  if (now - lastSecMs >= 1000) {
+    lastSecMs = now;
+    const float p = sensor::currentCmH2O();
     Serial.printf("[%lu] P=%+6.2f cmH2O\n", now, p);
+
+#if HAS_LVGL
+    // 호기/흡기 cycle + 카운트다운 + 진행률.
+    if (g_app_phase == AppPhase::Training) {
+      const uint32_t elapsed = now - g_phase_started_ms;
+      const uint32_t in_cycle = elapsed % CYCLE_MS;
+      const bool is_exhale = in_cycle < TURN_EXHALE_MS;
+      const uint32_t remaining_ms = is_exhale
+          ? (TURN_EXHALE_MS - in_cycle)
+          : (CYCLE_MS - in_cycle);
+
+      // phase 전환 검지
+      static bool last_was_exhale = true;
+      if (is_exhale != last_was_exhale) {
+        last_was_exhale = is_exhale;
+        screens::training_set_phase(
+            is_exhale ? screens::TrainingPhase::Exhale
+                      : screens::TrainingPhase::Inhale,
+            remaining_ms / 1000);
+      } else {
+        screens::training_set_remaining(remaining_ms / 1000);
+      }
+
+      // 데모용 진행률 — 전체 4분 (240s) 의 % 로 가정.
+      uint32_t total_demo = 240000;
+      uint32_t pct = (elapsed * 100) / total_demo;
+      if (pct > 100) pct = 100;
+      screens::training_set_progress((uint8_t)pct, 1, 3);
+    }
+#endif
   }
 
   // LVGL tick — 60FPS 목표.
