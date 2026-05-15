@@ -1,9 +1,19 @@
-import 'dart:async';
-import 'dart:collection';
-import 'dart:math' as math;
+// 훈련 화면 v3 — Kirby 캐릭터 + 무한 스크롤 배경 + 거리 누적.
+//
+// 결정 (Q1~Q5):
+//   Q1: 목표 거리 = 1500m
+//   Q2: 걷기 속도 = 50 m/s (목표 zone 안에서만)
+//   Q3: 호기/흡기 시간 분할 — _exhalePeriodSec 동안 호기 turn, _inhalePeriodSec
+//        동안 흡기 turn 반복. 흡기 turn 일 때 센서 양압값을 음수로 뒤집어 표시
+//        (v3.2 하드웨어 임시 정책 — v4.0 양방향 센서 도입 후 제거 예정)
+//   Q4: 압력 바 범위 = -30 ~ +30 cmH₂O
+//   Q5: 별 위치는 화면 우측 시작 → 캐릭터 입 위치 (중앙 위쪽)
 
-import 'package:fl_chart/fl_chart.dart';
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart' show Ticker;
+import 'package:flutter/services.dart' show SystemUiOverlayStyle;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -12,7 +22,14 @@ import '../../core/ble/ble_providers.dart';
 import '../../core/models/pressure_sample.dart';
 import '../../core/storage/storage_providers.dart';
 import '../../core/theme/blowfit_colors.dart';
-import '../../core/theme/blowfit_widgets.dart';
+import 'widgets/celebration_overlay.dart';
+import 'widgets/infinite_scroll_background.dart';
+import 'widgets/kirby_character.dart';
+import 'widgets/pressure_bar_bottom.dart';
+import 'widgets/star_eating_overlay.dart';
+
+/// 호기/흡기 turn — Q3 시간 분할.
+enum _CycleTurn { exhale, inhale }
 
 class TrainingScreen extends ConsumerStatefulWidget {
   const TrainingScreen({super.key});
@@ -21,51 +38,56 @@ class TrainingScreen extends ConsumerStatefulWidget {
   ConsumerState<TrainingScreen> createState() => _TrainingScreenState();
 }
 
-class _TrainingScreenState extends ConsumerState<TrainingScreen> {
-  static const _windowSec = 30;
+class _TrainingScreenState extends ConsumerState<TrainingScreen>
+    with SingleTickerProviderStateMixin {
+  // ---- 정책 상수 ----
+  static const double _targetDistanceM = 1500;
+  static const double _walkingSpeedMps = 50;
   static const _defaultOrifice = OrificeLevel.medium;
-  // 목표 압력 기본값 — Settings 에서 재정의되면 build() 에서 덮어씀.
+  // 30s 호기 + 30s 흡기 사이클.
+  static const _exhalePeriodSec = 30.0;
+  static const _inhalePeriodSec = 30.0;
+  static const _cycleSec = _exhalePeriodSec + _inhalePeriodSec;
+
+  // ---- 목표 압력 zone (양수) ----
   double _targetLow = 20.0;
   double _targetHigh = 30.0;
 
-  /// 차트 x = 세션 시작 후 경과 초. 샘플 도착 빈도(Real 200Hz / Fake 50Hz)와
-  /// 무관하게 wall-clock 과 1:1 로 진행함.
-  final Queue<FlSpot> _points = Queue();
-  double _current = 0;
+  // ---- 세션 / 압력 상태 ----
+  /// 가장 최근 sensor raw 양압 (cmH₂O). 흡기 turn 일 때 displayPressure 에서
+  /// 음수로 뒤집어서 사용.
+  double _rawPressure = 0;
   bool _sessionActive = false;
   DateTime? _sessionStart;
-  Timer? _ticker;
-  // Summary 모달이 떴는지 추적. _stop() 의 watchdog 이 모달이 안 뜬 케이스에서만
-  // 강제로 홈 복귀하기 위해 사용.
+  Timer? _ticker1Hz;
+
+  // ---- Turn 전환 추적 — 호기↔흡기 변경 시 압력 0 reset + 짧은 transition. ----
+  _CycleTurn? _lastTurn;
+  DateTime? _turnChangedAt;
+  static const _turnTransitionMs = 500;
+
+  // ---- 거리 누적 (m). Ticker 기반 dt 적분. ----
+  late final Ticker _frameTicker;
+  Duration _lastFrameElapsed = Duration.zero;
+  double _distanceM = 0;
+  bool _celebrationShown = false;
+
+  // ---- 세션 종료 / 결과 화면 watchdog ----
   bool _summaryShown = false;
-
-  DeviceStateCode _phase = DeviceStateCode.standby;
-
-  /// 현재 phase 가 시작된 시점. BreathOrb 의 elapsed 카운트업에 사용.
-  DateTime? _phaseStartedAt;
 
   @override
   void initState() {
     super.initState();
-    ref.listenManual<AsyncValue<PressureSample>>(pressureSampleProvider, (_, next) {
-      next.whenData(_addSample);
+    _frameTicker = createTicker(_onFrame)..start();
+
+    ref.listenManual<AsyncValue<PressureSample>>(pressureSampleProvider, (_, n) {
+      n.whenData(_onSample);
     });
-    ref.listenManual<AsyncValue<SessionSummary>>(sessionSummaryProvider, (_, next) {
-      next.whenData(_showSummary);
+    ref.listenManual<AsyncValue<SessionSummary>>(sessionSummaryProvider, (_, n) {
+      n.whenData(_onSummary);
     });
-    ref.listenManual<AsyncValue<DeviceSnapshot>>(deviceStateProvider, (_, next) {
-      next.whenData((s) {
-        final newPhase = DeviceStateCode.fromByte(s.stateCode);
-        if (newPhase != _phase) {
-          setState(() {
-            _phase = newPhase;
-            _phaseStartedAt = DateTime.now();
-          });
-        }
-      });
-    });
-    ref.listenManual<AsyncValue<bool>>(connectionProvider, (_, next) {
-      next.whenData(_onConnectionChange);
+    ref.listenManual<AsyncValue<bool>>(connectionProvider, (_, n) {
+      n.whenData(_onConnectionChange);
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -77,20 +99,20 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
 
   @override
   void dispose() {
-    _ticker?.cancel();
+    _frameTicker.dispose();
+    _ticker1Hz?.cancel();
     super.dispose();
   }
+
+  // ---- BLE / 세션 관리 ----------------------------------------------------
 
   void _onConnectionChange(bool connected) {
     if (!connected && _sessionActive) {
       setState(() {
         _sessionActive = false;
-        _phase = DeviceStateCode.standby;
-        // 연결 끊김 시 timer 동결. _sessionStart 가 살아있으면 build() 가 매번
-        // now - _sessionStart 를 다시 계산해서 시간이 계속 흐름.
         _sessionStart = null;
       });
-      _ticker?.cancel();
+      _ticker1Hz?.cancel();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -102,35 +124,36 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
     }
   }
 
-  void _addSample(PressureSample s) {
-    final start = _sessionStart;
-    if (start == null) return;
-    final elapsedSec =
-        DateTime.now().difference(start).inMilliseconds / 1000.0;
+  void _onSample(PressureSample s) {
+    // Turn 전환 직후 짧은 transition window 동안에는 새 sensor 값 무시 — 압력바
+    // indicator 가 0 에서 점프 없이 다시 올라오도록.
+    final changed = _turnChangedAt;
+    if (changed != null) {
+      final since = DateTime.now().difference(changed).inMilliseconds;
+      if (since < _turnTransitionMs) return;
+    }
+    _rawPressure = s.cmH2O;
+    // setState 불필요 — _onFrame 에서 매 프레임 setState 함.
+  }
+
+  void _onSummary(SessionSummary s) {
+    if (!mounted) return;
+    _summaryShown = true;
     setState(() {
-      _current = s.cmH2O;
-      _points.add(FlSpot(elapsedSec, s.cmH2O));
-      // 슬라이딩 윈도우: 가장 최근 30초만 유지.
-      while (_points.isNotEmpty &&
-          _points.first.x < elapsedSec - _windowSec) {
-        _points.removeFirst();
-      }
-      // endurance 는 _ticker (1s) 가 _current 기준으로 누적 — sample 단위 timing
-      // 사용 안 함 (BLE packet jitter + zero-padding 영향 방지).
+      _sessionActive = false;
+      _sessionStart = null;
     });
+    _ticker1Hz?.cancel();
+    context.go('/result', extra: s);
   }
 
   Future<void> _start() async {
-    // startSession 직전에 목표 압력대를 다시 한 번 펌웨어로 푸시.
-    // (펌웨어 reboot 시 RAM 의 zone 이 default 로 리셋되는 케이스 안전망 —
-    // targetSyncProvider 의 connect-시 sync 가 timing 으로 못 잡았을 때 대비.)
     try {
       final store = await ref.read(targetSettingsStoreProvider.future);
       final zone = store.load();
       await ref.read(bleManagerProvider).setTarget(zone.low, zone.high);
-    } catch (_) {
-      // non-fatal — 펌웨어가 default zone (20-30) 으로 진행
-    }
+    } catch (_) {/* non-fatal */}
+
     try {
       await ref.read(bleManagerProvider).startSession(_defaultOrifice);
     } catch (e) {
@@ -142,34 +165,32 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
     }
     setState(() {
       _sessionActive = true;
-      _points.clear();
       _sessionStart = DateTime.now();
+      _distanceM = 0;
+      _celebrationShown = false;
+      _lastTurn = null;
+      _turnChangedAt = null;
+      _rawPressure = 0;
     });
-    _ticker?.cancel();
-    _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
+    _ticker1Hz?.cancel();
+    _ticker1Hz = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
-      // 1 초마다 setState — BreathOrb elapsed / chart elapsed 갱신.
-      // endurance 는 펌웨어 SessionSummary 에서 정확한 값으로 받음.
-      setState(() {
-      });
+      setState(() {});
     });
   }
 
-  Future<void> _stop() async {
+  Future<void> _stop({bool goHome = true}) async {
     await ref.read(bleManagerProvider).stopSession();
     setState(() {
       _sessionActive = false;
-      // build() 의 elapsed = now - _sessionStart 가 계속 커지지 않도록 동결.
       _sessionStart = null;
     });
-    _ticker?.cancel();
-    _summaryShown = false;
-    // Watchdog: SessionSummary BLE notify 가 도달 못 하는 케이스에서도 화면이
-    // 멈추지 않도록 4초 후에 modal 안 떴으면 홈으로 복귀.
+    _ticker1Hz?.cancel();
+    if (!goHome) return;
     Future.delayed(const Duration(seconds: 4), () {
       if (!mounted) return;
-      if (_sessionActive) return; // 새 세션 시작했으면 무시
-      if (_summaryShown) return;  // 모달 이미 떴으면 그대로 둠
+      if (_sessionActive) return;
+      if (_summaryShown) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('세션이 종료되었습니다. 기록 탭에서 결과를 확인하세요.'),
@@ -180,742 +201,562 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen> {
     });
   }
 
-  void _showSummary(SessionSummary s) {
-    if (!mounted) return;
-    _summaryShown = true;
-    setState(() {
-      _sessionActive = false;
-      _sessionStart = null;
-    });
-    _ticker?.cancel();
-    // Phase 5a: modal 대신 별도 결과 화면으로 이동. extra 로 summary 전달.
-    context.go('/result', extra: s);
+  // ---- Cycle / Distance --------------------------------------------------
+
+  /// 현재 cycle turn 계산 — 세션 시작 후 elapsed 기준.
+  _CycleTurn _currentTurn(double elapsedSec) {
+    final mod = elapsedSec % _cycleSec;
+    return mod < _exhalePeriodSec ? _CycleTurn.exhale : _CycleTurn.inhale;
   }
 
-  // _fmt / _phaseLabel 은 Phase 4-5a 에서 _BottomStats / _PhaseGuide 가 자체
-  // 포맷팅을 가져가서 더 이상 필요없음.
+  /// 현재 turn 의 남은 시간 (s).
+  double _remainingInTurn(double elapsedSec) {
+    final mod = elapsedSec % _cycleSec;
+    return mod < _exhalePeriodSec
+        ? _exhalePeriodSec - mod
+        : _cycleSec - mod;
+  }
+
+  void _onFrame(Duration elapsed) {
+    final dt = (elapsed - _lastFrameElapsed).inMicroseconds / 1e6;
+    _lastFrameElapsed = elapsed;
+    if (dt <= 0) return;
+    if (!_sessionActive) return;
+    if (_celebrationShown) return;
+
+    final start = _sessionStart;
+    if (start == null) return;
+    final elapsedSec =
+        DateTime.now().difference(start).inMilliseconds / 1000.0;
+    final turn = _currentTurn(elapsedSec);
+
+    // Turn 전환 검지 — 호기↔흡기 변경 시 압력 0 reset + transition window 시작.
+    if (_lastTurn != null && _lastTurn != turn) {
+      _rawPressure = 0;
+      _turnChangedAt = DateTime.now();
+    }
+    _lastTurn = turn;
+
+    final raw = _rawPressure;
+
+    // 호기 turn + 양압 zone 안일 때만 거리 누적. 흡기 turn 은 거리 증가 안 함
+    // (사용자 결정 — 흡기는 호흡 훈련 목적, 진행은 호기로만).
+    final inZoneAbs = raw >= _targetLow && raw <= _targetHigh;
+    final shouldWalk = inZoneAbs && turn == _CycleTurn.exhale;
+
+    if (shouldWalk) {
+      _distanceM += _walkingSpeedMps * dt;
+      if (_distanceM >= _targetDistanceM) {
+        _distanceM = _targetDistanceM;
+        _celebrationShown = true;
+        // 세션은 유지하고 modal 만 표시 — 사용자 "결과 보기" 버튼이 _stop 호출.
+      }
+    }
+
+    // setState 로 build 트리거. _onFrame 은 매 프레임 호출되므로 부드러운 갱신.
+    setState(() {});
+  }
+
+  // ---- Build --------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
     final connected = ref.watch(connectionProvider).valueOrNull ?? false;
-    // deviceStateProvider 는 _phase 갱신만을 위해 listen 했고 여기선 직접 안 씀.
     final health = ref.watch(bleHealthProvider).valueOrNull;
     final degraded = health?.isDegraded ?? false;
-    final zone = ref
-        .watch(targetSettingsStoreProvider)
-        .valueOrNull
-        ?.load();
+
+    final zone = ref.watch(targetSettingsStoreProvider).valueOrNull?.load();
     if (zone != null) {
       _targetLow = zone.low.toDouble();
       _targetHigh = zone.high.toDouble();
     }
-    final elapsed = _sessionStart == null
-        ? Duration.zero
-        : DateTime.now().difference(_sessionStart!);
+
+    final start = _sessionStart;
+    final elapsed =
+        start == null ? Duration.zero : DateTime.now().difference(start);
     final elapsedSec = elapsed.inMilliseconds / 1000.0;
-    final visibleEnd =
-        elapsedSec < _windowSec ? _windowSec.toDouble() : elapsedSec;
-    final endX = visibleEnd.ceilToDouble();
-    final startX = (endX - _windowSec).clamp(0.0, double.infinity);
 
-    // 펌웨어 set 진행도 — Metrics.setIndex / TOTAL_SETS. 디자인은 1/3 ~ 3/3.
-    // 현재 firmware 가 setIndex 를 BLE 로 노출 안 해서 임시로 1 고정.
-    const totalSets = 3;
-    final currentSet = _sessionActive ? 1 : 1;
+    final turn = _sessionActive ? _currentTurn(elapsedSec) : _CycleTurn.exhale;
+    final remaining = _sessionActive ? _remainingInTurn(elapsedSec) : 0.0;
 
-    // phase 시작 후 elapsed 초 — BreathOrb 안 카운트업 숫자.
-    final phaseElapsedSec = _phaseStartedAt == null
-        ? 0
-        : DateTime.now().difference(_phaseStartedAt!).inSeconds;
+    // displayPressure — 흡기 turn 이면 부호 뒤집기 (Q3 임시 정책).
+    final displayPressure =
+        turn == _CycleTurn.inhale ? -_rawPressure : _rawPressure;
 
-    return Scaffold(
-      // 디자인 v2 — phase 별 살짝 다른 배경색.
-      backgroundColor: _bgForPhase(_phase),
-      body: SafeArea(
-        child: Column(
-          children: [
-            _TrainingTopBar(
-              currentSet: currentSet,
-              totalSets: totalSets,
-              onClose: () => context.pop(),
-            ),
-            const SizedBox(height: 4),
-            _PhaseGuide(
-              phase: _phase,
-              sessionActive: _sessionActive,
-            ),
-            if (degraded) ...[
-              const SizedBox(height: 8),
-              const _DegradedSignalBanner(),
-            ],
-            const SizedBox(height: 8),
-            // BreathOrb — 디자인 v2 의 핵심 비주얼. 펌웨어 phase 가 train/rest
-            // 일 때 호흡 애니메이션, prep/standby 일 때 정적.
-            _BreathOrb(
-              phase: _phase,
-              sessionActive: _sessionActive,
-              elapsedSec: phaseElapsedSec,
-            ),
-            const SizedBox(height: 8),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: _LiveChart(
-                  points: _points,
-                  startX: startX,
-                  endX: endX,
-                  current: _current,
-                  targetLow: _targetLow,
-                  targetHigh: _targetHigh,
+    final inZoneAbs = _rawPressure >= _targetLow && _rawPressure <= _targetHigh;
+
+    // Kirby 동작 결정.
+    KirbyPhase kirbyPhase;
+    if (!_sessionActive) {
+      kirbyPhase = KirbyPhase.idle;
+    } else if (turn == _CycleTurn.exhale && inZoneAbs) {
+      kirbyPhase = KirbyPhase.exhale;
+    } else if (turn == _CycleTurn.inhale && inZoneAbs) {
+      kirbyPhase = KirbyPhase.inhale;
+    } else {
+      kirbyPhase = KirbyPhase.idle;
+    }
+
+    final walking = kirbyPhase == KirbyPhase.exhale;
+    final eatingStars = kirbyPhase == KirbyPhase.inhale;
+
+    // Idle 시 Rive 의 pressure 도 0 으로 강제 — Kirby.riv SM 이 pressure 값
+    // 자체로 호흡 state transition 하는 케이스 차단.
+    final pressureToKirby =
+        kirbyPhase == KirbyPhase.idle ? 0.0 : displayPressure;
+
+    // 레이아웃 상수.
+    // 풀밭 (가운데 갈색 길) 위치 = 화면 위에서 ~64% 지점.
+    // kirbyFootRatio: 작을수록 박스가 풀밭 라인 가까이 내려감 (박스 안 vertical
+    // center 정렬 + Rive artboard 가로형 → 박스 가운데가 캐릭터 실제 위치).
+    // 0.45 → 박스 가운데가 풀밭 라인에 정렬되어 캐릭터 발이 시각적으로 풀밭에.
+    // kirbyHorizontalShift: 가운데에서 왼쪽으로 70px 이동.
+    const kirbySize = 360.0;
+    const grassLineRatio = 0.64;
+    const kirbyFootRatio = 0.40;
+    const kirbyHorizontalShift = -70.0;
+
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.dark,
+        statusBarBrightness: Brightness.light,
+      ),
+      child: Scaffold(
+        body: LayoutBuilder(
+        builder: (context, constraints) {
+          final h = constraints.maxHeight;
+          final w = constraints.maxWidth;
+          final grassLineY = h * grassLineRatio;
+          final kirbyTop = grassLineY - kirbySize * kirbyFootRatio;
+          final kirbyLeft = (w - kirbySize) / 2 + kirbyHorizontalShift;
+          // Kirby 박스 안 입 위치 — 박스 top 으로부터 박스 height 의 ~38%
+          // (얼굴이 박스 위쪽 절반에 있음).
+          final mouthY = kirbyTop + kirbySize * 0.38;
+          // Alignment 좌표로 변환 (Stack 영역 = LayoutBuilder size).
+          final mouthAlignY = (mouthY / h) * 2 - 1;
+
+          return Stack(
+            children: [
+              // ---- 1) 무한 스크롤 배경 (전체 화면) ----
+              Positioned.fill(
+                child: InfiniteScrollBackground(
+                  walking: walking,
+                  speedMps: _walkingSpeedMps,
                 ),
               ),
-            ),
-            const SizedBox(height: 12),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-              child: SizedBox(
-                width: double.infinity,
-                child: FilledButton(
-                  onPressed: connected && _sessionActive ? _stop : null,
-                  child: const Text('훈련 종료'),
+
+              // ---- 2) Kirby 캐릭터 — 풀밭 라인에 발 닿도록 절대 px 좌표 ----
+              Positioned(
+                left: kirbyLeft,
+                top: kirbyTop,
+                width: kirbySize,
+                height: kirbySize,
+                child: KirbyCharacter(
+                  phase: kirbyPhase,
+                  pressure: pressureToKirby,
                 ),
+              ),
+
+              // ---- 3) 별 먹기 오버레이 (흡기 zone 시) ----
+              Positioned.fill(
+                child: StarEatingOverlay(
+                  active: eatingStars,
+                  mouthAlignment: Alignment(-0.05, mouthAlignY),
+                ),
+              ),
+
+              // ---- 4a) 통합 HUD — 화면 위쪽 stick, 좌우 여백 0 ----
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: SafeArea(
+                  bottom: false,
+                  child: _TrainingHud(
+                    currentMeters: _distanceM,
+                    targetMeters: _targetDistanceM,
+                    turn: turn,
+                    remainingSec: remaining,
+                    sessionActive: _sessionActive,
+                    pressure: displayPressure,
+                    targetLow: _targetLow,
+                    targetHigh: _targetHigh,
+                    degraded: degraded,
+                  ),
+                ),
+              ),
+
+              // ---- 4b) 종료 버튼 — 화면 아래 stick ----
+              Positioned(
+                left: 16,
+                right: 16,
+                bottom: 0,
+                child: SafeArea(
+                  top: false,
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        onPressed:
+                            connected && _sessionActive ? _stop : null,
+                        child: const Text('훈련 종료'),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+
+              // ---- 5) Celebration overlay (도달 시) ----
+              if (_celebrationShown)
+                CelebrationOverlay(
+                  distanceMeters: _distanceM,
+                  elapsed: elapsed,
+                  onContinue: () => _stop(goHome: true),
+                ),
+            ],
+          );
+        },
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 통합 HUD — 진행 거리 + Phase 배너 + 압력 바 한 카드. 화면 폭 100% + 위쪽 stick.
+// ---------------------------------------------------------------------------
+
+class _TrainingHud extends StatelessWidget {
+  const _TrainingHud({
+    required this.currentMeters,
+    required this.targetMeters,
+    required this.turn,
+    required this.remainingSec,
+    required this.sessionActive,
+    required this.pressure,
+    required this.targetLow,
+    required this.targetHigh,
+    required this.degraded,
+  });
+
+  final double currentMeters;
+  final double targetMeters;
+  final _CycleTurn turn;
+  final double remainingSec;
+  final bool sessionActive;
+  final double pressure;
+  final double targetLow;
+  final double targetHigh;
+  final bool degraded;
+
+  @override
+  Widget build(BuildContext context) {
+    // 외곽 흰 카드 제거 — 배경 이미지의 sky 가 위쪽 영역에 그대로 보이도록.
+    // Section 1 (진행거리) 은 카드 없이 sky 위 직접 표시 + 얇은 progress bar.
+    // Section 2 (Phase) 는 그라디언트 카드 그대로 (호기/흡기 컬러 cue).
+    // Section 3 (실시간 압력) 은 반투명 흰 카드 그대로 (sky 위 떠있는 느낌).
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+      child: Column(
+        children: [
+          // Section 1: 진행 거리 — sky 위 minimal.
+          _ProgressMinimal(
+            currentMeters: currentMeters,
+            targetMeters: targetMeters,
+          ),
+          const SizedBox(height: 14),
+          // Section 2: Phase 배너 (그라디언트 컬러).
+          _PhaseBanner(
+            turn: turn,
+            remainingSec: remainingSec,
+            sessionActive: sessionActive,
+          ),
+          const SizedBox(height: 12),
+          // Section 3: 실시간 압력 바 (반투명 흰 카드).
+          PressureBarBottom(
+            pressure: pressure,
+            targetLow: targetLow,
+            targetHigh: targetHigh,
+          ),
+          if (degraded) ...[
+            const SizedBox(height: 8),
+            const _DegradedSignalBanner(),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// 진행 거리 minimal — sky 위에 직접 표시 (카드 없음).
+class _ProgressMinimal extends StatelessWidget {
+  const _ProgressMinimal({
+    required this.currentMeters,
+    required this.targetMeters,
+  });
+
+  final double currentMeters;
+  final double targetMeters;
+
+  @override
+  Widget build(BuildContext context) {
+    final ratio = targetMeters <= 0
+        ? 0.0
+        : (currentMeters / targetMeters).clamp(0.0, 1.0);
+    final cur = currentMeters.clamp(0, targetMeters).round();
+    final tgt = targetMeters.round();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            const Icon(
+              Icons.flag_outlined,
+              size: 16,
+              color: BlowfitColors.gray800,
+            ),
+            const SizedBox(width: 6),
+            const Text(
+              '진행 거리',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: BlowfitColors.gray800,
+              ),
+            ),
+            const Spacer(),
+            Text(
+              '$cur',
+              style: const TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w800,
+                color: BlowfitColors.blue500,
+                fontFeatures: [FontFeature.tabularFigures()],
+              ),
+            ),
+            Text(
+              ' / $tgt m',
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: BlowfitColors.gray800,
+                fontFeatures: [FontFeature.tabularFigures()],
               ),
             ),
           ],
         ),
-      ),
+        const SizedBox(height: 6),
+        // 얇은 progress bar — sky 위 흰색 트랙 + 파란 fill.
+        ClipRRect(
+          borderRadius: BorderRadius.circular(2),
+          child: SizedBox(
+            height: 3,
+            child: Stack(
+              children: [
+                Container(color: const Color.fromRGBO(255, 255, 255, 0.55)),
+                FractionallySizedBox(
+                  widthFactor: ratio,
+                  heightFactor: 1,
+                  child: Container(color: BlowfitColors.blue500),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
-  }
-
-  /// phase 별 살짝 다른 배경 — 디자인 v2.
-  Color _bgForPhase(DeviceStateCode p) {
-    switch (p) {
-      case DeviceStateCode.train:
-        return const Color(0xFFF0F6FF); // 살짝 파랑
-      case DeviceStateCode.rest:
-        return const Color(0xFFF0FAFF); // 살짝 시안
-      default:
-        return BlowfitColors.bg;
-    }
   }
 }
 
 // ---------------------------------------------------------------------------
-// Top bar — close + set chip + (right side reserved for future pause)
+// Phase 배너 — 큰 카드, 호기/흡기 컬러 차별화 + 큰 카운트다운 숫자
 // ---------------------------------------------------------------------------
 
-class _TrainingTopBar extends StatelessWidget {
-  const _TrainingTopBar({
-    required this.currentSet,
-    required this.totalSets,
-    required this.onClose,
+class _PhaseBanner extends StatelessWidget {
+  const _PhaseBanner({
+    required this.turn,
+    required this.remainingSec,
+    required this.sessionActive,
   });
 
-  final int currentSet;
-  final int totalSets;
-  final VoidCallback onClose;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 52,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Row(
-        children: [
-          _CircleIconButton(icon: Icons.close, onTap: onClose),
-          const Spacer(),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(999),
-              boxShadow: BlowfitColors.shadowLevel1,
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text(
-                  '세트 ',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: BlowfitColors.ink,
-                  ),
-                ),
-                Text(
-                  '$currentSet',
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: BlowfitColors.blue500,
-                    fontFeatures: [FontFeature.tabularFigures()],
-                  ),
-                ),
-                Text(
-                  ' / $totalSets',
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: BlowfitColors.ink,
-                    fontFeatures: [FontFeature.tabularFigures()],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const Spacer(),
-          // 향후 일시정지 버튼 자리 — 현재는 빈 공간으로 close 버튼과 시각적 균형.
-          const SizedBox(width: 36),
-        ],
-      ),
-    );
-  }
-}
-
-class _CircleIconButton extends StatelessWidget {
-  const _CircleIconButton({required this.icon, required this.onTap});
-  final IconData icon;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(999),
-        onTap: onTap,
-        child: Container(
-          width: 36,
-          height: 36,
-          decoration: BoxDecoration(
-            color: Colors.white,
-            shape: BoxShape.circle,
-            boxShadow: BlowfitColors.shadowLevel1,
-          ),
-          child: Icon(icon, size: 20, color: BlowfitColors.gray700),
-        ),
-      ),
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Phase guide — chip + big text (current pressure visualized via chart)
-// ---------------------------------------------------------------------------
-
-class _PhaseGuide extends StatelessWidget {
-  const _PhaseGuide({required this.phase, required this.sessionActive});
-  final DeviceStateCode phase;
+  final _CycleTurn turn;
+  final double remainingSec;
   final bool sessionActive;
 
-  ({String chip, String guide, String sub, IconData icon}) get _content {
-    switch (phase) {
-      case DeviceStateCode.train:
-        return (
-          chip: '호기 단계',
-          guide: '입으로 강하게 내쉬세요',
-          sub: '복부의 힘을 사용하세요',
-          icon: Icons.arrow_upward,
-        );
-      case DeviceStateCode.prep:
-        return (
-          chip: '준비',
-          guide: '곧 시작합니다',
-          sub: '편안한 자세로 앉아주세요',
-          icon: Icons.timer_outlined,
-        );
-      case DeviceStateCode.rest:
-        return (
-          chip: '휴식',
-          guide: '잠시 쉬어요',
-          sub: '다음 세트를 준비하세요',
-          icon: Icons.pause_circle_outline,
-        );
-      case DeviceStateCode.summary:
-        return (
-          chip: '완료',
-          guide: '훈련 완료!',
-          sub: '잘하셨어요',
-          icon: Icons.check_circle_outline,
-        );
-      case DeviceStateCode.standby:
-      case DeviceStateCode.boot:
-      case DeviceStateCode.weekly:
-      case DeviceStateCode.error:
-        return (
-          chip: '대기',
-          guide: sessionActive ? '시작 중...' : '훈련을 시작하세요',
-          sub: '기기를 입에 물고 준비하세요',
-          icon: Icons.air,
-        );
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    final content = _content;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Column(
+    final isExhale = turn == _CycleTurn.exhale;
+    // 호기 = 파랑, 흡기 = 보라/마젠타 — 명확히 다른 두 컬러.
+    final List<Color> gradient = !sessionActive
+        ? const [Color(0xFF6B7280), Color(0xFF4B5563)]
+        : isExhale
+            ? const [Color(0xFF5C8CFF), BlowfitColors.blue500]
+            : const [Color(0xFFB084F2), Color(0xFF7C3AED)];
+    final glow = !sessionActive
+        ? const Color.fromRGBO(75, 85, 99, 0.25)
+        : isExhale
+            ? const Color.fromRGBO(0, 102, 255, 0.30)
+            : const Color.fromRGBO(124, 58, 237, 0.30);
+    final title = !sessionActive
+        ? '대기 중'
+        : isExhale
+            ? '호기 차례'
+            : '흡기 차례';
+    final guide = !sessionActive
+        ? '연결을 기다리는 중'
+        : isExhale
+            ? '강하게 내쉬세요'
+            : '천천히 들이마시세요';
+    final icon = isExhale ? Icons.north : Icons.south;
+    final iconLabel = isExhale ? '내쉬기' : '들이마시기';
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOut,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: gradient,
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(BlowfitRadius.lg),
+        boxShadow: [
+          BoxShadow(
+            color: glow,
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Row(
         children: [
+          // 좌측 — 큰 화살표 아이콘 in 원
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              color: BlowfitColors.blue500,
-              borderRadius: BorderRadius.circular(999),
+            width: 56,
+            height: 56,
+            decoration: const BoxDecoration(
+              color: Color.fromRGBO(255, 255, 255, 0.22),
+              shape: BoxShape.circle,
             ),
-            child: Row(
+            child: Icon(icon, size: 32, color: Colors.white),
+          ),
+          const SizedBox(width: 14),
+          // 가운데 — 라벨 + 가이드
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(content.icon, size: 12, color: Colors.white),
-                const SizedBox(width: 6),
+                Row(
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.4,
+                        color: Colors.white,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color.fromRGBO(255, 255, 255, 0.22),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        iconLabel,
+                        style: const TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                          letterSpacing: 0.4,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 2),
                 Text(
-                  content.chip,
+                  guide,
                   style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.white,
-                    letterSpacing: 0.48,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                    color: Color.fromRGBO(255, 255, 255, 0.88),
                   ),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 12),
-          Text(
-            content.guide,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: 26,
-              fontWeight: FontWeight.w700,
-              letterSpacing: -0.78,
-              height: 1.25,
-              color: BlowfitColors.ink,
+          // 우측 — 큰 카운트다운 숫자
+          if (sessionActive)
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  '${remainingSec.ceil()}',
+                  style: const TextStyle(
+                    fontSize: 32,
+                    fontWeight: FontWeight.w800,
+                    height: 1,
+                    letterSpacing: -1,
+                    color: Colors.white,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
+                ),
+                const Text(
+                  '초',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: Color.fromRGBO(255, 255, 255, 0.85),
+                  ),
+                ),
+              ],
             ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            content.sub,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w500,
-              color: BlowfitColors.ink3,
-            ),
-          ),
         ],
       ),
     );
   }
 }
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 class _DegradedSignalBanner extends StatelessWidget {
   const _DegradedSignalBanner();
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: BlowfitColors.amberBg,
-          borderRadius: BorderRadius.circular(BlowfitRadius.md),
-        ),
-        child: const Row(
-          children: [
-            Icon(Icons.signal_cellular_alt_2_bar,
-                size: 16, color: BlowfitColors.amberInk),
-            SizedBox(width: 8),
-            Text(
-              '신호 약함 — 일부 데이터가 누락될 수 있습니다',
-              style: TextStyle(
-                fontSize: 12,
-                color: BlowfitColors.amberInk,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: BlowfitColors.amberBg,
+        borderRadius: BorderRadius.circular(BlowfitRadius.md),
       ),
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Breath orb — 디자인 v2 의 핵심 비주얼. 220×220 원형 + phase 별 호흡 애니메이션
-// ---------------------------------------------------------------------------
-
-class _BreathOrb extends StatefulWidget {
-  const _BreathOrb({
-    required this.phase,
-    required this.sessionActive,
-    required this.elapsedSec,
-  });
-
-  final DeviceStateCode phase;
-  final bool sessionActive;
-
-  /// 현재 phase 가 시작된 시점부터 경과한 초 — 큰 숫자로 표시.
-  final int elapsedSec;
-
-  @override
-  State<_BreathOrb> createState() => _BreathOrbState();
-}
-
-class _BreathOrbState extends State<_BreathOrb>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _ac;
-
-  @override
-  void initState() {
-    super.initState();
-    // 디자인의 4초 ease-in-out — 호흡 리듬.
-    _ac = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 4),
-    )..repeat();
-  }
-
-  @override
-  void dispose() {
-    _ac.dispose();
-    super.dispose();
-  }
-
-  /// phase 별 그라데이션 + 라벨.
-  ({List<Color> gradient, Color glow, String label, bool animate}) get _tokens {
-    switch (widget.phase) {
-      case DeviceStateCode.train:
-        return (
-          gradient: const [Color(0xFF5C8CFF), BlowfitColors.blue500],
-          glow: const Color.fromRGBO(0, 102, 255, 0.25),
-          label: '내쉬기',
-          animate: true,
-        );
-      case DeviceStateCode.rest:
-        return (
-          gradient: const [Color(0xFF66D2EE), Color(0xFF0099CC)],
-          glow: const Color.fromRGBO(0, 153, 204, 0.25),
-          label: '휴식',
-          animate: true,
-        );
-      case DeviceStateCode.prep:
-        return (
-          gradient: const [Color(0xFF5C8CFF), BlowfitColors.blue500],
-          glow: const Color.fromRGBO(0, 102, 255, 0.20),
-          label: '준비',
-          animate: false,
-        );
-      case DeviceStateCode.summary:
-        return (
-          gradient: const [BlowfitColors.green500, BlowfitColors.greenInk],
-          glow: const Color.fromRGBO(0, 191, 64, 0.25),
-          label: '완료',
-          animate: false,
-        );
-      case DeviceStateCode.standby:
-      case DeviceStateCode.boot:
-      case DeviceStateCode.weekly:
-      case DeviceStateCode.error:
-        return (
-          gradient: const [BlowfitColors.gray400, BlowfitColors.gray500],
-          glow: const Color.fromRGBO(17, 24, 39, 0.10),
-          label: widget.sessionActive ? '진행 중' : '대기',
-          animate: false,
-        );
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final t = _tokens;
-    return Center(
-      child: SizedBox(
-        width: 200,
-        height: 200,
-        child: AnimatedBuilder(
-          animation: _ac,
-          builder: (_, __) {
-            // 0..1 사이클 → sin 기반 1±0.05 scale.
-            final pulse = t.animate
-                ? 1 + 0.05 * math.sin(_ac.value * 2 * math.pi)
-                : 1.0;
-            return Stack(
-              alignment: Alignment.center,
-              children: [
-                // 외곽 aura
-                Container(
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: RadialGradient(
-                      colors: [
-                        t.glow,
-                        t.glow.withValues(alpha: 0),
-                      ],
-                    ),
-                  ),
-                ),
-                // 메인 orb (호흡 scale)
-                Transform.scale(
-                  scale: pulse,
-                  child: Container(
-                    width: 156,
-                    height: 156,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: LinearGradient(
-                        colors: t.gradient,
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: t.glow,
-                          blurRadius: 40,
-                          offset: const Offset(0, 16),
-                        ),
-                      ],
-                    ),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          t.label,
-                          style: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.white,
-                            letterSpacing: 0.4,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          '${widget.elapsedSec}',
-                          style: const TextStyle(
-                            fontSize: 50,
-                            fontWeight: FontWeight.w700,
-                            height: 1,
-                            letterSpacing: -2,
-                            color: Colors.white,
-                            fontFeatures: [FontFeature.tabularFigures()],
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        const Text(
-                          '초',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: Color.fromRGBO(255, 255, 255, 0.85),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            );
-          },
-        ),
-      ),
-    );
-  }
-
-}
-
-// ---------------------------------------------------------------------------
-// Bidirectional live chart — Y axis ±30 cmH2O, target zone band,
-// realtime current pressure label.
-// ---------------------------------------------------------------------------
-
-class _LiveChart extends StatelessWidget {
-  const _LiveChart({
-    required this.points,
-    required this.startX,
-    required this.endX,
-    required this.current,
-    required this.targetLow,
-    required this.targetHigh,
-  });
-
-  final Queue<FlSpot> points;
-  final double startX;
-  final double endX;
-  final double current;
-  final double targetLow;
-  final double targetHigh;
-
-  // 디자인의 ±30 cmH2O 양방향 시각화를 따른다. 현재 하드웨어 (XGZP6847A005KPG)
-  // 는 양압만 측정하므로 음수 영역은 항상 비어있고, 차후 차압 센서로 교체 시
-  // 흡기 데이터가 자동으로 그래프 하단에 들어옴.
-  static const double _yMin = -30.0;
-  static const double _yMax = 30.0;
-
-  @override
-  Widget build(BuildContext context) {
-    return BlowfitCard(
-      padding: const EdgeInsets.fromLTRB(8, 14, 12, 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: const Row(
         children: [
-          // 헤더 — 라벨 + 현재값 + 목표 구간 범례
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            child: Row(
-              children: [
-                const Text(
-                  '실시간 압력',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: BlowfitColors.ink,
-                  ),
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  '${current.toStringAsFixed(1)} cmH₂O',
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: BlowfitColors.blue500,
-                    fontFeatures: [FontFeature.tabularFigures()],
-                  ),
-                ),
-                const Spacer(),
-                Container(
-                  width: 8,
-                  height: 8,
-                  decoration: BoxDecoration(
-                    color: BlowfitColors.green100,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-                const SizedBox(width: 6),
-                const Text(
-                  '목표 구간',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: BlowfitColors.ink3,
-                  ),
-                ),
-              ],
-            ),
+          Icon(
+            Icons.signal_cellular_alt_2_bar,
+            size: 16,
+            color: BlowfitColors.amberInk,
           ),
-          const SizedBox(height: 4),
-          Expanded(
-            child: LineChart(
-              LineChartData(
-                minY: _yMin,
-                maxY: _yMax,
-                minX: startX,
-                maxX: endX,
-                clipData: const FlClipData.all(),
-                gridData: FlGridData(
-                  show: true,
-                  drawVerticalLine: false,
-                  horizontalInterval: 10,
-                  getDrawingHorizontalLine: (v) {
-                    // y=0 baseline 은 더 진하게.
-                    final isZero = v.abs() < 0.01;
-                    return FlLine(
-                      color: isZero
-                          ? BlowfitColors.gray400
-                          : BlowfitColors.gray150,
-                      strokeWidth: isZero ? 1.2 : 1,
-                    );
-                  },
-                ),
-                borderData: FlBorderData(show: false),
-                titlesData: FlTitlesData(
-                  leftTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      reservedSize: 32,
-                      interval: 10,
-                      getTitlesWidget: (v, meta) {
-                        // -30, -20, ..., +30
-                        final n = v.round();
-                        final label = n > 0 ? '+$n' : '$n';
-                        return Padding(
-                          padding: const EdgeInsets.only(right: 6),
-                          child: SizedBox(
-                            width: 24,
-                            child: Text(
-                              label,
-                              textAlign: TextAlign.right,
-                              style: const TextStyle(
-                                fontSize: 10,
-                                color: BlowfitColors.ink3,
-                                fontFeatures: [FontFeature.tabularFigures()],
-                              ),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                  bottomTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      reservedSize: 22,
-                      interval: 5,
-                      getTitlesWidget: (v, meta) {
-                        final sec = v.round();
-                        if (sec < 0 || sec % 5 != 0) {
-                          return const SizedBox.shrink();
-                        }
-                        return Padding(
-                          padding: const EdgeInsets.only(top: 4),
-                          child: Text(
-                            sec == 0 ? '0' : '${sec}s',
-                            style: const TextStyle(
-                              fontSize: 10,
-                              color: BlowfitColors.ink3,
-                              fontFeatures: [FontFeature.tabularFigures()],
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                  topTitles: const AxisTitles(
-                      sideTitles: SideTitles(showTitles: false)),
-                  rightTitles: const AxisTitles(
-                      sideTitles: SideTitles(showTitles: false)),
-                ),
-                rangeAnnotations: RangeAnnotations(
-                  horizontalRangeAnnotations: [
-                    // 호기 (양압) 목표 구간.
-                    HorizontalRangeAnnotation(
-                      y1: targetLow,
-                      y2: targetHigh,
-                      color: const Color.fromRGBO(0, 191, 64, 0.12),
-                    ),
-                    // 흡기 (음압) 목표 구간 — 차후 흡기 센서 추가 시 활용.
-                    HorizontalRangeAnnotation(
-                      y1: -targetHigh,
-                      y2: -targetLow,
-                      color: const Color.fromRGBO(0, 191, 64, 0.08),
-                    ),
-                  ],
-                ),
-                lineBarsData: [
-                  LineChartBarData(
-                    spots: points.toList(growable: false),
-                    isCurved: true,
-                    curveSmoothness: 0.25,
-                    preventCurveOverShooting: true,
-                    color: BlowfitColors.blue500,
-                    barWidth: 2.5,
-                    dotData: const FlDotData(show: false),
-                    belowBarData: BarAreaData(
-                      show: true,
-                      color: const Color.fromRGBO(0, 102, 255, 0.06),
-                    ),
-                  ),
-                ],
-              ),
+          SizedBox(width: 8),
+          Text(
+            '신호 약함 — 일부 데이터가 누락될 수 있습니다',
+            style: TextStyle(
+              fontSize: 12,
+              color: BlowfitColors.amberInk,
+              fontWeight: FontWeight.w600,
             ),
           ),
         ],

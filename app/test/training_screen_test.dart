@@ -27,43 +27,7 @@ Widget _buildHarness({required BleManager ble}) {
 }
 
 void main() {
-  testWidgets('Training renders phase guide + set chip + 종료 버튼', (tester) async {
-    final fake = FakeBleManager();
-    addTearDown(fake.dispose);
-
-    await tester.pumpWidget(_buildHarness(ble: fake));
-    await tester.pump();
-
-    // Phase 가이드 (초기 standby).
-    expect(find.text('훈련을 시작하세요'), findsOneWidget);
-    // 세트 chip.
-    expect(find.text('세트 '), findsOneWidget);
-    // 차트 헤더.
-    expect(find.text('실시간 압력'), findsOneWidget);
-    expect(find.text('목표 구간'), findsOneWidget);
-    // 종료 버튼.
-    expect(find.text('훈련 종료'), findsOneWidget);
-  });
-
-  testWidgets('종료 button is disabled before any session starts', (tester) async {
-    final fake = FakeBleManager();
-    addTearDown(fake.dispose);
-
-    await tester.pumpWidget(_buildHarness(ble: fake));
-    await tester.pump();
-
-    // FilledButton.icon 이 아닌 일반 FilledButton 으로 만들었으므로 byType 으로
-    // 찾아도 OK. 하지만 안전하게 텍스트 ancestor 로 접근.
-    final btn = tester.widget<FilledButton>(
-      find.ancestor(
-        of: find.text('훈련 종료'),
-        matching: find.byType(FilledButton),
-      ),
-    );
-    expect(btn.onPressed, isNull);
-  });
-
-  testWidgets('BreathOrb renders phase label initially',
+  testWidgets('Kirby v3 — progress bar + phase chip + pressure bar + 종료 버튼',
       (tester) async {
     final fake = FakeBleManager();
     addTearDown(fake.dispose);
@@ -71,9 +35,35 @@ void main() {
     await tester.pumpWidget(_buildHarness(ble: fake));
     await tester.pump();
 
-    // 디자인 v2: BottomStats 제거되고 BreathOrb 가 그 자리. 초기 standby.
-    // "대기" 는 phase chip + orb 안 라벨 두 군데에 등장. "초" 단위는 orb 만.
-    expect(find.text('대기'), findsAtLeastNWidgets(1));
-    expect(find.text('초'), findsOneWidget);
+    // 상단 진행 거리.
+    expect(find.text('진행 거리'), findsOneWidget);
+    // 1500m 목표 — '/ 1500 m'.
+    expect(find.text(' / 1500 m'), findsOneWidget);
+    // Phase chip — 세션 시작 전 '대기 중'.
+    expect(find.text('대기 중'), findsOneWidget);
+    // 압력 바 헤더.
+    expect(find.text('실시간 압력'), findsOneWidget);
+    // 압력 바 zone 범위 라벨 (default 20-30).
+    expect(find.text('-30  ~  -20'), findsOneWidget);
+    expect(find.text('+20  ~  +30'), findsOneWidget);
+    // 종료 버튼.
+    expect(find.text('훈련 종료'), findsOneWidget);
+  });
+
+  testWidgets('종료 button is disabled before any session starts',
+      (tester) async {
+    final fake = FakeBleManager();
+    addTearDown(fake.dispose);
+
+    await tester.pumpWidget(_buildHarness(ble: fake));
+    await tester.pump();
+
+    final btn = tester.widget<FilledButton>(
+      find.ancestor(
+        of: find.text('훈련 종료'),
+        matching: find.byType(FilledButton),
+      ),
+    );
+    expect(btn.onPressed, isNull);
   });
 }
