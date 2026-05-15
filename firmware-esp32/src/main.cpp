@@ -15,6 +15,7 @@
 #include "config.h"
 #include "sensor.h"
 #include "display/lvgl_port.h"
+#include "display/theme.h"
 
 // ----- 전역 LVGL 위젯 핸들 (M3 부터 screens/ 모듈로 분리 예정) -----
 namespace {
@@ -36,48 +37,62 @@ static void bootHardware() {
 static void buildHelloScreen() {
 #if HAS_LVGL
   lv_obj_t* scr = lv_screen_active();
-  lv_obj_set_style_bg_color(scr, lv_color_hex(0x111111), 0);
+  lv_obj_set_style_bg_color(scr, theme::color(theme::GRAY_900), 0);
 
-  // Title — BlowFit
+  // Title — BlowFit (영문, Pretendard Bold 28pt)
   lv_obj_t* lbl_title = lv_label_create(scr);
   lv_label_set_text(lbl_title, "BlowFit");
-  lv_obj_set_style_text_font(lbl_title, &lv_font_montserrat_28, 0);
-  lv_obj_set_style_text_color(lbl_title, lv_color_hex(0xFFFFFF), 0);
+  lv_obj_set_style_text_font(lbl_title, theme::font_28(), 0);
+  lv_obj_set_style_text_color(lbl_title, theme::color(0xFFFFFF), 0);
   lv_obj_align(lbl_title, LV_ALIGN_TOP_MID, 0, 16);
 
-  // Subtitle — v4.0
+  // Subtitle — v4.0 (Pretendard Bold 20pt)
   lv_obj_t* lbl_ver = lv_label_create(scr);
   lv_label_set_text(lbl_ver, "v4.0");
-  lv_obj_set_style_text_font(lbl_ver, &lv_font_montserrat_16, 0);
-  lv_obj_set_style_text_color(lbl_ver, lv_color_hex(0x5C8CFF), 0);
-  lv_obj_align(lbl_ver, LV_ALIGN_TOP_MID, 0, 54);
+  lv_obj_set_style_text_font(lbl_ver, theme::font_20(), 0);
+  lv_obj_set_style_text_color(lbl_ver, theme::color(theme::BLUE_400), 0);
+  lv_obj_align(lbl_ver, LV_ALIGN_TOP_MID, 0, 52);
 
-  // M2 status label
+  // M3 한글 status label — Pretendard
   g_label_status = lv_label_create(scr);
-  lv_label_set_text(g_label_status, "M2: LVGL Hello");
-  lv_obj_set_style_text_font(g_label_status, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(g_label_status, lv_color_hex(0x00BF40), 0);
+  lv_label_set_text(g_label_status, "준비 중");
+  lv_obj_set_style_text_font(g_label_status, theme::font_20(), 0);
+  lv_obj_set_style_text_color(g_label_status, theme::color(theme::GREEN_500), 0);
   lv_obj_align(g_label_status, LV_ALIGN_TOP_MID, 0, 84);
 
-  // Pressure live label — 가운데 큰 글씨.
+  // 한글 안내문 — 14pt
+  lv_obj_t* lbl_hint = lv_label_create(scr);
+  lv_label_set_text(lbl_hint, "강하게 내쉬세요");
+  lv_obj_set_style_text_font(lbl_hint, theme::font_14(), 0);
+  lv_obj_set_style_text_color(lbl_hint, theme::color(theme::GRAY_400), 0);
+  lv_obj_align(lbl_hint, LV_ALIGN_TOP_MID, 0, 116);
+
+  // Pressure live label — 가운데 큰 영문/숫자 (Montserrat 48pt)
   g_label_pressure = lv_label_create(scr);
   lv_label_set_text(g_label_pressure, "+0.0");
-  lv_obj_set_style_text_font(g_label_pressure, &lv_font_montserrat_48, 0);
-  lv_obj_set_style_text_color(g_label_pressure, lv_color_hex(0x5C8CFF), 0);
+  lv_obj_set_style_text_font(g_label_pressure, theme::font_big(), 0);
+  lv_obj_set_style_text_color(g_label_pressure, theme::color(theme::BLUE_400), 0);
   lv_obj_align(g_label_pressure, LV_ALIGN_CENTER, 0, 20);
 
-  // cmH2O unit
+  // cmH2O unit (영문/숫자)
   lv_obj_t* lbl_unit = lv_label_create(scr);
   lv_label_set_text(lbl_unit, "cmH2O");
-  lv_obj_set_style_text_font(lbl_unit, &lv_font_montserrat_14, 0);
-  lv_obj_set_style_text_color(lbl_unit, lv_color_hex(0xA1A1A1), 0);
-  lv_obj_align(lbl_unit, LV_ALIGN_CENTER, 0, 80);
+  lv_obj_set_style_text_font(lbl_unit, theme::font_14(), 0);
+  lv_obj_set_style_text_color(lbl_unit, theme::color(theme::GRAY_400), 0);
+  lv_obj_align(lbl_unit, LV_ALIGN_CENTER, 0, 78);
 
-  // Footer — build time
+  // 하단 한글 — "실시간 압력"
+  lv_obj_t* lbl_caption = lv_label_create(scr);
+  lv_label_set_text(lbl_caption, "실시간 압력");
+  lv_obj_set_style_text_font(lbl_caption, theme::font_14(), 0);
+  lv_obj_set_style_text_color(lbl_caption, theme::color(theme::INK_3), 0);
+  lv_obj_align(lbl_caption, LV_ALIGN_BOTTOM_MID, 0, -34);
+
+  // Footer — build time (영문)
   lv_obj_t* lbl_build = lv_label_create(scr);
   lv_label_set_text(lbl_build, __DATE__ " " __TIME__);
-  lv_obj_set_style_text_font(lbl_build, &lv_font_montserrat_12, 0);
-  lv_obj_set_style_text_color(lbl_build, lv_color_hex(0x6B7280), 0);
+  lv_obj_set_style_text_font(lbl_build, theme::font_14(), 0);
+  lv_obj_set_style_text_color(lbl_build, theme::color(theme::INK_3), 0);
   lv_obj_align(lbl_build, LV_ALIGN_BOTTOM_MID, 0, -10);
 #endif
 }
@@ -110,7 +125,7 @@ void setup() {
 
 #if HAS_LVGL
   if (g_label_status) {
-    lv_label_set_text(g_label_status, "Ready");
+    lv_label_set_text(g_label_status, "대기");
   }
 #endif
 
@@ -140,9 +155,9 @@ void loop() {
       char buf[16];
       snprintf(buf, sizeof(buf), "%+5.1f", p);
       lv_label_set_text(g_label_pressure, buf);
-      // 부호에 따라 컬러 변경 — exhale=blue, inhale=purple
-      lv_color_t color = (p >= 0) ? lv_color_hex(0x5C8CFF) : lv_color_hex(0xB084F2);
-      lv_obj_set_style_text_color(g_label_pressure, color, 0);
+      // 부호에 따라 컬러 변경 — 호기=파랑, 흡기=보라
+      const uint32_t hex = (p >= 0) ? theme::BLUE_400 : theme::PURPLE_400;
+      lv_obj_set_style_text_color(g_label_pressure, theme::color(hex), 0);
     }
 #endif
   }
