@@ -1,51 +1,112 @@
-// BlowFit v4.0 펌웨어 — M2 milestone (LVGL 통합).
+// BlowFit v4.0 펌웨어 — M7 milestone (session state machine).
 //
-// 이 단계 (M2) 의 목표:
-//   - lvgl_port 모듈로 LVGL <-> TFT_eSPI 결합
-//   - 더블 버퍼링 (PSRAM 우선) + 60FPS 목표
-//   - "BlowFit v4.0 / Hello LVGL" 라벨 위젯 표시
-//   - 실시간 압력값을 LVGL label 로 갱신 (5Hz)
-//   - 우상단 LVGL perf monitor (FPS / CPU%) 표시
-//
-// 다음 단계 (M3): 한글 폰트 (Pretendard subset) + theme tokens + screen 모듈화.
+// 진행:
+//   - session.{h,cpp} 가 Boot/Standby/Prep/Train/Rest/Summary 사이클 관리
+//   - main.cpp 가 state 변화 감지 → 해당 screen 호출
+//   - GPIO0 (BOOT 버튼) 짧게 누름 → session::startSession()
+//   - GPIO14 (사용자 버튼) 짧게 누름 → session::stopSession()
+//   - 압력값/카운트다운/진행률 매 tick 화면 갱신
 
 #include <Arduino.h>
 #include <lvgl.h>
 
 #include "config.h"
 #include "sensor.h"
+#include "session.h"
 #include "display/lvgl_port.h"
 #include "display/theme.h"
 #include "display/screens/screen_standby.h"
 #include "display/screens/screen_training.h"
+#include "display/screens/screen_rest.h"
+#include "display/screens/screen_summary.h"
 
-// ----- 전역 상태 -----
-
-// 간이 state machine — M7 의 정식 state_machine 도입 전까지의 placeholder.
-// boot 후 standby 화면, 영점 보정 끝나면 일정 시간 후 자동으로 training 화면.
-enum class AppPhase : uint8_t { Standby, Training };
-static AppPhase g_app_phase = AppPhase::Standby;
-static uint32_t g_phase_started_ms = 0;
-
-// Training 화면 데모용 — 호기/흡기 turn 30s 씩 사이클.
-constexpr uint32_t TURN_EXHALE_MS = 30000;
-constexpr uint32_t TURN_INHALE_MS = 30000;
-constexpr uint32_t CYCLE_MS = TURN_EXHALE_MS + TURN_INHALE_MS;
-
-// ----- 시리얼 + 디스플레이 전원 부트 보조 -----
+// ----- 시리얼 + 디스플레이 전원 부트 -----
 static void bootHardware() {
 #if HAS_DISPLAY
-  // LDO 전원 enable (GPIO15 HIGH) — 배터리 모드 필수.
   pinMode(pins::TFT_POWER_ON, OUTPUT);
   digitalWrite(pins::TFT_POWER_ON, HIGH);
-  delay(50);  // LDO 안정화 대기
+  delay(50);
 #endif
 }
 
-// ----- LVGL 초기 화면 빌드 -----
-// buildHelloScreen() 는 M3 까지의 데모 화면. M4 부터는 screens/screen_standby
-// 가 담당. 이 함수는 호출하지 않음 (삭제 대신 reference 로 history 유지하려면
-// 별도 archive). 현재는 제거.
+// ----- 버튼 처리 (debounce + edge detect) -----
+namespace btn {
+  constexpr uint32_t DEBOUNCE_MS = 30;
+
+  struct Button {
+    uint8_t pin;
+    bool last_raw = HIGH;       // INPUT_PULLUP 기본 HIGH
+    bool stable = HIGH;
+    uint32_t last_change_ms = 0;
+    explicit Button(uint8_t p) : pin(p) {}
+  };
+
+  Button g_boot(pins::BUTTON_BOOT);
+  Button g_user(pins::BUTTON_USER);
+
+  /// 한 frame 동안 falling edge (HIGH → LOW = 눌림) 발생 여부.
+  bool pollFallingEdge(Button& b, uint32_t now) {
+    const bool raw = digitalRead(b.pin);
+    if (raw != b.last_raw) {
+      b.last_raw = raw;
+      b.last_change_ms = now;
+    }
+    if (now - b.last_change_ms >= DEBOUNCE_MS && b.stable != raw) {
+      const bool pressed_now = (raw == LOW);
+      b.stable = raw;
+      return pressed_now;
+    }
+    return false;
+  }
+}  // namespace btn
+
+// ----- 화면 전환 — session state 변화 시 호출 -----
+static void switchScreenFor(session::State s) {
+  switch (s) {
+    case session::State::Standby:
+      screens::standby_show();
+      screens::standby_set_connected(false);
+      screens::standby_set_battery(-1);
+      break;
+    case session::State::Prep:
+    case session::State::Train: {
+      // Prep 도 training 화면에 카운트다운 노출 (간결).
+      screens::training_show();
+      screens::training_set_target(session::targetLow(), session::targetHigh());
+      const auto turn = session::currentTurn();
+      const screens::TrainingPhase ui_phase =
+          (turn == session::Turn::Inhale) ? screens::TrainingPhase::Inhale
+                                          : screens::TrainingPhase::Exhale;
+      screens::training_set_phase(ui_phase, session::remainingSec());
+      screens::training_set_progress(session::progressPercent(),
+                                     session::currentSet(),
+                                     session::stats().total_sets > 0
+                                         ? session::stats().total_sets
+                                         : 3);
+      break;
+    }
+    case session::State::Rest:
+      screens::rest_show();
+      screens::rest_set_remaining(session::remainingSec());
+      screens::rest_set_next_set(session::currentSet() + 1, 3);
+      break;
+    case session::State::Summary: {
+      const auto& st = session::stats();
+      screens::SummaryData d {
+        .avg_pressure   = st.avg_pressure,
+        .max_pressure   = st.max_pressure,
+        .duration_sec   = st.duration_sec,
+        .hit_percent    = st.hit_percent,
+        .completed_sets = st.completed_sets,
+        .total_sets     = st.total_sets,
+      };
+      screens::summary_show(d);
+      break;
+    }
+    default:
+      break;
+  }
+}
 
 // ----- Setup -----
 void setup() {
@@ -55,39 +116,34 @@ void setup() {
   Serial.println("=========================================");
   Serial.println("BlowFit v4.0 - ESP32-S3 / T-Display S3");
   Serial.println("Build: " __DATE__ " " __TIME__);
-  Serial.println("M2: LVGL integration");
+  Serial.println("M7: session state machine");
   Serial.println("=========================================");
 
   bootHardware();
 
 #if HAS_LVGL
   lvgl_port::begin();
+  // 초기 화면 = standby
   screens::standby_show();
-  // 부팅 직후엔 BLE 연결 없음, 배터리 측정 전 — 기본값.
   screens::standby_set_connected(false);
   screens::standby_set_battery(-1);
 #endif
 
-  // 센서 영점 보정 (5초)
+  // 영점 보정.
   Serial.println("Calibrating zero (5s)...");
   sensor::calibrateZero();
   Serial.printf("Zero offset = %.2f cmH2O\n", sensor::zeroOffset());
 
   pinMode(pins::VIBRATION, OUTPUT);
   pinMode(pins::LED_STATUS, OUTPUT);
+  pinMode(pins::BUTTON_BOOT, INPUT_PULLUP);
+  pinMode(pins::BUTTON_USER, INPUT_PULLUP);
 
-#if HAS_LVGL
-  // 영점 보정 끝나면 바로 training 화면으로 전환 (데모 — M7 의 정식 state
-  // machine 이 도착하면 사용자 트리거 / BLE start_session opcode 로 전환).
-  screens::training_show();
-  screens::training_set_target(20.0f, 30.0f);
-  screens::training_set_phase(screens::TrainingPhase::Exhale, TURN_EXHALE_MS / 1000);
-  screens::training_set_progress(0, 1, 3);
-  g_app_phase = AppPhase::Training;
-  g_phase_started_ms = millis();
-#endif
+  // Session state machine 시작.
+  session::begin();
+  // 영점 보정 끝났으므로 자연스럽게 Standby 로 진입.
 
-  Serial.println("Setup complete.");
+  Serial.println("Setup complete. Press BOOT button to start session.");
 }
 
 // ----- Loop -----
@@ -101,57 +157,68 @@ void loop() {
     sensor::tick();
   }
 
-  // 20Hz 압력 라벨/게이지 갱신 — LVGL 의 partial render 가 부드럽게 처리.
-  static uint32_t lastUpdateMs = 0;
-  if (now - lastUpdateMs >= 50) {
-    lastUpdateMs = now;
-    const float p = sensor::currentCmH2O();
-#if HAS_LVGL
-    if (g_app_phase == AppPhase::Training) {
+  // 버튼 입력 — 부팅 후 1.5초 settle 통과 후에만 처리 (floating 핀 안정화).
+  static const uint32_t BTN_SETTLE_MS = 1500;
+  if (now >= BTN_SETTLE_MS) {
+    if (btn::pollFallingEdge(btn::g_boot, now)) {
+      // BOOT 버튼 = toggle. Standby/Summary 면 start, 그 외 면 stop.
+      const auto s = session::currentState();
+      if (s == session::State::Standby || s == session::State::Summary) {
+        Serial.println("[btn] BOOT pressed -> startSession");
+        session::startSession();
+      } else {
+        Serial.println("[btn] BOOT pressed -> stopSession");
+        session::stopSession();
+      }
+    }
+    if (btn::pollFallingEdge(btn::g_user, now)) {
+      Serial.println("[btn] USER pressed -> stopSession");
+      session::stopSession();
+    }
+  }
+
+  // Session state machine tick.
+  const float p = sensor::currentCmH2O();
+  static session::State last_state = session::State::Boot;
+  session::tick(now, p);
+  const session::State cur = session::currentState();
+  if (cur != last_state) {
+    Serial.printf("[state] %u -> %u\n", (unsigned)last_state, (unsigned)cur);
+    switchScreenFor(cur);
+    last_state = cur;
+  }
+
+  // Training 화면이면 압력 + 카운트다운 + 진행률 실시간 갱신.
+  static uint32_t lastUpdate20HzMs = 0;
+  if (cur == session::State::Prep || cur == session::State::Train) {
+    if (now - lastUpdate20HzMs >= 50) {
+      lastUpdate20HzMs = now;
       screens::training_set_pressure(p);
     }
-#endif
   }
-
-  // 1Hz 시리얼 디버그 + phase 사이클 처리.
-  static uint32_t lastSecMs = 0;
-  if (now - lastSecMs >= 1000) {
-    lastSecMs = now;
-    const float p = sensor::currentCmH2O();
-    Serial.printf("[%lu] P=%+6.2f cmH2O\n", now, p);
-
-#if HAS_LVGL
-    // 호기/흡기 cycle + 카운트다운 + 진행률.
-    if (g_app_phase == AppPhase::Training) {
-      const uint32_t elapsed = now - g_phase_started_ms;
-      const uint32_t in_cycle = elapsed % CYCLE_MS;
-      const bool is_exhale = in_cycle < TURN_EXHALE_MS;
-      const uint32_t remaining_ms = is_exhale
-          ? (TURN_EXHALE_MS - in_cycle)
-          : (CYCLE_MS - in_cycle);
-
-      // phase 전환 검지
-      static bool last_was_exhale = true;
-      if (is_exhale != last_was_exhale) {
-        last_was_exhale = is_exhale;
-        screens::training_set_phase(
-            is_exhale ? screens::TrainingPhase::Exhale
-                      : screens::TrainingPhase::Inhale,
-            remaining_ms / 1000);
-      } else {
-        screens::training_set_remaining(remaining_ms / 1000);
-      }
-
-      // 데모용 진행률 — 전체 4분 (240s) 의 % 로 가정.
-      uint32_t total_demo = 240000;
-      uint32_t pct = (elapsed * 100) / total_demo;
-      if (pct > 100) pct = 100;
-      screens::training_set_progress((uint8_t)pct, 1, 3);
+  static uint32_t lastUpdate1HzMs = 0;
+  if (now - lastUpdate1HzMs >= 1000) {
+    lastUpdate1HzMs = now;
+    if (cur == session::State::Prep || cur == session::State::Train) {
+      const auto turn = session::currentTurn();
+      const screens::TrainingPhase ui_phase =
+          (turn == session::Turn::Inhale) ? screens::TrainingPhase::Inhale
+                                          : screens::TrainingPhase::Exhale;
+      screens::training_set_phase(ui_phase, session::remainingSec());
+      screens::training_set_progress(session::progressPercent(),
+                                     session::currentSet(),
+                                     3);
+    } else if (cur == session::State::Rest) {
+      screens::rest_set_remaining(session::remainingSec());
     }
-#endif
+    const int boot_raw = digitalRead(pins::BUTTON_BOOT);
+    const int user_raw = digitalRead(pins::BUTTON_USER);
+    Serial.printf("[%lu] state=%u turn=%u P=%+6.2f rem=%us BOOT=%d USER=%d\n",
+                  now, (unsigned)cur, (unsigned)session::currentTurn(),
+                  p, session::remainingSec(), boot_raw, user_raw);
   }
 
-  // LVGL tick — 60FPS 목표.
+  // LVGL tick.
 #if HAS_LVGL
   lvgl_port::tick();
 #endif

@@ -70,7 +70,7 @@
 // 디버그 / 로그
 // ============================================================================
 #define LV_USE_LOG             1
-#define LV_LOG_LEVEL           LV_LOG_LEVEL_WARN
+#define LV_LOG_LEVEL           LV_LOG_LEVEL_ERROR  // WARN 도배 방지
 #define LV_LOG_PRINTF          1     // printf() 로 출력 → 시리얼
 
 // PERF_MONITOR — 화면 우하단에 FPS / CPU% 작은 위젯 표시 (M2 개발용).

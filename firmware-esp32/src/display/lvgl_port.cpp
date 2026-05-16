@@ -52,6 +52,14 @@ namespace {
     Serial.print(buf);
   }
 
+  // ----- LVGL tick 콜백 -----
+  // LVGL 9.x 는 lv_conf.h 의 LV_TICK_CUSTOM 매크로를 지원하지 않음. 대신
+  // runtime 에 lv_tick_set_cb() 로 tick 공급 함수 등록 필요. millis() 가
+  // 부팅 후 ms 단위 — LVGL 이 timer/animation/redraw 계산에 사용.
+  uint32_t arduino_tick_cb() {
+    return millis();
+  }
+
 }  // anonymous namespace
 
 void begin() {
@@ -61,8 +69,9 @@ void begin() {
   g_tft.fillScreen(TFT_BLACK);
   g_tft.setSwapBytes(false);  // LVGL 의 LV_COLOR_16_SWAP=1 와 호환 — TFT 는 swap 안 함
 
-  // 2. LVGL 코어 + 로그.
+  // 2. LVGL 코어 + tick + 로그.
   lv_init();
+  lv_tick_set_cb(arduino_tick_cb);   // LVGL 9.x — lv_conf.h LV_TICK_CUSTOM 대체
 #if LV_USE_LOG
   lv_log_register_print_cb(log_cb);
 #endif
