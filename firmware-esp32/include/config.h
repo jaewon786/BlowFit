@@ -32,7 +32,11 @@
 namespace pins {
 
   // 외부 부품 — 사용자 배선
-  constexpr uint8_t PRESSURE_SENSOR = 4;   // GPIO4 (ADC1) — XGZP6847A010KPGPN33 OUT
+  // 압력 센서는 MikroE Diff Press Click (MPXV7007DP + MCP3221 12-bit I²C ADC).
+  // 보드 내장 MCP3221 이 0~5V analog 를 받아 I²C 로 변환 → MCU 측 GPIO 는 3.3V
+  // logic 만 노출되어 안전. 자세한 내용은 docs/mpxv7007_migration.md 참조.
+  constexpr uint8_t I2C_SDA         = 43;  // GPIO43 (UART0 TX, USB-CDC 사용 중이라 free)
+  constexpr uint8_t I2C_SCL         = 44;  // GPIO44 (UART0 RX, 위와 동일)
   constexpr uint8_t VIBRATION       = 10;  // GPIO10 PWM — 진동 모터
   constexpr uint8_t LED_STATUS      = 11;  // GPIO11 — 상태 LED (선택)
 
@@ -50,24 +54,51 @@ namespace pins {
   constexpr uint8_t BUTTON_BOOT = 0;   // 부트 버튼
   constexpr uint8_t BUTTON_USER = 14;  // 사용자 버튼
 
+  // ===== DEPRECATED (XGZP6847 analog pin) =====
+  // sensor.cpp 가 아직 analogRead 기반이라 build 호환 목적으로만 유지.
+  // MS4 에서 sensor.cpp Wire/I²C 교체 시 함께 제거.
+  constexpr uint8_t PRESSURE_SENSOR = 4;
+
 }  // namespace pins
 
-// ----- Pressure sensor (XGZP6847A010KPGPN33) -----
-// 양방향 차압 센서, 3.3V, -10~+10 kPa = -102~+102 cmH₂O.
+// ----- Pressure sensor (MPXV7007DP via MikroE Diff Press Click + MCP3221) -----
+// 양방향 차압 센서, 5V Vs, ±7 kPa (≈ ±71 cmH₂O). 보드 내장 MCP3221 12-bit I²C
+// ADC 가 sensor output (0.5~4.5V) 을 ratiometric 으로 변환.
+//
+// 변환식 (datasheet, 5V ratiometric):
+//   Vout/Vs = 0.057 × ΔP_kPa + 0.5
+//   ratio   = ADC / 4095
+//   ΔP_kPa  = (ratio - 0.5) / 0.057
+//   ΔP_cmH2O = ΔP_kPa × 10.197
+//
+// MCP3221 은 VDD 기준 ratiometric 이라 절대 전압 측정 불필요 — ADC ↔ ratio 만
+// 사용. ADC_VREF 같은 항목은 의도적으로 두지 않음.
 namespace sensor {
 
-  constexpr float ADC_VREF = 3.3f;       // ADC 기준 전압
-  constexpr int   ADC_MAX  = 4095;       // 12-bit ESP32 ADC
-  constexpr float ZERO_VOLTAGE = 1.45f;  // 0 압력 시 출력 전압 (데이터시트)
-  constexpr float K_FACTOR     = 0.125f; // -10~+10 kPa 3.3V 모델 K
-  constexpr float KPA_TO_CMH2O = 10.197f;
+  constexpr int   ADC_MAX        = 4095;     // MCP3221 12-bit
+  constexpr float ZERO_RATIO     = 0.5f;     // ΔP=0 시 ratio (datasheet)
+  constexpr float K_FACTOR_RATIO = 0.057f;   // ratio per kPa
+  constexpr float KPA_TO_CMH2O   = 10.197f;
+
+  // MCP3221 I²C 주소 — 0x48~0x4F 중 하나. MikroE Click 기본 0x4D 추정.
+  // MS2 (tools/i2c_scan) 로 실측 확인 후 필요 시 갱신.
+  constexpr uint8_t MCP3221_ADDR = 0x4D;
+  constexpr uint32_t I2C_FREQ_HZ = 400000;   // Fast-mode (MCP3221 spec: ≤400kHz @ 3.3V)
 
   // 영점 보정용 — 부팅 후 첫 N 샘플 평균을 zeroOffset 로 저장.
   constexpr int   ZERO_CALIBRATION_SAMPLES = 500;  // 100Hz × 5초
 
-  // 안전한 측정 범위 (saturation guard)
-  constexpr float MIN_CMH2O = -120.0f;
-  constexpr float MAX_CMH2O = +120.0f;
+  // 안전한 측정 범위 (saturation guard). MPXV7007 풀스케일 ±71 cmH₂O 보다 약간
+  // 보수적으로 설정 → 비정상 입력은 clamp.
+  constexpr float MIN_CMH2O = -71.0f;
+  constexpr float MAX_CMH2O = +71.0f;
+
+  // ===== DEPRECATED (XGZP6847A010KPGPN33) =====
+  // 아래 상수는 sensor.cpp 가 아직 analogRead 기반이라 build 호환 목적으로만
+  // 유지. MS4 에서 sensor.cpp 를 Wire/I²C 로 교체할 때 함께 제거.
+  constexpr float ADC_VREF        = 3.3f;
+  constexpr float ZERO_VOLTAGE    = 1.45f;
+  constexpr float K_FACTOR        = 0.125f;
 
 }  // namespace sensor
 
