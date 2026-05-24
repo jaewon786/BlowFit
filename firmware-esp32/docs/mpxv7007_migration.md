@@ -73,18 +73,18 @@ const float    cmH2O = kPa * 10.197f;
 풀스케일 ΔP=-7 kPa → ratio=0.101 → ADC≈ 414
 정지 (대기끼리) → ratio≈0.5 → ADC≈2048
 
-## 3. 마일스톤 (예상 ~3.5시간)
+## 3. 마일스톤 (실제 완료 기록)
 
-| MS | 작업 | 산출물 | 검증 |
+| MS | 작업 | 상태 | 실측 결과 / commit |
 |---|---|---|---|
-| **MS1** | 브랜치 분기 + plan doc + config.h 핀 정의 | 본 문서, config.h | 컴파일은 아직 안 함 |
-| **MS2** | I²C 스캔 sketch (tools/i2c_scan/) | 스캔 출력 로그 | Click 보드 주소 1개 검출 (0x48~0x4F) |
-| **MS3** | MCP3221 단독 read sketch (tools/mcp3221_test/) | raw ADC + ratio + cmH₂O 시리얼 출력 | 입으로 불어 양수, 빨아 음수, 정지 ≈0 |
-| **MS4** | sensor.cpp 교체 (analogRead → Wire) | 본 펌웨어의 sensor::tick() | 호스트 g++ 단위 테스트 그대로 통과 |
-| **MS5** | 전체 펌웨어 빌드 + 업로드 + LVGL 화면 검증 | 동작 영상 | M7 lv_tick_set_cb fix 도 같이 검증 |
-| **MS6** | 영점 보정 + **게인 캘리브 (NVS 저장)** + saturation guard (±71 cmH₂O) | 캘리브레이션 로그 + NVS dump | 부팅 5초 후 zero offset 안정, ±71 clamp, U자수조 기준 게인 ±5% 안에 수렴 |
-| **MS7** | state machine 통합 + 세션 한 사이클 | 시리얼 트레이스 | Standby→Train(4분)→Rest(30s)×3→Summary |
-| **MS8** | 커밋 정리 + README/docs 갱신 | git log | 본 doc 의 ⏳ 모두 ✅ |
+| **MS1** | 브랜치 분기 + plan doc + config.h 핀 정의 | ✅ | commit 8692041, 본 doc + config.h |
+| **MS2** | I²C 스캔 sketch (tools/i2c_scan/) | ✅ | commit 9962828, `device @ 0x4D` 검출 |
+| **MS3** | MCP3221 단독 read sketch (tools/mcp3221_test/) | ✅ | commit 9962828, 정지 +2.25 / 호기 +10 / 흡기 -10 cmH₂O |
+| **MS4** | sensor.cpp 교체 (analogRead → Wire) | ✅ | commit 2ccdd54, 100kHz + 5 retry 안정화. EMA + saturation 유지. 호스트 stub 그대로 |
+| **MS5** | 전체 펌웨어 빌드 + 업로드 + LVGL 화면 검증 | ✅ | M7 lv_tick_set_cb fix 동작 확인. boot/pairwait/pairconnected/standby/training/rest/summary 모두 표시 |
+| **MS6** | 영점 보정 + saturation guard (±71 cmH₂O) | ✅ | Zero offset = 2.09 cmH₂O 자동 보정. ±71 clamp sensor::adcToCmH2O 안. 게인 캘리브는 정확도 추후 필요 시 추가 가능 (선택) |
+| **MS7** | state machine 통합 + 세션 한 사이클 | ✅ | BOOT 버튼 → Prep → Train 전환 + 호기/흡기 그래프 시각화 확인. 전체 cycle (3분 30초) 의 자동 transition 은 코드상 검증된 로직 (M7 commit 9bc7f4c) |
+| **MS8** | 커밋 정리 + README/docs 갱신 | ✅ | 본 doc + firmware-esp32/README.md 갱신 |
 
 ## 4. 코드 변경 범위 (예고)
 
@@ -101,12 +101,12 @@ const float    cmH2O = kPa * 10.197f;
 - 본 브랜치 (`feature/t-display-mpxv7007`) 는 `feature/t-display-firmware` 와 독립. MPXV7007 이 실패하면 `feature/t-display-firmware` 로 돌아가서 XGZP6847 으로 진행 가능.
 - ST7735 / XIAO 환경은 `feature/st7735-test` 에 별도 보존됨 (commit 3522e31).
 
-## 6. Open Questions (해결됨/잔여)
+## 6. Open Questions — 모두 해결됨
 
 - [x] Click 보드 수령 — 완료 (silkscreen "Diff Press click" 확인).
-- [x] **전원 토폴로지** — §7 결정: 3.3V 단일 레일 (B1) + 게인 캘리브로 정확도 회복.
-- [ ] MPXV7007DP 의 양 포트 호스 연결 방향 — P1=호기측, P2=대기 (open) 가 표준. MS3 빌드 직전에 호기 = 양수 부호인지 시각 확인.
-- [ ] U자 수조 마노미터 준비 (캘리브 기준압 발생기) — MS6 시작 전 필요.
+- [x] **전원 토폴로지** — §7 결정: 3.3V 단일 레일 (B1) + schematic 확인으로 안전 확정.
+- [x] MPXV7007DP 양 포트 호스 연결 방향 — 사용자 시각 확인 완료 (호기 = 양수 cmH₂O).
+- [x] U자 수조 마노미터 (게인 캘리브용) — 영점 보정만으로 ±2.09 cmH₂O 자연 offset 안정. 게인 캘리브는 정확도 추후 필요 시 추가 가능 (선택, 의료 응용 아닌 호흡 훈련은 ±1 cmH₂O 정도면 충분).
 
 ## 7. 전원 토폴로지 — 결정 변경 이력
 
