@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/date_symbol_data_local.dart';
 
+import 'core/ble/ble_foreground_task.dart';
 import 'core/db/db_providers.dart';
 import 'core/models/pressure_sample.dart';
 import 'core/theme/blowfit_theme.dart';
@@ -26,6 +28,11 @@ void main() async {
   await initializeDateFormatting('ko');
   // BLE permissions are requested by ConnectScreen with proper UX context;
   // asking on cold start surprises the user before they see why.
+
+  // Foreground service 의 notification channel + task option 초기화.
+  // Service 자체는 첫 페어링 완료 후 startService() 호출 시 시작.
+  await BleForegroundService.initialize();
+
   runApp(const ProviderScope(child: BlowfitApp()));
 }
 
@@ -33,7 +40,11 @@ final _rootNavKey = GlobalKey<NavigatorState>();
 
 final _router = GoRouter(
   navigatorKey: _rootNavKey,
-  initialLocation: '/',
+  // 앱 시작 화면 = ConnectScreen. 저장된 lastDevice 있으면 자동 재연결 시도,
+  // 성공 시 _attemptConnect 가 자동으로 dashboard ('/') 로 이동. lastDevice
+  // 없으면 디바이스 목록 표시 (첫 페어링은 사용자가 선택). 디바이스 일단
+  // 연결되면 이후 모든 부팅에서 앱 자동 연결.
+  initialLocation: '/connect',
   routes: [
     StatefulShellRoute.indexedStack(
       builder: (context, state, navigationShell) =>
@@ -116,11 +127,49 @@ final _router = GoRouter(
   ],
 );
 
-class BlowfitApp extends ConsumerWidget {
+class BlowfitApp extends ConsumerStatefulWidget {
   const BlowfitApp({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<BlowfitApp> createState() => _BlowfitAppState();
+}
+
+class _BlowfitAppState extends ConsumerState<BlowfitApp> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    // 알림 권한 (Android 13+) — 다음 frame 에서 요청 (context 안정화 후).
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final permResult = await FlutterForegroundTask.checkNotificationPermission();
+      if (permResult != NotificationPermission.granted) {
+        await FlutterForegroundTask.requestNotificationPermission();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // 앱이 background → foreground 복귀할 때마다 자동 재연결 시도.
+    // ConnectScreen 의 initState 는 cold start 때만 발동하므로, 사용자가
+    // 홈 버튼 눌렀다가 다시 앱으로 돌아오는 시나리오에선 connect 트리거가
+    // 없음. 이 lifecycle hook 으로 그 시점에도 재연결 흐름 발동.
+    if (state == AppLifecycleState.resumed) {
+      debugPrint('[ble] app resumed — re-triggering autoReconnectProvider');
+      // Provider 를 invalidate 후 read → 첫 watch 시점 로직 재실행.
+      ref.invalidate(autoReconnectProvider);
+      ref.read(autoReconnectProvider);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     // Wire BLE session summaries into the local DB for the lifetime of the app.
     ref.watch(sessionPersistenceProvider);
     // 연결될 때마다 캐시된 목표 압력대를 펌웨어로 재전송 (펌웨어 reboot 시 default

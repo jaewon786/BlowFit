@@ -23,6 +23,8 @@ dependencies:
   intl: ^0.19.0
   shared_preferences: ^2.3.0
   rive: ^0.14.0
+  # 안드로이드 foreground service — 앱 종료 후에도 BLE 연결 유지 (auto-reconnect).
+  flutter_foreground_task: ^8.10.0
 
 dev_dependencies:
   flutter_test:

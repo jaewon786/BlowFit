@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/ble/ble_error_translator.dart';
+import '../../core/ble/ble_foreground_task.dart';
 import '../../core/ble/ble_permissions.dart';
 import '../../core/ble/ble_providers.dart';
 import '../../core/ble/discovered_device.dart';
@@ -112,6 +113,12 @@ class _ConnectScreenState extends ConsumerState<ConnectScreen> {
       await ref.read(bleManagerProvider).connect(d);
       final store = await ref.read(lastDeviceStoreProvider.future);
       await store.save(LastDevice(id: d.id, name: d.name));
+
+      // Foreground service 를 위해 SharedPreferences 에도 저장 (별도 isolate 에서 접근).
+      await BleForegroundService.saveLastDeviceId(d.id, d.name);
+      // Service 시작 — 앱 종료 후에도 자동 재연결 유지.
+      await BleForegroundService.startService();
+
       if (!mounted) return true;
       if (context.canPop()) {
         context.pop();

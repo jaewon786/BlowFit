@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
@@ -85,7 +86,40 @@ class RealBleManager implements BleManager {
       }
     });
 
-    await fbp.connect(autoConnect: false, mtu: 185);
+    // autoConnect: true — OS 가 디바이스 광고 발견 시 자동 reconnect.
+    // 펌웨어 측 BLE 본딩 (BLESecurity) 과 조합되면 OS 가 페어된 디바이스로
+    // 인식하고 자동 재연결 흐름 활성.
+    //
+    // mtu: null 명시 — flutter_blue_plus 1.30+ 의 default mtu 가 non-null
+    // (보통 512) 이라 mtu 인자 생략하면 default 가 적용됨. 그러면 라이브러리
+    // 의 assertion `(mtu == null) || !autoConnect` 가 위반됨. null 명시로
+    // assertion 통과 → connect 후 별도로 requestMtu(185) 협상.
+    //
+    // autoConnect=true 일 땐 connect() 가 즉시 return — 실제 연결은 OS 가
+    // 백그라운드에서 진행. 따라서 discoverServices() 호출 전 connectionState
+    // 가 connected 될 때까지 명시적 대기 필요.
+    debugPrint('[ble] calling connect(autoConnect: true, mtu: null)');
+    await fbp.connect(autoConnect: true, mtu: null);
+
+    // 실제 연결 완료까지 대기 (timeout 30s).
+    debugPrint('[ble] waiting for connection to establish...');
+    await fbp.connectionState
+        .firstWhere((s) => s == BluetoothConnectionState.connected)
+        .timeout(const Duration(seconds: 30), onTimeout: () {
+      throw TimeoutException(
+          'BLE connection timeout — device may be out of range or off');
+    });
+    debugPrint('[ble] connection established');
+
+    // MTU 협상 (Android 만; iOS 는 자동).
+    if (!kIsWeb && Platform.isAndroid) {
+      try {
+        await fbp.requestMtu(185);
+        debugPrint('[ble] MTU set to 185');
+      } catch (e) {
+        debugPrint('[ble] requestMtu(185) failed: $e (fallback to default)');
+      }
+    }
     final services = await fbp.discoverServices();
     final svc = services.firstWhere(
       (s) => s.uuid == BlowfitUuids.service,
