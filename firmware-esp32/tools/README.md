@@ -8,8 +8,8 @@
 
 | 폴더 | 목적 | 검증 단계 |
 |---|---|---|
-| `i2c_scan/` | I²C 버스 전체 스캔 → Click 보드의 MCP3221 주소 확인 (예상 0x4D) | MS2 |
-| `mcp3221_test/` | MCP3221 단독 read + ratio + cmH₂O 변환 검증 (호흡 입력) | MS3 *(예정)* |
+| `i2c_scan/` | I²C 버스 전체 스캔 → Click 보드의 MCP3221 주소 확인 (실측 0x4D) | MS2 ✅ |
+| `mcp3221_test/` | MCP3221 단독 read + ratio + cmH₂O 변환 검증 (호흡 입력) | MS3 |
 
 ## 사용 (각 sketch 공통)
 

@@ -88,6 +88,12 @@ void scan_once(uint32_t freq_hz) {
 }
 
 void setup() {
+  // T-Display S3 의 화면 LDO enable (GPIO15) — i2c_scan 자체엔 화면이 필요
+  // 없지만 사용자가 보드 상태를 시각 확인할 수 있도록 켜둠. 본 펌웨어의
+  // bootHardware() 와 동일한 동작.
+  pinMode(15, OUTPUT);
+  digitalWrite(15, HIGH);
+
   Serial.begin(115200);
   delay(500);
   Serial.println();
