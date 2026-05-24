@@ -1,16 +1,28 @@
-// sensor.cpp — XGZP6847A010KPGPN33 (양방향 ±102 cmH₂O) 구현.
+// sensor.cpp — MPXV7007DP (MikroE Diff Press Click) + MCP3221 I²C ADC.
 //
-// 호스트 g++ 테스트 빌드 호환을 위해 ARDUINO 매크로 분기.
+// 양방향 차압 센서, ratiometric 출력. JP1=3V3 위치 + Click 보드 위 3V3↔5V
+// short 로 단일 3.3V 레일 운용 (under-spec, 호흡 훈련 영역엔 충분).
+//
+// 변환식 (Vs 무관 ratiometric):
+//   ratio = adc / 4095     ← MCP3221 12-bit, VDD 대비 ratiometric
+//   ΔP_kPa = (ratio - 0.5) / 0.057
+//   ΔP_cmH2O = ΔP_kPa × 10.197
+//
+// 호스트 g++ 테스트 빌드 호환:
+//   - ARDUINO 매크로 분기로 Wire 의존성 격리
+//   - hostSetAdc(int) 로 fake ADC value 주입 가능
 
 #include "sensor.h"
 #include "config.h"
 
+#include <cmath>
+
 #if defined(ARDUINO)
   #include <Arduino.h>
+  #include <Wire.h>
 #else
-  // 호스트 테스트 stub — analogRead 가짜 + delay 무시.
-  static int g_hostAdc = 0;
-  inline int analogRead(int) { return g_hostAdc; }
+  // 호스트 테스트 stub — Wire 없음.
+  static int g_hostAdc = 2048;   // 영점 근처 default
   namespace sensor { void hostSetAdc(int adc) { g_hostAdc = adc; } }
 #endif
 
@@ -21,6 +33,27 @@ namespace {
   float g_emaCurrent = 0.0f;
   constexpr float EMA_ALPHA = 0.3f;  // EMA 강도 — 노이즈 / 응답성 trade-off.
   TickHook g_tickHook = nullptr;     // calibrate 동안 매 sample 마다 호출 (LVGL refresh).
+
+  /// MCP3221 에서 12-bit ADC 값 read.
+  /// 반환: 0..4095 (정상), -1 (5회 retry 후 I²C 통신 실패)
+  /// 일시적 BLE/LVGL 간섭으로 한 번 실패해도 retry 로 흡수.
+  int readMcp3221() {
+#if defined(ARDUINO)
+    for (int attempt = 0; attempt < 5; ++attempt) {
+      const uint8_t got = Wire.requestFrom(MCP3221_ADDR, (uint8_t)2);
+      if (got >= 2) {
+        const uint8_t hi = Wire.read();
+        const uint8_t lo = Wire.read();
+        return ((uint16_t)(hi & 0x0F) << 8) | lo;
+      }
+      if (attempt < 4) delay(2);  // 2ms 대기 후 재시도
+    }
+    return -1;
+#else
+    return g_hostAdc;
+#endif
+  }
+
 }  // anonymous
 
 void setTickHook(TickHook hook) {
@@ -28,9 +61,13 @@ void setTickHook(TickHook hook) {
 }
 
 float adcToCmH2O(int adc, float zeroOffsetCmH2O) {
-  const float voltage = (adc * ADC_VREF) / static_cast<float>(ADC_MAX);
-  const float kPa = (voltage - ZERO_VOLTAGE) / K_FACTOR;
+  // adc < 0 = I²C 실패 — 0 으로 처리 (영점에서 적용).
+  if (adc < 0) return -zeroOffsetCmH2O;
+
+  const float ratio = adc / static_cast<float>(ADC_MAX);
+  const float kPa = (ratio - ZERO_RATIO) / K_FACTOR_RATIO;
   const float cm = kPa * KPA_TO_CMH2O;
+
   // saturation guard
   float clamped = cm - zeroOffsetCmH2O;
   if (clamped > MAX_CMH2O) clamped = MAX_CMH2O;
@@ -40,29 +77,39 @@ float adcToCmH2O(int adc, float zeroOffsetCmH2O) {
 
 void calibrateZero() {
   // 첫 N 샘플 평균을 zero offset 으로 저장.
-  // 이 함수는 setup() 에서 한 번만 호출 — 5초 지연 발생.
+  // setup() 에서 한 번만 호출 — ~2초 지연 발생 (200 sample × 10ms).
   double accumulator = 0.0;
+  int valid_samples = 0;
   for (int i = 0; i < ZERO_CALIBRATION_SAMPLES; i++) {
-    const int adc = analogRead(pins::PRESSURE_SENSOR);
-    accumulator += adcToCmH2O(adc, /*zeroOffset=*/0.0f);
+    const int adc = readMcp3221();
+    if (adc >= 0) {
+      accumulator += adcToCmH2O(adc, /*zeroOffset=*/0.0f);
+      valid_samples++;
+    }
 #if defined(ARDUINO)
-    // LVGL refresh hook — 등록되어 있으면 매 sample 마다 호출 → boot 화면의
-    // spinner 등 애니메이션이 5초 보정 동안에도 계속 회전.
     if (g_tickHook) g_tickHook();
-    delay(10);  // 100Hz 샘플링 간격
+    delay(10);
 #endif
   }
-  g_zeroOffset = static_cast<float>(accumulator / ZERO_CALIBRATION_SAMPLES);
+  // I²C 실패가 많아 valid sample 부족 시 영점 0 유지 (보수적).
+  if (valid_samples > ZERO_CALIBRATION_SAMPLES / 2) {
+    g_zeroOffset = static_cast<float>(accumulator / valid_samples);
+  } else {
+    g_zeroOffset = 0.0f;
+  }
 }
 
 bool recalibrateZero() {
-  // 영점 재보정 — 사용자 트리거. setup 의 calibrateZero 와 동일.
   calibrateZero();
   return true;
 }
 
 void tick() {
-  const int adc = analogRead(pins::PRESSURE_SENSOR);
+  const int adc = readMcp3221();
+  if (adc < 0) {
+    // I²C 통신 실패 — EMA 유지 (값 안 갱신, decay 안 함).
+    return;
+  }
   const float instant = adcToCmH2O(adc, g_zeroOffset);
   g_emaCurrent = EMA_ALPHA * instant + (1.0f - EMA_ALPHA) * g_emaCurrent;
 }

@@ -8,6 +8,7 @@
 //   - 압력값/카운트다운/진행률 매 tick 화면 갱신
 
 #include <Arduino.h>
+#include <Wire.h>
 #include <lvgl.h>
 
 #include "config.h"
@@ -24,13 +25,18 @@
 #include "display/screens/screen_rest.h"
 #include "display/screens/screen_summary.h"
 
-// ----- 시리얼 + 디스플레이 전원 부트 -----
+// ----- 시리얼 + 디스플레이 전원 + I²C 부트 -----
 static void bootHardware() {
 #if HAS_DISPLAY
   pinMode(pins::TFT_POWER_ON, OUTPUT);
   digitalWrite(pins::TFT_POWER_ON, HIGH);
   delay(50);
 #endif
+  // I²C bus init — sensor.cpp 의 MCP3221 read 가 Wire 사용.
+  Wire.begin(pins::I2C_SDA, pins::I2C_SCL, sensor::I2C_FREQ_HZ);
+  Serial.printf("[i2c] init SDA=GPIO%u SCL=GPIO%u @ %lu Hz\n",
+                (unsigned)pins::I2C_SDA, (unsigned)pins::I2C_SCL,
+                (unsigned long)sensor::I2C_FREQ_HZ);
 }
 
 // ----- 버튼 처리 (debounce + edge detect) -----

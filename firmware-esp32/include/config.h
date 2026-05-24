@@ -54,11 +54,6 @@ namespace pins {
   constexpr uint8_t BUTTON_BOOT = 0;   // 부트 버튼
   constexpr uint8_t BUTTON_USER = 14;  // 사용자 버튼
 
-  // ===== DEPRECATED (XGZP6847 analog pin) =====
-  // sensor.cpp 가 아직 analogRead 기반이라 build 호환 목적으로만 유지.
-  // MS4 에서 sensor.cpp Wire/I²C 교체 시 함께 제거.
-  constexpr uint8_t PRESSURE_SENSOR = 4;
-
 }  // namespace pins
 
 // ----- Pressure sensor (MPXV7007DP via MikroE Diff Press Click + MCP3221) -----
@@ -83,7 +78,10 @@ namespace sensor {
   // MCP3221 I²C 주소 — 0x48~0x4F 중 하나. MikroE Click 기본 0x4D 추정.
   // MS2 (tools/i2c_scan) 로 실측 확인 후 필요 시 갱신.
   constexpr uint8_t MCP3221_ADDR = 0x4D;
-  constexpr uint32_t I2C_FREQ_HZ = 400000;   // Fast-mode (MCP3221 spec: ≤400kHz @ 3.3V)
+  // I²C frequency: 100kHz standard-mode. 400kHz Fast-mode 도 가능하지만 본
+  // 펌웨어의 LVGL/BLE task 점유 환경에선 100kHz 가 더 안정적. i2c_scan
+  // sketch 는 가벼워서 400kHz OK 였음.
+  constexpr uint32_t I2C_FREQ_HZ = 100000;   // Standard-mode (안정성 우선)
 
   // 영점 보정용 — 부팅 후 첫 N 샘플 평균을 zeroOffset 로 저장.
   // 부팅 시간 2초 = 200 sample × 10ms. 더 길게 (500 = 5초) 하면 평균 noise
@@ -94,13 +92,6 @@ namespace sensor {
   // 보수적으로 설정 → 비정상 입력은 clamp.
   constexpr float MIN_CMH2O = -71.0f;
   constexpr float MAX_CMH2O = +71.0f;
-
-  // ===== DEPRECATED (XGZP6847A010KPGPN33) =====
-  // 아래 상수는 sensor.cpp 가 아직 analogRead 기반이라 build 호환 목적으로만
-  // 유지. MS4 에서 sensor.cpp 를 Wire/I²C 로 교체할 때 함께 제거.
-  constexpr float ADC_VREF        = 3.3f;
-  constexpr float ZERO_VOLTAGE    = 1.45f;
-  constexpr float K_FACTOR        = 0.125f;
 
 }  // namespace sensor
 
