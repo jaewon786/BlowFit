@@ -20,7 +20,12 @@ namespace {
   float g_zeroOffset = 0.0f;
   float g_emaCurrent = 0.0f;
   constexpr float EMA_ALPHA = 0.3f;  // EMA 강도 — 노이즈 / 응답성 trade-off.
+  TickHook g_tickHook = nullptr;     // calibrate 동안 매 sample 마다 호출 (LVGL refresh).
 }  // anonymous
+
+void setTickHook(TickHook hook) {
+  g_tickHook = hook;
+}
 
 float adcToCmH2O(int adc, float zeroOffsetCmH2O) {
   const float voltage = (adc * ADC_VREF) / static_cast<float>(ADC_MAX);
@@ -41,6 +46,9 @@ void calibrateZero() {
     const int adc = analogRead(pins::PRESSURE_SENSOR);
     accumulator += adcToCmH2O(adc, /*zeroOffset=*/0.0f);
 #if defined(ARDUINO)
+    // LVGL refresh hook — 등록되어 있으면 매 sample 마다 호출 → boot 화면의
+    // spinner 등 애니메이션이 5초 보정 동안에도 계속 회전.
+    if (g_tickHook) g_tickHook();
     delay(10);  // 100Hz 샘플링 간격
 #endif
   }

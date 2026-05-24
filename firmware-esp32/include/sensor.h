@@ -30,4 +30,10 @@ namespace sensor {
   /// 영점 offset 직접 read — 디버그/캘리브레이션 UI 용.
   float zeroOffset();
 
+  /// calibrateZero / recalibrateZero 의 sample 사이 (10ms 간격) 마다 호출될
+  /// hook. main.cpp 에서 LVGL refresh (lvgl_port::tick()) 를 등록하면 5초
+  /// 영점 보정 동안에도 boot 화면의 spinner 가 계속 회전. nullptr 이면 무시.
+  using TickHook = void(*)();
+  void setTickHook(TickHook hook);
+
 }  // namespace sensor

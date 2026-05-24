@@ -86,7 +86,9 @@ namespace sensor {
   constexpr uint32_t I2C_FREQ_HZ = 400000;   // Fast-mode (MCP3221 spec: ≤400kHz @ 3.3V)
 
   // 영점 보정용 — 부팅 후 첫 N 샘플 평균을 zeroOffset 로 저장.
-  constexpr int   ZERO_CALIBRATION_SAMPLES = 500;  // 100Hz × 5초
+  // 부팅 시간 2초 = 200 sample × 10ms. 더 길게 (500 = 5초) 하면 평균 noise
+  // 감소하지만 호흡 훈련 응용엔 200 sample 도 충분.
+  constexpr int   ZERO_CALIBRATION_SAMPLES = 200;  // 100Hz × 2초
 
   // 안전한 측정 범위 (saturation guard). MPXV7007 풀스케일 ±71 cmH₂O 보다 약간
   // 보수적으로 설정 → 비정상 입력은 clamp.

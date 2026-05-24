@@ -13,8 +13,12 @@
 #include "config.h"
 #include "sensor.h"
 #include "session.h"
+#include "ble_service.h"
 #include "display/lvgl_port.h"
 #include "display/theme.h"
+#include "display/screens/screen_boot.h"
+#include "display/screens/screen_pairwait.h"
+#include "display/screens/screen_pairconnected.h"
 #include "display/screens/screen_standby.h"
 #include "display/screens/screen_training.h"
 #include "display/screens/screen_rest.h"
@@ -123,14 +127,16 @@ void setup() {
 
 #if HAS_LVGL
   lvgl_port::begin();
-  // 초기 화면 = standby
-  screens::standby_show();
-  screens::standby_set_connected(false);
-  screens::standby_set_battery(-1);
+  // 부팅 화면 표시 + 첫 LVGL refresh (즉시 그려지도록).
+  screens::boot_show();
+  lvgl_port::tick();
+  // calibrateZero 의 매 sample 사이에 LVGL refresh 가 호출되도록 hook 등록.
+  // → 2초 보정 동안 spinner 계속 회전 (총 부팅 ≈ 2초).
+  sensor::setTickHook([]() { lvgl_port::tick(); });
 #endif
 
-  // 영점 보정.
-  Serial.println("Calibrating zero (5s)...");
+  // 영점 보정 — 2초 (200 sample × 10ms). hook 덕에 spinner 회전 유지.
+  Serial.println("Showing boot screen + calibrating zero (2s)...");
   sensor::calibrateZero();
   Serial.printf("Zero offset = %.2f cmH2O\n", sensor::zeroOffset());
 
@@ -143,6 +149,39 @@ void setup() {
   session::begin();
   // 영점 보정 끝났으므로 자연스럽게 Standby 로 진입.
 
+#if HAS_BLE
+  // BLE GATT — 광고 시작. 앱이 prefix 'BlowFit' 로 스캔하면 발견됨.
+  ble_service::begin();
+
+  // 부팅 흐름: boot 화면 → 페어링 대기 화면 (30초 timeout) → 연결되면 연결완료
+  // 화면 → Standby. 30초 안에 앱이 연결 안 해도 Standby 진입 — 디바이스 단독
+  // 사용 가능. 백그라운드 BLE 광고는 계속 → 앱이 나중에 켜져도 어느 시점에서든
+  // 자동 연결 (standby 화면의 BT dot 가 자동 갱신).
+  Serial.println("Waiting for BLE pairing (30s timeout)...");
+  screens::pairwait_show();
+  const uint32_t pair_until = millis() + 30000;
+  while (!ble_service::isConnected() && (int32_t)(pair_until - millis()) > 0) {
+    lvgl_port::tick();
+    delay(50);
+    if (digitalRead(pins::BUTTON_BOOT) == LOW) {
+      Serial.println("[ble] pairing skipped by BOOT button");
+      break;
+    }
+  }
+
+  if (ble_service::isConnected()) {
+    Serial.println("[ble] paired — showing connected screen (2s)");
+    screens::pairconnected_show();
+    const uint32_t until = millis() + 2000;
+    while ((int32_t)(until - millis()) > 0) {
+      lvgl_port::tick();
+      delay(20);
+    }
+  } else {
+    Serial.println("[ble] pairing timeout — entering Standby (advertising continues)");
+  }
+#endif
+
   Serial.println("Setup complete. Press BOOT button to start session.");
 }
 
@@ -150,11 +189,26 @@ void setup() {
 void loop() {
   const uint32_t now = millis();
 
-  // 100Hz 압력 샘플링.
+  // 100Hz 압력 샘플링 + BLE Pressure Stream 누적.
   static uint32_t lastSampleMs = 0;
+  static int16_t  ble_sample_buf[10];
+  static uint8_t  ble_sample_idx = 0;
   if (now - lastSampleMs >= 10) {
     lastSampleMs = now;
     sensor::tick();
+
+#if HAS_BLE
+    // cmH2O × 10 의 int16 으로 변환 후 buffer 에 누적. 10개 모이면 notify.
+    const float v = sensor::currentCmH2O();
+    int32_t s32 = (int32_t)lroundf(v * 10.0f);
+    if (s32 >  32767) s32 =  32767;
+    if (s32 < -32768) s32 = -32768;
+    ble_sample_buf[ble_sample_idx++] = (int16_t)s32;
+    if (ble_sample_idx >= 10) {
+      ble_sample_idx = 0;
+      ble_service::pushSamples(ble_sample_buf, 10);
+    }
+#endif
   }
 
   // 버튼 입력 — 부팅 후 1.5초 settle 통과 후에만 처리 (floating 핀 안정화).
@@ -185,8 +239,46 @@ void loop() {
   if (cur != last_state) {
     Serial.printf("[state] %u -> %u\n", (unsigned)last_state, (unsigned)cur);
     switchScreenFor(cur);
+
+#if HAS_BLE
+    // Device State notify (4B). orifice/battery 는 placeholder (M9 NVS 후 실값).
+    ble_service::pushState((uint8_t)cur, /*orifice=*/0, /*battery=*/100, /*charging=*/false);
+
+    // Summary 진입 시 Session Summary notify (32B). state machine 의 stats() 활용.
+    if (cur == session::State::Summary) {
+      const auto& st = session::stats();
+      ble_service::SummaryFields s = {
+        .startEpoch    = ble_service::startEpoch(),
+        .durationSec   = st.duration_sec,
+        .maxPressure   = st.max_pressure,
+        .avgPressure   = st.avg_pressure,
+        .enduranceSec  = st.hit_ms / 1000,
+        .orificeLevel  = 0,     // TODO M9
+        .targetHits    = 0,     // TODO M9 (15s hold count)
+        .sampleCount   = (uint16_t)((uint32_t)st.duration_sec * 100u > 65535u ? 65535u
+                                    : (uint16_t)((uint32_t)st.duration_sec * 100u)),
+        .crc32         = 0,     // TODO M9
+        .sessionId     = 0,     // TODO M9 (NVS counter)
+      };
+      ble_service::pushSummary(s);
+    }
+#endif
+
     last_state = cur;
   }
+
+#if HAS_BLE
+  // BLE 연결 상태 변화 → standby 화면 BT dot 동기화 (현재 Standby state 일 때만).
+  static bool last_ble_connected = false;
+  const bool ble_now = ble_service::isConnected();
+  if (last_ble_connected != ble_now) {
+    last_ble_connected = ble_now;
+    Serial.printf("[ble] connection state -> %s\n", ble_now ? "connected" : "disconnected");
+    if (cur == session::State::Standby) {
+      screens::standby_set_connected(ble_now);
+    }
+  }
+#endif
 
   // Training 화면이면 압력 + 카운트다운 + 진행률 실시간 갱신.
   static uint32_t lastUpdate20HzMs = 0;
