@@ -225,7 +225,11 @@ class BleForegroundService {
       ),
       foregroundTaskOptions: ForegroundTaskOptions(
         eventAction: ForegroundTaskEventAction.repeat(30000),  // 30초마다
-        autoRunOnBoot: false,   // TODO: 부팅 후 자동 시작은 별도 옵션
+        // 폰 재부팅 후에도 자동 service 시작 (RECEIVE_BOOT_COMPLETED 권한
+        // 활용). 사용자가 한 번 페어링한 디바이스에 부팅 직후부터 자동 연결.
+        // 일부 OEM (Samsung, Xiaomi 등) 은 OS 설정에서 추가 권한 활성화 필요
+        // 할 수 있음 — "자동 시작 허용" 또는 "배터리 사용량 제한 없음".
+        autoRunOnBoot: true,
         autoRunOnMyPackageReplaced: true,
         allowWakeLock: true,
         allowWifiLock: false,
