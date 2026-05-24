@@ -18,7 +18,7 @@
 
 핵심: **분압 회로 / 전압 클램프 불필요 + 차압 = 호기/흡기 자동 구분 + 영점 드리프트 최소**.
 
-## 1. 핀 할당 (확정)
+## 1. 핀 할당 (확정 — 2026-05-24 갱신)
 
 ```
 LILYGO T-Display S3 — 사용자 외부 헤더
@@ -27,12 +27,16 @@ LILYGO T-Display S3 — 사용자 외부 헤더
 ├─ GPIO10  ─ Vibration (PWM) [기존 유지]
 ├─ GPIO11  ─ LED status [기존 유지]
 ├─ GPIO14  ─ BUTTON_USER (T-Display S3 내장) [기존 유지]
-├─ 3V3 ──┬─→ Click 3.3V  (MCP3221 VDD + I²C 풀업)
-│         └─→ Click 5V    (MPXV7007 Vs — under-spec 3.3V 공급, 게인 캘리브로 보정)
+├─ 3V3 ────→ Click 3.3V    (MCP3221 VDD + I²C 풀업)
+├─ 5V  ────→ Click 5V      (개발 단계: USB pass-through / 양산: TPS61023 boost)
 └─ GND ────→ Click GND
 ```
 
-**Click 5V 핀에 3.3V 공급** — 자세한 배경은 §7 (전원 토폴로지 결정) 참조. 4선만 사용 (T-Display 5V 핀 미사용).
+**전원 토폴로지**: Option A (TPS61023 boost 5V). 자세한 배경은 §7 참조.
+- **개발 단계 (지금~MS5)**: USB-C 연결 상태 → T-Display 5V 핀 (USB VBUS) 을 Click 5V 에 직결.
+- **양산 / 배터리 통합 (MS8 이후)**: TPS61023 모듈 추가로 배터리 3.7V → 5.2V boost.
+
+(이전 B1 옵션 — 3V3 → Click 5V 분기 — 은 Click 보드 schematic 미확인 상태에서 손상 위험이 있어 폐기됨.)
 
 ### GPIO43/44 안전성 검토
 
@@ -103,39 +107,89 @@ const float    cmH2O = kPa * 10.197f;
 - [ ] MPXV7007DP 의 양 포트 호스 연결 방향 — P1=호기측, P2=대기 (open) 가 표준. MS3 빌드 직전에 호기 = 양수 부호인지 시각 확인.
 - [ ] U자 수조 마노미터 준비 (캘리브 기준압 발생기) — MS6 시작 전 필요.
 
-## 7. 전원 토폴로지 (2026-05-21 결정)
+## 7. 전원 토폴로지 — 결정 변경 이력
 
-### 7.1 의사결정 — Option B1 (3.3V 단일 레일)
+### 7.0 결정 이력
 
-세 옵션 비교 후 **B1 선정**:
+| 날짜 | 결정 | 사유 |
+|---|---|---|
+| 2026-05-21 | B1 (3V3 분기 → 5V 핀) 선정 | 부품 없이 단순. **schematic 확인 없이 위험 가정** |
+| 2026-05-24 | **A (TPS61023 boost) 로 변경** | B1 의 위험성 재검토 — Click 보드 schematic 미확인 상태에서 5V 핀에 3.3V 공급은 다음 시나리오에서 손상 가능: ① 보드 내부에 5V→3.3V LDO 가 있는 경우 LDO 의 input ≤ output 으로 비정상 동작 + reverse current; ② op-amp/voltage divider scaling 회로가 5V 기준 설계라 3.3V 모드에서 정확도 unmapped. **schematic 확인 없는 안전 단정은 무리** → 가장 안전한 옵션 A 채택 |
 
-| 옵션 | 부품/공간 | 정확도 (캘리브 후) | 채택 여부 |
+### 7.1 의사결정 — Option A (TPS61023 boost 5V)
+
+| 옵션 | 부품/공간 | 안전성 | 채택 |
 |---|---|---|---|
-| A. TPS61023 boost (3.7V→5V) → Click 5V | +1~2천원, +17.8×11.3×5.6mm | ±0.5 cmH₂O | ❌ |
-| **B1. 3V3 → Click 3V3 + Click 5V 양쪽** | 0, 0 | **±0.7 cmH₂O** | ✅ |
-| B2. 3V3 → Click 3V3 만 (5V 미연결) | 0, 0 | 동작 안 함 (MPXV7007 Vs=0) | ❌ |
+| **A. TPS61023 boost (3.7V→5V)** | +모듈 1개 (17.8×11.3×5.6mm) | ✅ MPXV7007 spec (4.75~5.25V) 보장 | ⭐ |
+| ~~B1. 3V3 → Click 3V3 + Click 5V~~ | 0, 0 | ⚠️ Click 내부 회로 불확실 시 손상 가능 | ❌ 폐기 |
+| C. USB 5V 직결 | 0, 0 | ✅ 단 배터리 모드 불가 | 개발 단계만 |
 
 선정 이유:
-- 호흡 훈련 응용에 요구되는 정확도 (~±1 cmH₂O, zone 폭의 10%) 안에 들어옴
-- 케이스 portability 우선 — 부품/공간 최소화
-- 캘리브 절차는 1회성 (양산 시 공장 단계에서 처리 가능)
+- Click 내부 회로 검증 없이 underspec 전압 공급은 위험
+- TPS61023 모듈 ≈ 2천원, 작은 공간 (17.8×11.3×5.6mm) — portability 영향 미미
+- 정확도 spec (±1.5% FSS) 데이터시트 보장
+- 부팅 후 자동 시작 / 케이스 통합 단계에서 깔끔하게 통합
 
-### 7.2 회로상 작동 원리
+### 7.2 회로 — TPS61023 통합
 
 ```
-T-Display 3V3 ──┬──→ Click 3V3 핀  ──→ (내부) MCP3221 VDD  + I²C 풀업
-                └──→ Click 5V 핀  ──→ (내부) MPXV7007 Vs
-T-Display GND ────→ Click GND
-T-Display GPIO43 ─→ Click SDA
-T-Display GPIO44 ─→ Click SCL
+LiPo (3.7V) ──┬─→ T-Display S3 JST PH 1.25mm 배터리 입력
+              │     ↓
+              │     T-Display 내부 LDO → 3.3V → 화면/ESP32
+              │
+              └─→ TPS61023 IN ──→ (boost) ──→ OUT (5.2V) ──→ Click 5V 핀
+
+T-Display 3V3 ──→ Click 3V3   (MCP3221 VDD + I²C 풀업)
+T-Display GND ──→ Click GND   (+ TPS61023 GND)
+T-Display GPIO43 → Click SDA
+T-Display GPIO44 → Click SCL
 ```
 
-- MPXV7007 의 Vs 가 3.3V (datasheet spec 4.75~5.25V 밖) → 정확도 spec 미보장
-- 그러나 출력은 여전히 ratiometric: `Vout/Vs = 0.057×ΔP + 0.5`
-- MCP3221 VDD = MPXV7007 Vs = 3.3V (단일 레일) → ADC ratio 수식 변경 불필요
-- 잔여 오차: 칩 내부 온도/비선형 보상이 5V trim 이라 ~±2% gain 편차 → 게인 캘리브로 흡수
+핵심:
+- **Click 5V ← TPS61023 OUT (5.2V, datasheet spec 안)**
+- **Click 3V3 ← T-Display 3V3** (별도 레일 유지)
+- 두 레일 분리 = MikroE 표준 사용 패턴 그대로
 
-**T-Display 5V 핀은 사용 안 함** (USB 모드 동안에도 미사용 — 최종 배터리 모드와 동일 환경 유지하여 "USB 모드에선 동작했는데 배터리에선 다른 측정값" 같은 surprise 회피).
+### 7.3 변환식 — 변경 없음
+
+펌웨어 측 변환식은 그대로:
+```
+ratio = ADC / 4095 = Vout / Vs    ← ratiometric, Vs 무관
+ΔP_kPa = (ratio - 0.5) / 0.057
+ΔP_cmH2O = ΔP_kPa × 10.197
+```
+
+MCP3221 VDD = 3.3V, MPXV7007 Vs = 5.2V — 두 레일이 다르지만 MCP3221 의 input 은 보드 내부 회로 (scaling 또는 직결) 거쳐 자체 reference 기반으로 ADC 변환 → ratiometric 효과 그대로. 펌웨어의 config.h 변경 불필요.
+
+### 7.4 개발 단계 (지금~MS5)
+
+USB-C 항상 연결된 상태 → **T-Display 의 5V 핀 = USB VBUS pass-through 5V** → Click 5V 에 직접 연결해도 OK (옵션 C). 임시로 4선 (3V3, GND, SDA, SCL) + USB-5V → Click 5V 1선 = 총 5선.
+
+TPS61023 통합은 **MS8 (케이스 + 배터리 통합) 시점**에 진행.
+
+### 7.5 캘리브레이션 — 단순화
+
+5V 정상 spec 모드라 게인 캘리브 필수 아님 (선택). 영점 보정만 매 부팅 시:
+
+```cpp
+// sensor.h (현재 그대로)
+void calibrateZero();          // 매 부팅, 200 sample × 10ms = 2초
+float currentCmH2O();
+```
+
+양산 단계 정밀도 추가로 원하면 게인 캘리브 추가 가능 (U자 수조 마노미터 기준).
+
+### 7.6 배터리 통합 (MS8 이후)
+
+```
+LiPo 400mAh ─┬─→ JST PH → T-Display 배터리 입력 → 내부 LDO → 3.3V 레일
+             │
+             └─→ TPS61023 IN → OUT 5.2V → Click 5V
+
+TPS61023 소비: 5V × 7~10mA = 35~50mW
+3.7V 입력 + 88% 효율 → 배터리에서 ~11~15mA
+400mAh / 15mA = 약 27시간 (센서만 기준; 화면+ESP32+BLE 더 큰 비중)
+```
 
 ### 7.3 캘리브레이션 절차 (MS6 에서 구현)
 
@@ -159,11 +213,6 @@ void  loadCalibrationFromNVS();               // setup() 에서 호출
 - (a) 매 디바이스 1회 (양산 단계, 공장에서)
 - (b) 사용자가 정확도 의심 시 재캘리브 가능 (Settings UI 에서 트리거)
 
-### 7.4 배터리 통합 (케이스 설계 단계, MS8 이후)
-
-본 토폴로지 (B1) 는 **T-Display 의 3V3 핀** 만 사용 → 배터리 모드 (USB 미연결) 에서도 3V3 LDO 가 그대로 동작 → 추가 boost converter / 추가 배선 **불필요**.
-
-LiPo 400mAh + JST PH 1.25mm 커넥터 → T-Display S3 의 배터리 입력 → 내부 LDO → 3V3 핀 + 화면 + ESP32 + (분기) Click 보드 전원.
 
 ---
 
