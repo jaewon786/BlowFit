@@ -15,6 +15,7 @@
 #include "sensor.h"
 #include "session.h"
 #include "ble_service.h"
+#include "power.h"
 #include "display/lvgl_port.h"
 #include "display/theme.h"
 #include "display/screens/screen_boot.h"
@@ -126,10 +127,11 @@ void setup() {
   Serial.println("=========================================");
   Serial.println("BlowFit v4.0 - ESP32-S3 / T-Display S3");
   Serial.println("Build: " __DATE__ " " __TIME__);
-  Serial.println("M7: session state machine");
+  Serial.println("M7: session state machine, M11: power mgmt");
   Serial.println("=========================================");
 
   bootHardware();
+  power::begin();   // wakeup reason 출력 + PWR_LED ON
 
 #if HAS_LVGL
   lvgl_port::begin();
@@ -217,8 +219,13 @@ void loop() {
 #endif
   }
 
-  // 버튼 입력 — 부팅 후 1.5초 settle 통과 후에만 처리 (floating 핀 안정화).
+  // 전원 버튼 처리 (long-press = deep sleep). settle 후에만 활성.
   static const uint32_t BTN_SETTLE_MS = 1500;
+  if (now >= BTN_SETTLE_MS) {
+    power::tick(now);
+  }
+
+  // 버튼 입력 — 부팅 후 1.5초 settle 통과 후에만 처리 (floating 핀 안정화).
   if (now >= BTN_SETTLE_MS) {
     if (btn::pollFallingEdge(btn::g_boot, now)) {
       // BOOT 버튼 = toggle. Standby/Summary 면 start, 그 외 면 stop.

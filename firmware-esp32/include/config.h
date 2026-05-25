@@ -51,10 +51,30 @@ namespace pins {
   constexpr uint8_t TFT_POWER_ON = 15;  // LDO enable — 배터리 모드 필수
 
   // 사용자 입력 버튼 (T-Display S3 내장)
-  constexpr uint8_t BUTTON_BOOT = 0;   // 부트 버튼
-  constexpr uint8_t BUTTON_USER = 14;  // 사용자 버튼
+  constexpr uint8_t BUTTON_BOOT = 0;   // 부트 버튼 (short = startSession, long = deep sleep)
+  constexpr uint8_t BUTTON_USER = 14;  // 사용자 버튼 (short = stopSession)
+
+  // 외부 전원 버튼 (M11) — ETP164L 6x6 tact + LED.
+  // ESP32-S3 의 모든 GPIO 가 RTC GPIO 라 EXT0 deep sleep wakeup 가능.
+  // GPIO12 는 좌측 헤더 free + ADC1 가능 (배터리 측정 후 옵션).
+  constexpr uint8_t PWR_BUTTON  = 12;  // 외부 전원 버튼 (input pullup)
+  constexpr uint8_t PWR_LED     = 13;  // 외부 전원 LED (output, 220Ω 직렬)
 
 }  // namespace pins
+
+// ----- Power management (M11) -----
+namespace power {
+
+  // Deep sleep 진입 조건.
+  constexpr uint32_t LONG_PRESS_MS    = 2000;   // 전원 버튼 long-press = 2초
+  // BOOT 버튼은 short-press 가 startSession 이라 long-press 로 deep sleep.
+  // 외부 PWR_BUTTON (ETP164L) 은 short-press 만으로 deep sleep (별도 long
+  // press 의미 없음, 그저 켜고 끄기).
+
+  // Standby idle 시 자동 deep sleep (옵션 — 추후 활성화).
+  // constexpr uint32_t IDLE_DEEP_SLEEP_MS = 5UL * 60 * 1000;  // 5분
+
+}  // namespace power
 
 // ----- Pressure sensor (MPXV7007DP via MikroE Diff Press Click + MCP3221) -----
 // 양방향 차압 센서, 5V Vs, ±7 kPa (≈ ±71 cmH₂O). 보드 내장 MCP3221 12-bit I²C
