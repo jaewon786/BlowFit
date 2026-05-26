@@ -10,6 +10,8 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/db/db_providers.dart';
+import '../../core/db/trend_bucketing.dart';
 import '../../core/theme/blowfit_colors.dart';
 import '../../core/theme/blowfit_theme.dart';
 
@@ -201,7 +203,7 @@ class _TrendBgPainter extends CustomPainter {
 // Trend 콘텐츠 — Figma 좌표 그대로
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _TrendContent extends StatelessWidget {
+class _TrendContent extends ConsumerWidget {
   const _TrendContent({
     required this.f,
     required this.tabIndex,
@@ -217,6 +219,39 @@ class _TrendContent extends StatelessWidget {
   final VoidCallback onPrevMonth;
   final VoidCallback onNextMonth;
 
+  // ─── 차트 기하 (figma frame 좌표) ────────────────────────────
+  // X-axis: 66 (left) ~ 358 (right), width 292.
+  // Y-axis: 378 (top, +30 cmH₂O) ~ 521 (bottom, -30), 0 at 450.
+  //   y = 450 - pressure * 2.4
+  static const _chartLeft = 66.0;
+  static const _chartRight = 358.0;
+  static const _chartWidth = _chartRight - _chartLeft;
+  static const _chartZeroY = 450.0;
+  static const _pxPerCmH2O = 2.4;
+  static const _dotSize = 7.0;
+
+  /// 탭 index → TrendPeriod 매핑.
+  TrendPeriod get _period {
+    return TrendPeriod.values[tabIndex];
+  }
+
+  /// Bucket xPos (1-based) 를 차트 x 좌표로 변환. N 개 버킷을 [chartLeft,
+  /// chartRight] 에 균등 분포.
+  double _xForBucket(int xPos1Based, int bucketCount) {
+    final spacing = _chartWidth / bucketCount;
+    return _chartLeft + (xPos1Based - 0.5) * spacing - _dotSize / 2;
+  }
+
+  /// 호기 평균 (양수) 를 차트 y 좌표로. 위쪽 (양수 y).
+  double _yForExhale(double avg) =>
+      _chartZeroY - avg * _pxPerCmH2O - _dotSize / 2;
+
+  /// 흡기 평균 (절댓값 — 음수 미러) 를 차트 y 좌표로. 아래쪽.
+  /// DB 에 흡기 별도 stat 이 없으므로 호기 평균을 음수로 미러링. 추후 펌웨어
+  /// 가 호기/흡기 분리 통계 보내면 실제 값 사용.
+  double _yForInhale(double avg) =>
+      _chartZeroY + avg * _pxPerCmH2O - _dotSize / 2;
+
   static const _ink = Color(0xFF101010);
   static const _ink2 = Color(0xFF252525);
   static const _muted = Color(0xFF898989);
@@ -227,9 +262,13 @@ class _TrendContent extends StatelessWidget {
   static const _tabXs = [47.0, 140.0, 234.0, 329.0]; // 텍스트 left x
   static const _tabs = ['일간', '주간', '월간', '년간'];
 
-  List<Widget> _buildChartArea() {
+  List<Widget> _buildChartArea(WidgetRef ref) {
     // 선택된 탭의 indicator x = 텍스트 x - 27 (좌측 padding).
     final indicatorX = _tabXs[tabIndex] - 27;
+    // 실제 데이터 — period 별 버킷. AsyncValue.valueOrNull 이 null 이면 (로딩
+    // 중) 빈 리스트 — 차트 skeleton 만 보이고 dot 없음.
+    final buckets =
+        ref.watch(trendBucketsProvider(_period)).valueOrNull ?? const [];
     return [
       // 1. 일간 (선택된 탭) indicator — 흰색 박스, frame (indicatorX, 280, 79, 40.64)
       f.at(
@@ -393,24 +432,44 @@ class _TrendContent extends StatelessWidget {
           h: 1,
           child: Container(color: _muted.withValues(alpha: 0.25)),
         ),
-      // 8. 데이터 dot (Ellipse 49 at frame 126,422, 7×7 #0A89FC)
-      f.at(
-        x: 126,
-        y: 422,
-        w: 7,
-        h: 7,
-        child: Container(
-          decoration: const BoxDecoration(
-            color: DotColors.primary,
-            shape: BoxShape.circle,
+      // 8. 실제 데이터 dots — 호기 (blue, +Y) + 흡기 mirror (green, -Y).
+      // 데이터 없는 (sessionCount==0) 버킷은 dot 생략 — 빈 자리 그대로.
+      for (final b in buckets)
+        if (!b.isEmpty && b.avgExhale != null) ...[
+          // 호기 dot (파랑, 위쪽)
+          f.at(
+            x: _xForBucket(b.xPos, buckets.length),
+            y: _yForExhale(b.avgExhale!),
+            w: _dotSize,
+            h: _dotSize,
+            child: Container(
+              decoration: const BoxDecoration(
+                color: DotColors.primary,
+                shape: BoxShape.circle,
+              ),
+            ),
           ),
-        ),
-      ),
+          // 흡기 dot (초록, 아래쪽 mirror) — DB 에 흡기 별도 stat 없으므로
+          // 호기 평균을 음수로 미러링. 펌웨어가 호기/흡기 분리 stat 보내면
+          // 그때 실제 흡기 평균 사용.
+          f.at(
+            x: _xForBucket(b.xPos, buckets.length),
+            y: _yForInhale(b.avgExhale!),
+            w: _dotSize,
+            h: _dotSize,
+            child: Container(
+              decoration: const BoxDecoration(
+                color: DotColors.inhale,
+                shape: BoxShape.circle,
+              ),
+            ),
+          ),
+        ],
     ];
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return Stack(
       children: [
         // ─── 로고 (35×30 at 15,56) ────────────────────────────────
@@ -478,7 +537,7 @@ class _TrendContent extends StatelessWidget {
         // ─── 탭 + 차트 카드 (Figma Union 1:2136 모양) ─────────────
         //   union = 일간 indicator(20,280,79,40.64) + 차트카드(20,320,362,234)
         //   다른 탭 (주간/월간/년간) 텍스트는 union 밖 — 배경 잔디가 비침.
-        ..._buildChartArea(),
+        ..._buildChartArea(ref),
 
         // ─── 캘린더 카드 (362×348 at 20,575) ──────────────────────
         f.at(
@@ -542,13 +601,18 @@ class _TrendContent extends StatelessWidget {
 // Summary 카드 — 이번 주 1회 | 이번 달 1일 | 지금까지 1회
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _SummaryCard extends StatelessWidget {
+class _SummaryCard extends ConsumerWidget {
   const _SummaryCard({required this.f, required this.textColor});
   final _Frame f;
   final Color textColor;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final stats = ref.watch(trendSummaryStatsProvider).valueOrNull;
+    final weekSessions = stats?.thisWeekSessions ?? 0;
+    final monthDays = stats?.thisMonthDays ?? 0;
+    final total = stats?.totalSessions ?? 0;
+
     return Container(
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.8),
@@ -562,47 +626,40 @@ class _SummaryCard extends StatelessWidget {
             top: f.sx(18),
             child: _label('이번 주', textColor),
           ),
-          // "1회" (57, 203 → card 37, 35)
           Positioned(
             left: f.sx(37),
             top: f.sx(35),
-            child: _value('1회', textColor),
+            child: _value('$weekSessions회', textColor),
           ),
-          // divider 1 (137, 185, w=0, h=58 → card 117, 17)
           Positioned(
             left: f.sx(117),
             top: f.sx(17),
             child: Container(width: 1, height: f.sx(58), color: Colors.black12),
           ),
-          // "이번 달" (184, 186 → card 164, 18)
           Positioned(
             left: f.sx(164),
             top: f.sx(18),
             child: _label('이번 달', textColor),
           ),
-          // "1일" (181, 203 → card 161, 35)
           Positioned(
             left: f.sx(161),
             top: f.sx(35),
-            child: _value('1일', textColor),
+            child: _value('$monthDays일', textColor),
           ),
-          // divider 2 (261, 185 → card 241, 17)
           Positioned(
             left: f.sx(241),
             top: f.sx(17),
             child: Container(width: 1, height: f.sx(58), color: Colors.black12),
           ),
-          // "지금까지" (304, 186 → card 284, 18)
           Positioned(
             left: f.sx(284),
             top: f.sx(18),
             child: _label('지금까지', textColor),
           ),
-          // "1회" (305, 203 → card 285, 35)
           Positioned(
             left: f.sx(285),
             top: f.sx(35),
-            child: _value('1회', textColor),
+            child: _value('$total회', textColor),
           ),
         ],
       ),
@@ -635,7 +692,7 @@ class _SummaryCard extends StatelessWidget {
 // Calendar 카드 — 2026년 5월
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _CalendarCard extends StatelessWidget {
+class _CalendarCard extends ConsumerWidget {
   const _CalendarCard({
     required this.f,
     required this.month,
@@ -652,7 +709,10 @@ class _CalendarCard extends StatelessWidget {
   final Color calGray;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    // 이 달 훈련한 날짜 집합 (1-based day-of-month).
+    final trainedDays =
+        ref.watch(monthTrainedDaysProvider(month)).valueOrNull ?? const <int>{};
     // 카드 (20, 575) ~ (382, 923). card-local 좌표:
     //   < (50, 603, 5x10) → card (30, 28)
     //   "2026년 5월" (163, 601, 77x14) → card (143, 26), centered around 200
@@ -736,13 +796,22 @@ class _CalendarCard extends StatelessWidget {
                 ),
               ),
             ),
-          // 날짜 셀
+          // 날짜 셀 — 훈련한 날은 primary blue + bold, 평일은 calGray.
+          // 일요일 / 토요일은 본 색상 유지 (요일 헤더와 일관성).
           for (var d = 1; d <= daysInMonth; d++)
             () {
               final idx = d - 1 + firstDow;
               final row = idx ~/ 7;
               final col = idx % 7;
               if (row >= weekYs.length) return const SizedBox.shrink();
+              final trained = trainedDays.contains(d);
+              final cellColor = trained
+                  ? DotColors.primary
+                  : (col == 0
+                      ? DotColors.sunday.withValues(alpha: 0.7)
+                      : col == 6
+                          ? DotColors.saturday.withValues(alpha: 0.7)
+                          : calGray);
               return Positioned(
                 left: f.sx(dayXs[col] - 20),
                 top: f.sx(weekYs[row] - 575),
@@ -750,8 +819,9 @@ class _CalendarCard extends StatelessWidget {
                   '$d',
                   style: TextStyle(
                     fontSize: f.sx(13),
-                    fontWeight: FontWeight.w700,
-                    color: calGray,
+                    fontWeight:
+                        trained ? FontWeight.w700 : FontWeight.w500,
+                    color: cellColor,
                     fontFamily: BlowfitTheme.fontFamily,
                   ),
                 ),
@@ -767,27 +837,20 @@ class _CalendarCard extends StatelessWidget {
 // Achievements 카드
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _AchievementsCard extends StatelessWidget {
+class _AchievementsCard extends ConsumerWidget {
   const _AchievementsCard({required this.f, required this.ink});
   final _Frame f;
   final Color ink;
 
+  // Figma 의 item y 좌표 (frame, card-local 변환은 944 빼기). 최대 5개 표시
+  // — MilestoneEngine.compute 가 정확히 5개 반환.
+  static const _itemYs = [1017.0, 1056.0, 1098.0, 1140.0, 1182.0];
+
   @override
-  Widget build(BuildContext context) {
-    // 카드 (20, 944) ~ (382, 1292). card-local:
-    //   "업적" (44, 970, 17 Bold) → (24, 26)
-    //   items at y=1017/1056/1098/1140/1182/1224 (간격 ~41)
-    //   체크박스 (51, 1018, 15x15) → (31, 74)
-    //   item 텍스트 (82, 1017) → (62, 73), 13 SemiBold
-    const items = [
-      '1주차 - 첫 훈련 완료',
-      '2주차 - 연속 훈련 완료',
-      '2주차 - 연속 훈련 완료',
-      '2주차 - 연속 훈련 완료',
-      '2주차 - 연속 훈련 완료',
-      '2주차 - 연속 훈련 완료',
-    ];
-    const itemYs = [1017.0, 1056.0, 1098.0, 1140.0, 1182.0, 1224.0];
+  Widget build(BuildContext context, WidgetRef ref) {
+    final milestones = ref.watch(milestonesProvider).valueOrNull ?? const [];
+    final achievedColor = DotColors.primary;
+    final lockedColor = ink.withValues(alpha: 0.25);
 
     return Container(
       decoration: BoxDecoration(
@@ -810,32 +873,40 @@ class _AchievementsCard extends StatelessWidget {
               ),
             ),
           ),
-          // items
-          for (var i = 0; i < items.length; i++) ...[
+          // milestones — 미달성 항목은 체크박스 회색 / 텍스트 fade.
+          for (var i = 0;
+              i < milestones.length && i < _itemYs.length;
+              i++) ...[
             // 체크박스
             Positioned(
               left: f.sx(51 - 20),
-              top: f.sx(itemYs[i] + 1 - 944),
+              top: f.sx(_itemYs[i] + 1 - 944),
               child: Container(
                 width: f.sx(15),
                 height: f.sx(15),
                 decoration: BoxDecoration(
-                  color: DotColors.primary,
+                  color: milestones[i].achievedAt != null
+                      ? achievedColor
+                      : lockedColor,
                   borderRadius: BorderRadius.circular(f.sx(3)),
                 ),
-                child: Icon(Icons.check, size: f.sx(11), color: Colors.white),
+                child: milestones[i].achievedAt != null
+                    ? Icon(Icons.check, size: f.sx(11), color: Colors.white)
+                    : null,
               ),
             ),
             // 텍스트
             Positioned(
               left: f.sx(82 - 20),
-              top: f.sx(itemYs[i] - 944),
+              top: f.sx(_itemYs[i] - 944),
               child: Text(
-                items[i],
+                milestones[i].title,
                 style: TextStyle(
                   fontSize: f.sx(13),
                   fontWeight: FontWeight.w600,
-                  color: ink,
+                  color: milestones[i].achievedAt != null
+                      ? ink
+                      : ink.withValues(alpha: 0.5),
                   fontFamily: BlowfitTheme.fontFamily,
                 ),
               ),

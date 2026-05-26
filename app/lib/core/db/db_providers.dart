@@ -154,6 +154,65 @@ final firstSessionStatsProvider =
   return ref.watch(sessionRepositoryProvider).firstSessionStats();
 });
 
+/// Trend 화면 Calendar — 주어진 달에서 1+ 세션 있는 day-of-month 집합.
+/// `month` 의 year/month 만 사용 (day 는 무시).
+final monthTrainedDaysProvider =
+    StreamProvider.family<Set<int>, DateTime>((ref, month) {
+  final repo = ref.watch(sessionRepositoryProvider);
+  final monthStart = DateTime(month.year, month.month, 1);
+  final nextMonth = DateTime(month.year, month.month + 1, 1);
+  return repo.watchSince(monthStart).map((sessions) {
+    final days = <int>{};
+    for (final s in sessions) {
+      final t = s.receivedAt;
+      if (t.isBefore(monthStart) || !t.isBefore(nextMonth)) continue;
+      days.add(t.day);
+    }
+    return days;
+  });
+});
+
+/// Trend 화면 Summary 카드 — "이번 주 N회 | 이번 달 N일 | 지금까지 N회".
+///   thisWeekSessions: 이번 주 (월요일 시작) 의 총 세션 수.
+///   thisMonthDays   : 이번 달의 distinct 날짜 수 (세션 1개 이상인 날).
+///   totalSessions   : 지금까지 누적 세션 수.
+typedef TrendSummaryStats = ({
+  int thisWeekSessions,
+  int thisMonthDays,
+  int totalSessions,
+});
+
+final trendSummaryStatsProvider = StreamProvider<TrendSummaryStats>((ref) {
+  final repo = ref.watch(sessionRepositoryProvider);
+  // 1년 윈도우 — 사용자 대부분이 1년 안에서 사용. "지금까지" 는 정확히는
+  // 무제한이지만 watchSince(1년 전) 으로 근사. 추후 watchAll 필요 시 별도
+  // 메서드로 분리.
+  final since = DateTime.now().subtract(const Duration(days: 365));
+  return repo.watchSince(since).map((sessions) {
+    final now = DateTime.now();
+    // 이번 주 월요일 00:00.
+    final daysFromMon = now.weekday - DateTime.monday;
+    final monday = DateTime(now.year, now.month, now.day)
+        .subtract(Duration(days: daysFromMon));
+    final monthStart = DateTime(now.year, now.month, 1);
+
+    var weekSessions = 0;
+    final monthDays = <DateTime>{};
+    for (final s in sessions) {
+      final t = s.receivedAt;
+      if (!t.isBefore(monday)) weekSessions++;
+      if (!t.isBefore(monthStart) && t.year == now.year && t.month == now.month) {
+        monthDays.add(DateTime(t.year, t.month, t.day));
+      }
+    }
+    return (
+      thisWeekSessions: weekSessions,
+      thisMonthDays: monthDays.length,
+      totalSessions: sessions.length,
+    );
+  });
+});
+
 /// Trend 화면 마일스톤 카드용 — 최근 200일 세션 + 현재 streak 합쳐서
 /// MilestoneEngine 으로 5종 마일스톤 계산.
 final milestonesProvider = StreamProvider<List<Milestone>>((ref) {

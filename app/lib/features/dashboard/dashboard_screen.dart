@@ -24,6 +24,8 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/ble/ble_providers.dart';
 import '../../core/ble/blowfit_uuids.dart';
+import '../../core/db/db_providers.dart';
+import '../../core/storage/storage_providers.dart';
 import '../../core/theme/blowfit_colors.dart';
 import '../../core/theme/blowfit_theme.dart';
 import '../settings/settings_screen.dart';
@@ -328,21 +330,29 @@ class _HomeContent extends StatelessWidget {
           child: buildIcon('assets/dot/icon_bell.png', 30, 30),
         ),
 
-        // ─── "안녕하세요. 오재원님" (15 SemiBold at 19,112) ────────
+        // ─── "안녕하세요. {이름}님" (15 SemiBold at 19,112) ────────
+        // UserProfile.name 이 없으면 (온보딩 미완) "사용자" fallback.
         f.at(
           x: 19,
           y: 108,
           child: Row(
             children: [
-              Text(
-                '안녕하세요. 오재원님',
-                style: TextStyle(
-                  fontSize: f.sx(15),
-                  fontWeight: FontWeight.w600,
-                  height: 1.2,
-                  color: textPrimary,
-                  fontFamily: BlowfitTheme.fontFamily,
-                ),
+              Consumer(
+                builder: (_, ref, __) {
+                  final store =
+                      ref.watch(userProfileStoreProvider).valueOrNull;
+                  final name = store?.load()?.name ?? '사용자';
+                  return Text(
+                    '안녕하세요. $name님',
+                    style: TextStyle(
+                      fontSize: f.sx(15),
+                      fontWeight: FontWeight.w600,
+                      height: 1.2,
+                      color: textPrimary,
+                      fontFamily: BlowfitTheme.fontFamily,
+                    ),
+                  );
+                },
               ),
               SizedBox(width: f.sx(4)),
               // Figma 의 12×12 노란 smiley 이모지 (home_light.png 에서 직접 추출).
@@ -477,13 +487,19 @@ class _HomeContent extends StatelessWidget {
 // 통계 카드
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _StatsCard extends StatelessWidget {
+class _StatsCard extends ConsumerWidget {
   const _StatsCard({required this.f, required this.isDark});
   final _Frame f;
   final bool isDark;
 
+  // 일일 목표 — 30분. 향후 설정 화면에서 사용자 정의 가능하도록 SharedPreferences
+  // 로 이전 가능. 한 cycle = 호기 10s + 호기쉼 3s + 흡기 10s + 흡기쉼 3s = 26s.
+  static const _dailyGoalMinutes = 30;
+  static const _cycleSeconds = 26;
+  static const _phaseSeconds = 10; // 호기 또는 흡기 phase 만의 시간.
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final cardBg = isDark ? DotColors.darkCard : DotColors.lightCard;
     final subCardBg =
         isDark ? DotColors.darkCardSoft : DotColors.lightCardSoft;
@@ -491,6 +507,20 @@ class _StatsCard extends StatelessWidget {
         isDark ? DotColors.darkTextPrimary : DotColors.lightTextPrimary;
     final trackBg = isDark ? DotColors.darkTrack : DotColors.lightTrack;
     final percentColor = isDark ? DotColors.primaryAlt : textPrimary;
+
+    // ─── 오늘 통계 계산 ───
+    // todayDurationProvider 는 StreamProvider<Duration>. AsyncValue 의
+    // valueOrNull 이 null 이면 (로딩) duration=0 으로 placeholder 표시.
+    final today =
+        ref.watch(todayDurationProvider).valueOrNull ?? Duration.zero;
+    final cycleCount = today.inSeconds ~/ _cycleSeconds;
+    // 호기/흡기 각 phase 의 실제 누적 분 — cycle 당 10s × cycleCount.
+    final phaseMinutes = (cycleCount * _phaseSeconds) ~/ 60;
+    // 일일 목표 대비 진행률 (0..100). 30분 도달 시 100%.
+    final progressPct =
+        ((today.inMinutes / _dailyGoalMinutes) * 100).clamp(0, 100).toInt();
+    // Progress bar width — track 가로 320px 중 progressPct 비율.
+    final progressBarWidth = (320.0 * progressPct / 100.0).clamp(19.0, 320.0);
 
     return Container(
       decoration: BoxDecoration(
@@ -525,7 +555,7 @@ class _StatsCard extends StatelessWidget {
             right: f.sx(21),
             top: f.sx(18),
             child: Text(
-              '0%',
+              '$progressPct%',
               style: TextStyle(
                 fontSize: f.sx(17),
                 fontWeight: FontWeight.w700,
@@ -550,7 +580,7 @@ class _StatsCard extends StatelessWidget {
             left: f.sx(21),
             top: f.sx(43),
             child: Container(
-              width: f.sx(19),
+              width: f.sx(progressBarWidth),
               height: f.sx(13),
               decoration: BoxDecoration(
                 color: DotColors.primary,
@@ -566,8 +596,8 @@ class _StatsCard extends StatelessWidget {
             child: _BreathSubCard(
               f: f,
               label: '호기',
-              count: '1회',
-              duration: '00분',
+              count: '$cycleCount회',
+              duration: '$phaseMinutes분',
               bg: subCardBg,
               textPrimary: textPrimary,
             ),
@@ -580,8 +610,8 @@ class _StatsCard extends StatelessWidget {
             child: _BreathSubCard(
               f: f,
               label: '흡기',
-              count: '1회',
-              duration: '00분',
+              count: '$cycleCount회',
+              duration: '$phaseMinutes분',
               bg: subCardBg,
               textPrimary: textPrimary,
             ),
