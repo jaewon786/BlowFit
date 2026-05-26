@@ -14,15 +14,20 @@ namespace {
   // 데모용 짧은 시간 (테스트 편의). 실 사용 시 config.h::session 의
   // TRAIN_MS=240000, REST_MS=30000 으로 조정.
   // ============================================================
-  constexpr uint32_t PREP_DURATION_MS    = 3000;    // 3초 카운트다운
-  constexpr uint32_t TRAIN_DURATION_MS   = 60000;   // 1분
-  constexpr uint32_t REST_DURATION_MS    = 10000;   // 10초
-  constexpr uint32_t SUMMARY_DURATION_MS = 8000;    // 8초 자동 복귀
-  constexpr uint8_t  DEMO_TOTAL_SETS          = 3;
-  // Train 내부 호기/흡기 turn cycle.
-  constexpr uint32_t TURN_EXHALE_MS = 30000;
-  constexpr uint32_t TURN_INHALE_MS = 30000;
-  constexpr uint32_t TURN_CYCLE_MS  = TURN_EXHALE_MS + TURN_INHALE_MS;
+  constexpr uint32_t PREP_DURATION_MS    = 0;        // PREP 스킵 — 즉시 TRAIN
+  constexpr uint32_t TRAIN_DURATION_MS   = 600000;   // 10분 (사용자가 stop 까지)
+  constexpr uint32_t REST_DURATION_MS    = 3000;     // set 사이 휴식 3초
+  constexpr uint32_t SUMMARY_DURATION_MS = 8000;     // 8초 자동 복귀
+  constexpr uint8_t  DEMO_TOTAL_SETS     = 1;        // sets 단순화 — 1 set
+  // Train 내부 4-phase turn cycle (앱 spec 일치):
+  //   Exhale 10s → ExhaleRest 3s → Inhale 10s → InhaleRest 3s = 26s/cycle
+  constexpr uint32_t TURN_EXHALE_MS      = 10000;
+  constexpr uint32_t TURN_EXHALE_REST_MS = 3000;
+  constexpr uint32_t TURN_INHALE_MS      = 10000;
+  constexpr uint32_t TURN_INHALE_REST_MS = 3000;
+  constexpr uint32_t TURN_CYCLE_MS =
+      TURN_EXHALE_MS + TURN_EXHALE_REST_MS +
+      TURN_INHALE_MS + TURN_INHALE_REST_MS;
 
   State    g_state       = State::Boot;
   Turn     g_turn        = Turn::None;
@@ -76,10 +81,31 @@ namespace {
     g_stats.total_sets     = DEMO_TOTAL_SETS;
   }
 
-  /// Train state 의 turn cycle (호기 ↔ 흡기) 계산.
+  /// Train state 의 turn cycle (4-phase: Exhale/ExhaleRest/Inhale/InhaleRest).
   Turn turnAt(uint32_t elapsed_in_train) {
     const uint32_t in_cycle = elapsed_in_train % TURN_CYCLE_MS;
-    return in_cycle < TURN_EXHALE_MS ? Turn::Exhale : Turn::Inhale;
+    if (in_cycle < TURN_EXHALE_MS) return Turn::Exhale;
+    uint32_t t = in_cycle - TURN_EXHALE_MS;
+    if (t < TURN_EXHALE_REST_MS) return Turn::ExhaleRest;
+    t -= TURN_EXHALE_REST_MS;
+    if (t < TURN_INHALE_MS) return Turn::Inhale;
+    return Turn::InhaleRest;
+  }
+
+  /// 현재 turn 의 남은 시간 (ms).
+  uint32_t turnRemainingMs(uint32_t elapsed_in_train) {
+    const uint32_t in_cycle = elapsed_in_train % TURN_CYCLE_MS;
+    uint32_t phase_end;
+    if (in_cycle < TURN_EXHALE_MS) {
+      phase_end = TURN_EXHALE_MS;
+    } else if (in_cycle < TURN_EXHALE_MS + TURN_EXHALE_REST_MS) {
+      phase_end = TURN_EXHALE_MS + TURN_EXHALE_REST_MS;
+    } else if (in_cycle < TURN_EXHALE_MS + TURN_EXHALE_REST_MS + TURN_INHALE_MS) {
+      phase_end = TURN_EXHALE_MS + TURN_EXHALE_REST_MS + TURN_INHALE_MS;
+    } else {
+      phase_end = TURN_CYCLE_MS;
+    }
+    return phase_end - in_cycle;
   }
 
 }  // anonymous namespace
@@ -203,13 +229,11 @@ uint16_t remainingSec() {
     case State::Summary: total = SUMMARY_DURATION_MS; break;
     default:             return 0;
   }
-  // Train 내부에서는 현재 turn 의 남은 시간을 반환 (UI 의 카운트다운).
+  // Train 내부에서는 현재 turn (4-phase) 의 남은 시간을 반환.
   if (g_state == State::Train) {
-    const uint32_t in_cycle = elapsed % TURN_CYCLE_MS;
-    const uint32_t turn_left = (g_turn == Turn::Exhale)
-        ? (TURN_EXHALE_MS - in_cycle)
-        : (TURN_CYCLE_MS - in_cycle);
-    return turn_left / 1000;
+    // ceil 로 변환 — 표시 시 1초 단위로 자연스럽게 카운트다운.
+    const uint32_t ms = turnRemainingMs(elapsed);
+    return (uint16_t)((ms + 999) / 1000);
   }
   if (elapsed >= total) return 0;
   return (total - elapsed) / 1000;

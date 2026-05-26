@@ -85,9 +85,14 @@ static void switchScreenFor(session::State s) {
       screens::training_show();
       screens::training_set_target(session::targetLow(), session::targetHigh());
       const auto turn = session::currentTurn();
-      const screens::TrainingPhase ui_phase =
-          (turn == session::Turn::Inhale) ? screens::TrainingPhase::Inhale
-                                          : screens::TrainingPhase::Exhale;
+      screens::TrainingPhase ui_phase;
+      switch (turn) {
+        case session::Turn::Exhale:     ui_phase = screens::TrainingPhase::Exhale; break;
+        case session::Turn::Inhale:     ui_phase = screens::TrainingPhase::Inhale; break;
+        case session::Turn::ExhaleRest:
+        case session::Turn::InhaleRest:
+        default:                        ui_phase = screens::TrainingPhase::Rest; break;
+      }
       screens::training_set_phase(ui_phase, session::remainingSec());
       screens::training_set_progress(session::progressPercent(),
                                      session::currentSet(),
@@ -196,6 +201,12 @@ void setup() {
 // ----- Loop -----
 void loop() {
   const uint32_t now = millis();
+
+#if HAS_BLE
+  // BLE watchdog — Android 가 graceful disconnect 없이 연결을 silent drop
+  // 했을 때 stale "connected" state 를 force-disconnect → advertising 재시작.
+  ble_service::poll();
+#endif
 
   // 100Hz 압력 샘플링 + BLE Pressure Stream 누적.
   static uint32_t lastSampleMs = 0;
@@ -306,9 +317,14 @@ void loop() {
     lastUpdate1HzMs = now;
     if (cur == session::State::Prep || cur == session::State::Train) {
       const auto turn = session::currentTurn();
-      const screens::TrainingPhase ui_phase =
-          (turn == session::Turn::Inhale) ? screens::TrainingPhase::Inhale
-                                          : screens::TrainingPhase::Exhale;
+      screens::TrainingPhase ui_phase;
+      switch (turn) {
+        case session::Turn::Exhale:     ui_phase = screens::TrainingPhase::Exhale; break;
+        case session::Turn::Inhale:     ui_phase = screens::TrainingPhase::Inhale; break;
+        case session::Turn::ExhaleRest:
+        case session::Turn::InhaleRest:
+        default:                        ui_phase = screens::TrainingPhase::Rest; break;
+      }
       screens::training_set_phase(ui_phase, session::remainingSec());
       screens::training_set_progress(session::progressPercent(),
                                      session::currentSet(),

@@ -277,20 +277,24 @@ void training_set_pressure(float cmH2O) {
   if (!g_bar_active || !g_lbl_value) return;
   g_pressure = cmH2O;
 
-  // bar 위치/크기 계산.
-  float v = cmH2O;
-  if (v >  MAX_P_CMH2O) v =  MAX_P_CMH2O;
-  if (v < -MAX_P_CMH2O) v = -MAX_P_CMH2O;
-  const int bar_h = (int)(std::fabs(v) / MAX_P_CMH2O * BAR_HALF_H);
+  // 표시 방향은 **현재 phase** 가 결정 — 압력 부호 무시.
+  //   Exhale phase  → bar 위쪽 (zero line 위로 자람)
+  //   Inhale phase  → bar 아래쪽 (zero line 아래로 자람)
+  //   Rest          → bar 안 보임 (높이 0)
+  // 이로써 디바이스 측 호기/흡기 방향이 명확히 분리됨.
+  float v = std::fabs(cmH2O);
+  if (v > MAX_P_CMH2O) v = MAX_P_CMH2O;
+  const int bar_h = (int)(v / MAX_P_CMH2O * BAR_HALF_H);
 
-  // 음수 → bar 가 zero line 위쪽으로 자람 (yoff 음수).
-  // 양수 → bar 가 zero line 아래쪽으로 자람 (yoff 양수).
-  // LV_ALIGN_CENTER 기준 yoff 는 중심 기준.
   int yoff;
-  if (v >= 0) {
-    yoff = bar_h / 2;
+  if (g_phase == TrainingPhase::Exhale) {
+    yoff = -bar_h / 2; // 위쪽
+  } else if (g_phase == TrainingPhase::Inhale) {
+    yoff = bar_h / 2; // 아래쪽
   } else {
-    yoff = -bar_h / 2;
+    // Rest — bar 안 보이게
+    lv_obj_set_size(g_bar_active, BAR_W - 8, 0);
+    return;
   }
   lv_obj_set_size(g_bar_active, BAR_W - 8, bar_h);
   lv_obj_align(g_bar_active, LV_ALIGN_CENTER, 0, yoff);

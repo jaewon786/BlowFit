@@ -28,10 +28,13 @@ namespace session {
   };
 
   /// Training 내 호기/흡기 turn — UI 표시용. session 이 자동 cycle.
+  /// 4-phase cycle: Exhale 10s → ExhaleRest 3s → Inhale 10s → InhaleRest 3s.
   enum class Turn : uint8_t {
-    Exhale = 0,
-    Inhale = 1,
-    None   = 2,   // Train 이외 state 에서.
+    Exhale     = 0,
+    ExhaleRest = 1,
+    Inhale     = 2,
+    InhaleRest = 3,
+    None       = 4,   // Train 이외 state 에서.
   };
 
   struct Stats {

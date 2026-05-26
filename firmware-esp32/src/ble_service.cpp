@@ -28,12 +28,18 @@ namespace {
   volatile bool g_connected   = false;
   uint32_t      g_startEpoch  = 0;
   uint16_t      g_seq         = 0;     // Pressure Stream sequence (wrap 65535)
+  uint16_t      g_connId      = 0;     // 활성 connection handle (force disconnect 용)
+  uint32_t      g_lastActivityMs = 0;  // 마지막 GATT activity (write/notify) 시각
 
   /// 연결/끊김 콜백. 끊기면 자동 광고 재시작.
   class ServerCallbacks : public BLEServerCallbacks {
-    void onConnect(BLEServer* /*s*/) override {
+    void onConnect(BLEServer* s) override {
       g_connected = true;
-      Serial.println("[ble] client connected");
+      g_lastActivityMs = millis();
+      // ESP-IDF 의 conn_id 는 BLEServer 내부 — 가장 최근 연결을 추적.
+      // ESP32 BLE Arduino 는 단일 연결만 보장하므로 conn id 0 가 일반적.
+      g_connId = s->getConnId();
+      Serial.printf("[ble] client connected (connId=%u)\n", (unsigned)g_connId);
     }
     void onDisconnect(BLEServer* /*s*/) override {
       g_connected = false;
@@ -45,10 +51,13 @@ namespace {
   /// SESSION_CONTROL 쓰기 콜백 — 앱이 보낸 opcode 처리.
   class ControlCallbacks : public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic* c) override {
+      g_lastActivityMs = millis();  // watchdog refresh
       // ESP32 BLE Arduino 의 getValue() 가 std::string 반환.
       std::string v = c->getValue();
+      Serial.printf("[ble] CTRL onWrite: %u bytes\n", (unsigned)v.size());
       if (v.empty()) return;
       const uint8_t op = static_cast<uint8_t>(v[0]);
+      Serial.printf("[ble] CTRL opcode=%u\n", (unsigned)op);
       const uint8_t* payload = reinterpret_cast<const uint8_t*>(v.data()) + 1;
       const size_t   plen    = v.size() - 1;
 
@@ -156,7 +165,43 @@ void begin() {
 }
 
 void poll() {
-  // ESP32 BLE Arduino 는 별도 task 로 동작. 명시적 poll 불필요.
+  // ─────────────────────────────────────────────────────────────
+  // BLE 활동 watchdog — Android 가 background 진입 시 연결을 silent
+  // drop 하는 경우 (L2CAP_DISCONNECT 패킷 안 보냄) 펌웨어가 stuck
+  // 상태가 됨: g_connected=true 이지만 실제론 dead link. onDisconnect
+  // 도 안 호출되어서 advertising 재시작 안 됨 → 앱이 reconnect 못 함.
+  //
+  // 해결: connection 중에 N 초 동안 GATT activity (write/notify) 없으면
+  // dead link 로 간주, force disconnect → onDisconnect 호출 → advertising
+  // 재시작.
+  //
+  // Activity = onWrite (control) 호출 + pushSamples 등 notify 호출 시
+  // g_lastActivityMs 갱신. Train 중엔 pressure notify 50Hz 라 활성, Standby
+  // 에서도 stateNotify 가 1Hz 로 갱신.
+  //
+  // Threshold 60s — 보수적. App 의 graceful disconnect (lifecycle paused
+  // 에서 호출) 가 primary mechanism 이고, watchdog 는 force-quit 등 비정상
+  // 종료 시 backstop. Standby idle 60s 미만이면 false positive 없음.
+  // (실제론 BLE link supervision 이 5-10s 안에 firing 하는 게 정상이라 60s
+  // 면 두 메커니즘 다 실패한 경우만 발동.)
+  // ─────────────────────────────────────────────────────────────
+  constexpr uint32_t WATCHDOG_TIMEOUT_MS = 60000;
+  if (g_connected && g_lastActivityMs > 0) {
+    const uint32_t now = millis();
+    if (now - g_lastActivityMs > WATCHDOG_TIMEOUT_MS) {
+      Serial.printf("[ble] watchdog: no activity for %ums, forcing disconnect\n",
+                    (unsigned)(now - g_lastActivityMs));
+      // ESP-IDF API 직접 호출 — esp_ble_gap_disconnect.
+      // ESP32 BLE Arduino 의 BLEServer::disconnect() 도 가능하지만 conn id
+      // 정확성이 떨어짐. esp_ble_gatts_close 가 더 명확.
+      if (g_server != nullptr) {
+        g_server->disconnect(g_connId);
+      }
+      // disconnect 이후 onDisconnect callback 이 advertising 재시작 처리.
+      // 다음 watchdog 실행에서 false alarm 방지하려면 lastActivity reset.
+      g_lastActivityMs = now;
+    }
+  }
 }
 
 bool isConnected() { return g_connected; }
