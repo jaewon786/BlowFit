@@ -59,7 +59,7 @@ class FakeBleManager implements BleManager {
   }
 
   @override
-  Future<void> connect(DiscoveredDevice device) async {
+  Future<void> connect(DiscoveredDevice device, {bool autoConnect = true}) async {
     if (device.id != _fakeId) {
       throw StateError('Unknown fake device: ${device.id}');
     }
@@ -82,6 +82,18 @@ class FakeBleManager implements BleManager {
     _autoStopTimer?.cancel();
     _connected = false;
     _conn.add(false);
+  }
+
+  @override
+  Future<bool> ensureConnected({bool forceRebind = false}) async {
+    // Fake impl 은 stateful 한 GATT 가 없으므로 _connected 만 그대로 반환.
+    return _connected;
+  }
+
+  @override
+  Future<bool> tryAdoptExistingConnection() async {
+    // Fake impl 은 OS-level connection 개념이 없음 — 항상 false.
+    return false;
   }
 
   @override

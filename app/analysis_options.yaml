@@ -4,6 +4,8 @@ analyzer:
   exclude:
     - '**/*.g.dart'
     - '**/*.freezed.dart'
+    # v2 디자인 교체 시 v1 화면 백업 — analyzer 대상에서 제외 (참고 보관용).
+    - 'features_backup_v1/**'
 
 linter:
   rules:

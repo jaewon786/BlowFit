@@ -91,3 +91,63 @@ class BlowfitRadius {
   static const xl = 20.0;
   static const xxl = 24.0;
 }
+
+/// Figma DoT 디자인 시안 색상 토큰 — Home/추이/훈련 화면에서 직접 참조.
+///
+/// 라이트/다크 mode 모두 같은 primary/green 을 쓰지만 배경/표면/텍스트만 다름.
+/// 화면 위젯은 `Theme.of(context).brightness` 로 분기하거나, ConsumerWidget 에서
+/// themeMode provider 를 watch 해서 분기.
+class DotColors {
+  DotColors._();
+
+  // ---- Brand (라이트/다크 공용) ----
+  static const primary = Color(0xFF0A89FC);   // progress bar, dot, exhale chart
+  static const primaryAlt = Color(0xFF0086FF); // 0% 텍스트 (다크)
+  static const inhale = Color(0xFF32B65E);     // 흡기 차트 dot
+  static const sunday = Color(0xFFFF0000);    // 캘린더 일요일 (red)
+  static const saturday = Color(0xFF0088FF);  // 캘린더 토요일 (blue)
+
+  // ---- Light mode ----
+  // 홈 화면 배경 그라데이션 (156.78°): #99EBFC → #DBF9FF
+  static const lightBgTop = Color(0xFF99EBFC);
+  static const lightBgBottom = Color(0xFFDBF9FF);
+  // 훈련 화면 배경 그라데이션 (조금 더 다단계): #DFF9FF → #C6F5FF → #8DE9FD
+  static const lightTrainBg1 = Color(0xFFDFF9FF);
+  static const lightTrainBg2 = Color(0xFFC6F5FF);
+  static const lightTrainBg3 = Color(0xFF8DE9FD);
+  // 표면 (라이트)
+  static const lightCard = Color(0xFFFFFFFF);
+  static const lightCardSoft = Color(0xFFF1F6FA);   // 카드 안의 sub 카드
+  static const lightTrack = Color(0xFFE7EBF6);      // 진행 트랙
+  // 텍스트 (라이트)
+  static const lightTextPrimary = Color(0xFF101010);
+  static const lightTextSecondary = Color(0xFF252525);
+  static const lightTextMuted = Color(0xFF898989);
+  static const lightCalendarGray = Color(0xFF808080);
+  // CTA pill (훈련하기 버튼)
+  static const lightCtaBg = Color(0xFF000000);
+  static const lightCtaFg = Color(0xFFFFFFFF);
+
+  // ---- Dark mode ----
+  static const darkBg = Color(0xFF060725);         // scaffold 배경
+  static const darkCard = Color(0xFF04040D);       // 메인 카드 (오늘 총 몇 번)
+  static const darkCardSoft = Color(0xFF1C1C1E);   // 카드 안의 sub 카드
+  static const darkTrack = Color(0xB3424242);      // 진행 트랙 (70% opacity)
+  static const darkTextPrimary = Color(0xFFFFFFFF);
+  static const darkTextSecondary = Color(0xFFE0E0E0);
+  static const darkTextMuted = Color(0xFF8E8E93);
+
+  // ---- 캐릭터 (mascot) — 추후 SVG/PNG 자산 등록 후 교체 ----
+  // 잠시 그라데이션 원형 placeholder 로 표시. assets/character/dot_mascot.png
+  // 추가되면 Image.asset 으로 교체.
+  static const mascotBlue = Color(0xFF5B7CFA);
+  static const mascotBlueDark = Color(0xFF3D5BCC);
+  static const mascotCheek = Color(0xFFFF6B9D);
+
+  // ---- Light mode 의 하단 잔디 영역 (홈 화면) ----
+  static const lightGrass1 = Color(0xFFAFE89B);
+  static const lightGrass2 = Color(0xFF8FD97A);
+  // ---- Dark mode 의 하단 물결 (홈 화면) ----
+  static const darkWave1 = Color(0xFF1B1D4A);
+  static const darkWave2 = Color(0xFF14163A);
+}

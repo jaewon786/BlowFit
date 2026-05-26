@@ -38,6 +38,7 @@ flutter:
   assets:
     - assets/character/
     - assets/backgrounds/
+    - assets/dot/
   fonts:
     - family: Pretendard
       fonts:

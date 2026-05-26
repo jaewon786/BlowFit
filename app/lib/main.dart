@@ -5,18 +5,20 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/date_symbol_data_local.dart';
 
 import 'core/ble/ble_foreground_task.dart';
+import 'core/ble/ble_providers.dart';
 import 'core/db/db_providers.dart';
 import 'core/models/pressure_sample.dart';
 import 'core/theme/blowfit_theme.dart';
 import 'features/connect/connect_screen.dart';
-import 'features/dashboard/dashboard_screen.dart';
 import 'features/guide/guide_screen.dart';
+import 'features/home_pager/home_pager_screen.dart';
 import 'features/history/history_screen.dart';
 import 'features/onboarding/onboarding_screen.dart';
 import 'features/profile/profile_screen.dart';
 import 'features/profile_setup/profile_setup_screen.dart';
 import 'features/result/result_screen.dart';
 import 'features/session_detail/session_detail_screen.dart';
+import 'features/settings/settings_screen.dart';
 import 'features/settings/target_settings_screen.dart';
 import 'features/shell/main_shell.dart';
 import 'features/training/training_intro_screen.dart';
@@ -30,8 +32,16 @@ void main() async {
   // asking on cold start surprises the user before they see why.
 
   // Foreground service 의 notification channel + task option 초기화.
-  // Service 자체는 첫 페어링 완료 후 startService() 호출 시 시작.
   await BleForegroundService.initialize();
+  // 이전 빌드에서 startService 가 호출되어 service 가 background 에 살아있을
+  // 수 있음. Split-brain (main app vs service process 가 각각 BLE 잡으려고
+  // 경합) 방지하려고 명시적으로 정지. autoRunOnBoot/autoRunOnMyPackageReplaced
+  // 도 stopService 호출 시 비활성화됨.
+  try {
+    await BleForegroundService.stopService();
+  } catch (_) {
+    // service 가 안 돌고 있었으면 throw — 무시.
+  }
 
   runApp(const ProviderScope(child: BlowfitApp()));
 }
@@ -40,11 +50,10 @@ final _rootNavKey = GlobalKey<NavigatorState>();
 
 final _router = GoRouter(
   navigatorKey: _rootNavKey,
-  // 앱 시작 화면 = ConnectScreen. 저장된 lastDevice 있으면 자동 재연결 시도,
-  // 성공 시 _attemptConnect 가 자동으로 dashboard ('/') 로 이동. lastDevice
-  // 없으면 디바이스 목록 표시 (첫 페어링은 사용자가 선택). 디바이스 일단
-  // 연결되면 이후 모든 부팅에서 앱 자동 연결.
-  initialLocation: '/connect',
+  // 앱 시작 화면 = Home (dashboard). v2 디자인 결정 — 앱 실행 시 무조건
+  // 홈 화면. 자동 재연결은 background 의 autoReconnectProvider 가 처리하고,
+  // 디바이스 연결 UI 는 사용자가 명시적으로 '/connect' 로 이동했을 때만 노출.
+  initialLocation: '/',
   routes: [
     StatefulShellRoute.indexedStack(
       builder: (context, state, navigationShell) =>
@@ -52,7 +61,8 @@ final _router = GoRouter(
       branches: [
         StatefulShellBranch(
           routes: [
-            GoRoute(path: '/', builder: (_, __) => const DashboardScreen()),
+            // 홈 = 홈/추이 PageView (좌우 swipe 로 전환)
+            GoRoute(path: '/', builder: (_, __) => const HomePagerScreen()),
             // 훈련 시작 전 페이지 (체크리스트 + 팁) — 홈 탭 안에서 push.
             GoRoute(
               path: '/training-intro',
@@ -60,6 +70,11 @@ final _router = GoRouter(
             ),
             // 실시간 훈련 — intro 의 시작 버튼에서 push.
             GoRoute(path: '/training', builder: (_, __) => const TrainingScreen()),
+            // 설정 — 홈의 톱니바퀴 아이콘에서 push. /training 과 같은 branch
+            // 라우트로 두어야 shell branch context 에서 push 가 안정적으로
+            // 동작 (root-level parentNavigatorKey 라우트는 일부 케이스에서
+            // silent fail).
+            GoRoute(path: '/settings', builder: (_, __) => const SettingsScreen()),
           ],
         ),
         StatefulShellBranch(
@@ -156,13 +171,43 @@ class _BlowfitAppState extends ConsumerState<BlowfitApp> with WidgetsBindingObse
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // 앱이 background → foreground 복귀할 때마다 자동 재연결 시도.
-    // ConnectScreen 의 initState 는 cold start 때만 발동하므로, 사용자가
-    // 홈 버튼 눌렀다가 다시 앱으로 돌아오는 시나리오에선 connect 트리거가
-    // 없음. 이 lifecycle hook 으로 그 시점에도 재연결 흐름 발동.
-    if (state == AppLifecycleState.resumed) {
-      debugPrint('[ble] app resumed — re-triggering autoReconnectProvider');
-      // Provider 를 invalidate 후 read → 첫 watch 시점 로직 재실행.
+    // 앱이 background → foreground 복귀할 때 BLE link 정리.
+    //
+    // 백그라운드 동안 OS 가 GATT 를 끊었거나 일시 중단하면, _control
+    // characteristic 이 stale (이전 세션 dead instance) 인 채로 남고
+    // write 가 silently no-op 됨. 사용자는 "훈련하기" 를 눌러도 디바이스가
+    // 반응 안 하는 증상으로 경험. 따라서 resume 시:
+    //
+    //   1) bleManager.ensureConnected() — 실제 연결 상태 검증, stale 한
+    //      경우 reconnect + service rediscover + characteristic 재바인딩.
+    //   2) autoReconnectProvider invalidate — manager 가 device 정보를
+    //      잃었거나 scan 이 필요한 경우 (e.g. 디바이스 cold reboot) 의
+    //      fallback 경로.
+    if (state == AppLifecycleState.paused) {
+      // ─────────────────────────────────────────────────────────────────
+      // CRITICAL — App 이 background 로 갈 때 명시적 disconnect.
+      //
+      // Android 가 background 진입 시 BLE GATT 연결을 silently drop 하는 경우
+      // 가 있음. 그러면 펌웨어는 L2CAP_DISCONNECT 패킷을 못 받아서 자신을
+      // "여전히 연결 중" 으로 인식 → advertising 재시작 안 함 → 앱이 resume
+      // 후 reconnect 시도해도 scan 결과 0 → 사용자 stuck.
+      //
+      // 명시적 disconnect 호출 = 정상적인 L2CAP_DISCONNECT 전송 → 펌웨어의
+      // onDisconnect callback 발동 → advertising 재시작 → resume 시 정상
+      // 재연결 가능.
+      // ─────────────────────────────────────────────────────────────────
+      debugPrint('[ble] app paused — graceful disconnect');
+      () async {
+        try {
+          await ref.read(bleManagerProvider).disconnect();
+        } catch (e) {
+          debugPrint('[ble] paused disconnect threw: $e');
+        }
+      }();
+    } else if (state == AppLifecycleState.resumed) {
+      debugPrint('[ble] app resumed — re-running autoReconnect');
+      // paused 시 disconnect 했으므로 resume 시엔 cold start 와 동일한
+      // 흐름으로 재연결. autoReconnect 가 adopt 시도 후 scan + connect 수행.
       ref.invalidate(autoReconnectProvider);
       ref.read(autoReconnectProvider);
     }
@@ -177,9 +222,13 @@ class _BlowfitAppState extends ConsumerState<BlowfitApp> with WidgetsBindingObse
     ref.watch(targetSyncProvider);
     // 앱 시작 시 마지막 연결한 device 자동 재연결 시도 (silent fallback).
     ref.watch(autoReconnectProvider);
+    // 사용자 토글로 변경되는 light/dark 모드.
+    final themeMode = ref.watch(themeModeProvider);
     return MaterialApp.router(
       title: 'BlowFit',
       theme: BlowfitTheme.light(),
+      darkTheme: BlowfitTheme.dark(),
+      themeMode: themeMode,
       routerConfig: _router,
       debugShowCheckedModeBanner: false,
     );

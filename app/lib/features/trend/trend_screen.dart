@@ -1,552 +1,536 @@
-import 'package:fl_chart/fl_chart.dart';
+// Figma DoT — 추이 화면 (라이트모드).
+//
+// 디자인 출처: 1:2128 추이 - 라이트모드 (402×1415, scroll 가능).
+// 모든 좌표/크기는 Figma frame px 그대로. 화면 너비/402 로 scale.
+// 배경 ellipse 47/48 의 fill/transform 은 figma plugin API 로 추출한 정확한
+// 데이터 (nodes 1:2172 + 1:2132).
+
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
 
-import '../../core/coach/milestone_engine.dart';
-import '../../core/db/db_providers.dart';
-import '../../core/db/trend_bucketing.dart';
 import '../../core/theme/blowfit_colors.dart';
-import '../../core/theme/blowfit_widgets.dart';
+import '../../core/theme/blowfit_theme.dart';
 
-/// 진행 추이 화면. 디자인 시안의 08 화면.
-///
-/// 4개 탭 — 일간 (이번 주 월~일) / 주간 (이번 달 1~4주) / 월간 (최근 4개월) /
-/// 년간 (올해 1~12월). 기본은 일간.
-///
-/// Z안 적용 — 활성 데이터 < 2 면 변화율 숨김, 활성 데이터 0 이면 empty state.
+const double _kFrameW = 402;
+const double _kFrameH = 1415;
+
+class _Frame {
+  _Frame(this.screenW) : scale = screenW / _kFrameW;
+  final double screenW;
+  final double scale;
+  double sx(double v) => v * scale;
+  double sy(double v) => v * scale;
+
+  Positioned at({
+    required double x,
+    required double y,
+    double? w,
+    double? h,
+    required Widget child,
+  }) {
+    return Positioned(
+      left: sx(x),
+      top: sy(y),
+      width: w == null ? null : sx(w),
+      height: h == null ? null : sy(h),
+      child: child,
+    );
+  }
+}
+
 class TrendScreen extends ConsumerStatefulWidget {
   const TrendScreen({super.key});
-
   @override
   ConsumerState<TrendScreen> createState() => _TrendScreenState();
 }
 
 class _TrendScreenState extends ConsumerState<TrendScreen> {
-  // 기본은 일간 (index 0).
-  int _periodIndex = 0;
-  static const _periods = ['일간', '주간', '월간', '년간'];
-  static const _periodValues = TrendPeriod.values;
+  int _tabIndex = 0;
+  DateTime _calendarMonth = DateTime(2026, 5);
 
   @override
   Widget build(BuildContext context) {
-    final period = _periodValues[_periodIndex];
-    final bucketsAsync = ref.watch(trendBucketsProvider(period));
-    final milestonesAsync = ref.watch(milestonesProvider);
+    final media = MediaQuery.of(context);
+    final f = _Frame(media.size.width);
+    final frameH = f.sy(_kFrameH);
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('진행 추이'),
-      ),
-      body: SafeArea(
-        child: bucketsAsync.when(
-          loading: () => const Center(child: CircularProgressIndicator()),
-          error: (_, __) =>
-              const Center(child: Text('추이를 불러올 수 없습니다.')),
-          data: (buckets) {
-            final active =
-                buckets.where((b) => !b.isEmpty).toList(growable: false);
-            return ListView(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-              children: [
-                _PeriodTabs(
-                  labels: _periods,
-                  selected: _periodIndex,
-                  onSelect: (i) => setState(() => _periodIndex = i),
-                ),
-                const SizedBox(height: 14),
-                if (active.isEmpty)
-                  const _EmptyTrendCard()
-                else
-                  _HeroChart(
-                    buckets: buckets,
-                    active: active,
-                    period: period,
-                  ),
-                if (active.length >= 2) ...[
-                  const SizedBox(height: 12),
-                  _DirectionGrid(
-                    exhaleFrom: active.first.avgExhale!,
-                    exhaleTo: active.last.avgExhale!,
-                  ),
-                ],
-                const SizedBox(height: 14),
-                _MilestonesCard(
-                  milestones: milestonesAsync.valueOrNull ?? const [],
-                  loading: milestonesAsync.isLoading,
-                ),
-              ],
-            );
-          },
-        ),
-      ),
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Empty state — 세션 0개일 때
-// ---------------------------------------------------------------------------
-
-class _EmptyTrendCard extends StatelessWidget {
-  const _EmptyTrendCard();
-
-  @override
-  Widget build(BuildContext context) {
-    return BlowfitCard(
-      padding: const EdgeInsets.fromLTRB(20, 28, 20, 28),
-      child: Column(
-        children: [
-          Container(
-            width: 56,
-            height: 56,
-            decoration: BoxDecoration(
-              color: BlowfitColors.blue50,
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: const Icon(Icons.show_chart,
-                color: BlowfitColors.blue500, size: 28),
-          ),
-          const SizedBox(height: 14),
-          const Text(
-            '아직 추이를 그릴 데이터가 없어요',
-            style: TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w700,
-              color: BlowfitColors.ink,
-              letterSpacing: -0.3,
-            ),
-          ),
-          const SizedBox(height: 6),
-          const Text(
-            '첫 훈련을 완료하면\n주간 평균 호기 압력이 여기에 그려져요.',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 13,
-              color: BlowfitColors.ink3,
-              height: 1.5,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Period tab segment
-// ---------------------------------------------------------------------------
-
-class _PeriodTabs extends StatelessWidget {
-  const _PeriodTabs({
-    required this.labels,
-    required this.selected,
-    required this.onSelect,
-  });
-
-  final List<String> labels;
-  final int selected;
-  final ValueChanged<int> onSelect;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 44,
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: BlowfitColors.gray100,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        children: [
-          for (var i = 0; i < labels.length; i++) ...[
-            if (i > 0) const SizedBox(width: 4),
-            Expanded(
-              child: _PeriodTab(
-                label: labels[i],
-                selected: i == selected,
-                onTap: () => onSelect(i),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _PeriodTab extends StatelessWidget {
-  const _PeriodTab({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    // 파란 splash/highlight 효과 제거. 이미 선택된 탭은 onTap 도 비활성화하여
-    // 시각/햅틱 모두 무반응 (불필요한 ripple 방지).
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(9),
-      child: Container(
-        decoration: BoxDecoration(
-          color: selected ? Colors.white : Colors.transparent,
-          borderRadius: BorderRadius.circular(9),
-          boxShadow: selected ? BlowfitColors.shadowLevel1 : null,
-        ),
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: selected ? null : onTap,
-            splashColor: Colors.transparent,
-            highlightColor: Colors.transparent,
-            hoverColor: Colors.transparent,
-            child: SizedBox(
-              height: double.infinity,
-              child: Center(
-                child: Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color:
-                        selected ? BlowfitColors.ink : BlowfitColors.ink3,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Hero chart — bidirectional line chart (호기 above 0, 흡기 below)
-// ---------------------------------------------------------------------------
-
-class _HeroChart extends StatelessWidget {
-  const _HeroChart({
-    required this.buckets,
-    required this.active,
-    required this.period,
-  });
-
-  /// 모든 자리 (빈 자리 포함). 일간=7, 주간=4, 월간=4, 년간=12.
-  final List<TrendBucket> buckets;
-
-  /// 빈 자리 제외 — pct 계산용.
-  final List<TrendBucket> active;
-
-  final TrendPeriod period;
-
-  static const _exhaleColor = BlowfitColors.blue500;
-  static const _inhaleColor = Color(0xFF0099CC);
-
-  /// 활성 데이터 < 2 면 변화율 계산 불가 (Z안).
-  int? get _improvementPct {
-    if (active.length < 2) return null;
-    final first = active.first.avgExhale;
-    final last = active.last.avgExhale;
-    if (first == null || last == null || first <= 0) return null;
-    return ((last - first) / first * 100).round();
-  }
-
-  /// 헤더 카피 — B안 통일.
-  String get _heroTitle {
-    switch (period) {
-      case TrendPeriod.daily:
-        return '일간 추이';
-      case TrendPeriod.weekly:
-        return '주간 추이';
-      case TrendPeriod.monthly:
-        return '월간 추이';
-      case TrendPeriod.yearly:
-        return '년간 추이';
-    }
-  }
-
-  /// x 축 메이저 tick 간격.
-  double get _xInterval => 1;
-
-  /// 차트 좌우 여백 — 첫 점과 마지막 점이 가장자리에 붙지 않도록.
-  /// 월간 (12개) 은 자리 많아 여유 적게, 나머지는 여유 충분히.
-  double get _xPadding {
-    switch (period) {
-      case TrendPeriod.daily:
-      case TrendPeriod.weekly:
-      case TrendPeriod.yearly:
-        return 0.4;
-      case TrendPeriod.monthly:
-        return 0.15;
-    }
-  }
-
-  double get _chartMinX => 1 - _xPadding;
-  double get _chartMaxX => buckets.length + _xPadding;
-
-  /// 변화율 라벨 — 모든 윈도우에서 첫 활성 자리 기준으로 동적.
-  /// 사용자가 화요일부터 훈련했으면 "화요일 대비", 2주차부터면 "2주차 대비".
-  /// 변화율은 active.length >= 2 일 때만 호출되니 active 비어있는 경우 없음.
-  String get _deltaLabel {
-    if (active.isEmpty) return '시작 시점 대비'; // safety net
-    final firstLabel = active.first.label;
-    switch (period) {
-      case TrendPeriod.daily:
-        // "월" → "월요일 대비"
-        return '$firstLabel요일 대비';
-      case TrendPeriod.weekly:
-        // "1주" → "1주차 대비"
-        return '$firstLabel차 대비';
-      case TrendPeriod.monthly:
-        // "1월" → "1월 대비"
-        return '$firstLabel 대비';
-      case TrendPeriod.yearly:
-        // "2024" → "2024년 대비"
-        return '$firstLabel년 대비';
-    }
-  }
-
-  /// 라벨 lookup — xPos → label.
-  String _labelAt(int xPos) {
-    final b = buckets.firstWhere(
-      (b) => b.xPos == xPos,
-      orElse: () => TrendBucket(
-        xPos: xPos,
-        label: '',
-        avgExhale: null,
-        maxExhale: null,
-        sessionCount: 0,
-        bucketStart: DateTime(0),
-      ),
-    );
-    return b.label;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final pct = _improvementPct;
-    // 차트 점은 bucket.xPos 를 x 좌표로. 빈 자리는 점 없음 (line 끊어짐).
-    final exhaleSpots = <FlSpot>[];
-    for (final b in buckets) {
-      final v = b.avgExhale;
-      if (v != null) exhaleSpots.add(FlSpot(b.xPos.toDouble(), v));
-    }
-
-    return BlowfitCard(
-      padding: const EdgeInsets.all(18),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            _heroTitle,
-            style: const TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: BlowfitColors.ink3,
-            ),
-          ),
-          const SizedBox(height: 4),
-          // 변화율은 활성 데이터 >= 2 일 때만 표시. 미달 시 자리만 약간 비움.
-          if (pct != null)
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.baseline,
-              textBaseline: TextBaseline.alphabetic,
-              children: [
-                Text(
-                  pct >= 0 ? '+$pct%' : '$pct%',
-                  style: const TextStyle(
-                    fontSize: 30,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: -0.9,
-                    color: BlowfitColors.ink,
-                    fontFeatures: [FontFeature.tabularFigures()],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Row(
-                  children: [
-                    Icon(
-                      pct >= 0 ? Icons.arrow_upward : Icons.arrow_downward,
-                      size: 11,
-                      color: pct >= 0
-                          ? BlowfitColors.green500
-                          : BlowfitColors.red500,
-                    ),
-                    const SizedBox(width: 2),
-                    Text(
-                      _deltaLabel,
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        color: pct >= 0
-                            ? BlowfitColors.green500
-                            : BlowfitColors.red500,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          const SizedBox(height: 14),
-          const Row(
+      backgroundColor: const Color(0xFF4BA22B), // 잔디 마지막 stop 색
+      body: SingleChildScrollView(
+        child: SizedBox(
+          width: media.size.width,
+          height: frameH,
+          child: Stack(
             children: [
-              _Legend(color: _exhaleColor, label: '호기 평균'),
-              SizedBox(width: 14),
-              _Legend(color: _inhaleColor, label: '흡기 평균'),
+              // 1. 배경 — sky + 잔디 ellipse (figma 와 1:1)
+              Positioned.fill(
+                child: LayoutBuilder(
+                  builder: (_, c) => CustomPaint(
+                    size: Size(c.maxWidth, c.maxHeight),
+                    painter: _TrendBgPainter(),
+                  ),
+                ),
+              ),
+              // 2. 콘텐츠
+              _TrendContent(
+                f: f,
+                tabIndex: _tabIndex,
+                onTab: (i) => setState(() => _tabIndex = i),
+                calendarMonth: _calendarMonth,
+                onPrevMonth: () => setState(
+                  () => _calendarMonth = DateTime(
+                    _calendarMonth.year,
+                    _calendarMonth.month - 1,
+                  ),
+                ),
+                onNextMonth: () => setState(
+                  () => _calendarMonth = DateTime(
+                    _calendarMonth.year,
+                    _calendarMonth.month + 1,
+                  ),
+                ),
+              ),
             ],
           ),
-          const SizedBox(height: 12),
-          SizedBox(
-            height: 200,
-            child: LineChart(
-              LineChartData(
-                minX: _chartMinX,
-                maxX: _chartMaxX,
-                minY: -30,
-                maxY: 30,
-                clipData: const FlClipData.all(),
-                gridData: FlGridData(
-                  show: true,
-                  drawVerticalLine: false,
-                  horizontalInterval: 10,
-                  getDrawingHorizontalLine: (v) => FlLine(
-                    color: v.abs() < 0.01
-                        ? BlowfitColors.gray400
-                        : BlowfitColors.gray150,
-                    strokeWidth: v.abs() < 0.01 ? 1.2 : 1,
-                  ),
-                ),
-                borderData: FlBorderData(show: false),
-                titlesData: FlTitlesData(
-                  topTitles: const AxisTitles(
-                      sideTitles: SideTitles(showTitles: false)),
-                  rightTitles: const AxisTitles(
-                      sideTitles: SideTitles(showTitles: false)),
-                  leftTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      reservedSize: 32,
-                      interval: 10,
-                      getTitlesWidget: (v, meta) {
-                        final n = v.round();
-                        final label = n > 0 ? '+$n' : '$n';
-                        return Padding(
-                          padding: const EdgeInsets.only(right: 6),
-                          child: Text(
-                            label,
-                            textAlign: TextAlign.right,
-                            style: const TextStyle(
-                              fontSize: 10,
-                              color: BlowfitColors.ink3,
-                              fontFeatures: [FontFeature.tabularFigures()],
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                  bottomTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      reservedSize: 22,
-                      interval: _xInterval,
-                      getTitlesWidget: (v, meta) {
-                        final xPos = v.round();
-                        if (xPos < 1 || xPos > buckets.length) {
-                          return const SizedBox.shrink();
-                        }
-                        // 정수 좌표에만 라벨 — 비정수 (interpolation) 은 무시.
-                        if ((v - xPos).abs() > 0.001) {
-                          return const SizedBox.shrink();
-                        }
-                        return Padding(
-                          padding: const EdgeInsets.only(top: 6),
-                          child: Text(
-                            _labelAt(xPos),
-                            style: const TextStyle(
-                              fontSize: 10,
-                              color: BlowfitColors.ink3,
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                ),
-                lineBarsData: [
-                  _line(exhaleSpots, _exhaleColor),
-                  // 흡기는 하드웨어 미지원 — 차후 차압 센서 도입 시 활성화.
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  LineChartBarData _line(List<FlSpot> spots, Color color) {
-    // 디자인 v2 의 trend-profile.jsx 는 SVG 마지막 점만 circle 로 그림
-    // (`<circle cx={xScale(data.length-1)} ...>`). 우리도 가장 최근 데이터
-    // 포인트에만 dot 을 표시 — 12주의 모든 주에 점이 찍히지 않도록.
-    return LineChartBarData(
-      spots: spots,
-      isCurved: spots.length >= 3, // 점 2개 이하는 직선 (curve 가 wobble 함)
-      curveSmoothness: 0.3,
-      preventCurveOverShooting: true,
-      color: color,
-      barWidth: 2.5,
-      dotData: FlDotData(
-        show: spots.isNotEmpty,
-        checkToShowDot: (spot, bar) =>
-            spot == bar.spots.last,
-        getDotPainter: (spot, _, __, ___) => FlDotCirclePainter(
-          radius: 4,
-          color: color,
-          strokeWidth: 2,
-          strokeColor: Colors.white,
         ),
-      ),
-      belowBarData: BarAreaData(
-        show: true,
-        color: color.withValues(alpha: 0.06),
       ),
     );
   }
 }
 
-class _Legend extends StatelessWidget {
-  const _Legend({required this.color, required this.label});
-  final Color color;
-  final String label;
+// ─────────────────────────────────────────────────────────────────────────────
+// Trend 배경 페인터 — Figma plugin API 추출 데이터 그대로 (frame 1415 기준)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _TrendBgPainter extends CustomPainter {
+  // Ellipse 47 (추이) - 1:2172
+  static const _e47Width = 1017.3922729492188;
+  static const _e47Height = 1284.04150390625;
+  static const _e47Transform = <List<double>>[
+    [0.9964643716812134, -0.08401674032211304, -453.1190185546875],
+    [0.08401674032211304, 0.9964643716812134, 650.0],
+  ];
+  static const _e47Colors = <Color>[
+    Color(0xFFCFFF94),
+    Color(0xFF89C76A),
+    Color(0xFF4BA22B),
+  ];
+  static const _e47Stops = <double>[0.0, 0.5144, 1.0];
+
+  // Ellipse 48 (추이) - 1:2132
+  static const _e48Width = 488.5125427246094;
+  static const _e48Height = 503.53411865234375;
+  static const _e48Transform = <List<double>>[
+    [0.7538431286811829, -0.6570544242858887, 323.30615234375],
+    [0.6570544242858887, 0.7538431286811829, 455.0],
+  ];
+  static const _e48Colors = <Color>[
+    Color(0xFFE2F8C8),
+    Color(0xFF78CA59),
+  ];
+  static const _e48Stops = <double>[0.0, 1.0];
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = Offset.zero & size;
+    final paint = Paint();
+    final scale = size.width / _kFrameW;
+
+    // sky gradient
+    paint.shader = const LinearGradient(
+      begin: Alignment(-0.4, -1.0),
+      end: Alignment(0.4, 1.0),
+      stops: [0.082, 0.589, 1.0],
+      colors: [
+        DotColors.lightBgTop,
+        DotColors.lightBgBottom,
+        DotColors.lightBgBottom,
+      ],
+    ).createShader(rect);
+    canvas.drawRect(rect, paint);
+    paint.shader = null;
+
+    // 48 (앞쪽 작은 곡선) 먼저 그리고 47 그 위 — 홈과 동일한 z-order.
+    _drawEllipse(
+      canvas, scale, _e48Transform, _e48Width, _e48Height,
+      _e48Colors, _e48Stops,
+    );
+    _drawEllipse(
+      canvas, scale, _e47Transform, _e47Width, _e47Height,
+      _e47Colors, _e47Stops,
+    );
+  }
+
+  void _drawEllipse(
+    Canvas canvas,
+    double scale,
+    List<List<double>> m,
+    double w,
+    double h,
+    List<Color> colors,
+    List<double> stops,
+  ) {
+    canvas.save();
+    canvas.scale(scale, scale);
+    canvas.transform(
+      Float64List.fromList(<double>[
+        m[0][0], m[1][0], 0, 0,
+        m[0][1], m[1][1], 0, 0,
+        0, 0, 1, 0,
+        m[0][2], m[1][2], 0, 1,
+      ]),
+    );
+    final rect = Rect.fromLTWH(0, 0, w, h);
+    final shader = LinearGradient(
+      begin: Alignment.topCenter,
+      end: Alignment.bottomCenter,
+      colors: colors,
+      stops: stops,
+    ).createShader(rect);
+    canvas.drawOval(rect, Paint()..shader = shader);
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(_TrendBgPainter old) => false;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Trend 콘텐츠 — Figma 좌표 그대로
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _TrendContent extends StatelessWidget {
+  const _TrendContent({
+    required this.f,
+    required this.tabIndex,
+    required this.onTab,
+    required this.calendarMonth,
+    required this.onPrevMonth,
+    required this.onNextMonth,
+  });
+  final _Frame f;
+  final int tabIndex;
+  final ValueChanged<int> onTab;
+  final DateTime calendarMonth;
+  final VoidCallback onPrevMonth;
+  final VoidCallback onNextMonth;
+
+  static const _ink = Color(0xFF101010);
+  static const _ink2 = Color(0xFF252525);
+  static const _muted = Color(0xFF898989);
+  static const _calGray = Color(0xFF808080);
+
+  // 탭별 indicator x 좌표 (frame). 일간 시 union shape 의 indicator 위치 = 20.
+  // 다른 탭 선택 시 같은 width 79 의 indicator 가 그 탭 위로 이동.
+  static const _tabXs = [47.0, 140.0, 234.0, 329.0]; // 텍스트 left x
+  static const _tabs = ['일간', '주간', '월간', '년간'];
+
+  List<Widget> _buildChartArea() {
+    // 선택된 탭의 indicator x = 텍스트 x - 27 (좌측 padding).
+    final indicatorX = _tabXs[tabIndex] - 27;
+    return [
+      // 1. 일간 (선택된 탭) indicator — 흰색 박스, frame (indicatorX, 280, 79, 40.64)
+      f.at(
+        x: indicatorX,
+        y: 280,
+        w: 79,
+        h: 40.64,
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.only(
+              topLeft: Radius.circular(f.sx(10)),
+              topRight: Radius.circular(f.sx(10)),
+            ),
+          ),
+        ),
+      ),
+      // 2. 차트 카드 — 흰색 박스, frame (20, 320, 362, 234)
+      //    Figma Union 의 정확한 corner 모양:
+      //    - 일간 (indicator x=20, card 좌측과 정렬): top-left = sharp
+      //    - 년간 (indicator x+79=381, card 우측과 정렬): top-right = sharp
+      //    - 주간/월간 (indicator 중간): top corner 모두 rounded
+      //    - bottom corner: 항상 rounded
+      f.at(
+        x: 20,
+        y: 319, // 1px 위로 — indicator bottom 과 겹쳐서 union 효과
+        w: 362,
+        h: 235,
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.only(
+              topLeft: tabIndex == 0
+                  ? Radius.zero
+                  : Radius.circular(f.sx(10)),
+              topRight: tabIndex == _tabs.length - 1
+                  ? Radius.zero
+                  : Radius.circular(f.sx(10)),
+              bottomLeft: Radius.circular(f.sx(10)),
+              bottomRight: Radius.circular(f.sx(10)),
+            ),
+          ),
+        ),
+      ),
+      // 3. 탭 텍스트 4개 — 모두 frame y=292 위치.
+      //    선택된 탭: SemiBold, opacity 1.0. 미선택: Medium, opacity 0.7.
+      for (var i = 0; i < _tabs.length; i++)
+        f.at(
+          x: _tabXs[i] - 8, // 텍스트 좌측 hit area 살짝 키움
+          y: 286,
+          child: GestureDetector(
+            onTap: () => onTab(i),
+            child: Container(
+              padding: EdgeInsets.symmetric(
+                horizontal: f.sx(8),
+                vertical: f.sx(6),
+              ),
+              child: Text(
+                _tabs[i],
+                style: TextStyle(
+                  fontSize: f.sx(13),
+                  fontWeight: i == tabIndex
+                      ? FontWeight.w600
+                      : FontWeight.w500,
+                  color: _ink.withValues(alpha: i == tabIndex ? 1.0 : 0.7),
+                  fontFamily: BlowfitTheme.fontFamily,
+                ),
+              ),
+            ),
+          ),
+        ),
+      // 4. 호기 평균 legend (frame 45,343, 9×9 #0A89FC radius 1)
+      f.at(
+        x: 45,
+        y: 343,
+        w: 9,
+        h: 9,
+        child: Container(
+          decoration: BoxDecoration(
+            color: DotColors.primary,
+            borderRadius: BorderRadius.circular(f.sx(1)),
+          ),
+        ),
+      ),
+      f.at(
+        x: 60,
+        y: 341,
+        child: Text(
+          '호기 평균',
+          style: TextStyle(
+            fontSize: f.sx(10),
+            fontWeight: FontWeight.w500,
+            color: _ink2,
+            fontFamily: BlowfitTheme.fontFamily,
+          ),
+        ),
+      ),
+      // 5. 흡기 평균 legend (frame 113,343, 9×9 #32B65E radius 1)
+      f.at(
+        x: 113,
+        y: 343,
+        w: 9,
+        h: 9,
+        child: Container(
+          decoration: BoxDecoration(
+            color: DotColors.inhale,
+            borderRadius: BorderRadius.circular(f.sx(1)),
+          ),
+        ),
+      ),
+      f.at(
+        x: 128,
+        y: 341,
+        child: Text(
+          '흡기 평균',
+          style: TextStyle(
+            fontSize: f.sx(10),
+            fontWeight: FontWeight.w500,
+            color: _ink2,
+            fontFamily: BlowfitTheme.fontFamily,
+          ),
+        ),
+      ),
+      // 6. Y-axis labels (frame x, y per label)
+      for (final entry in const [
+        ('+30', 44.0, 373.0),
+        ('+20', 44.0, 397.0),
+        ('+10', 45.0, 421.0),
+        ('0', 54.0, 445.0),
+        ('-10', 46.0, 468.0),
+        ('-20', 46.0, 492.0),
+        ('-30', 45.0, 516.0),
+      ])
+        f.at(
+          x: entry.$2,
+          y: entry.$3,
+          child: Text(
+            entry.$1,
+            style: TextStyle(
+              fontSize: f.sx(8),
+              fontWeight: FontWeight.w500,
+              color: _muted,
+              fontFamily: BlowfitTheme.fontFamily,
+            ),
+          ),
+        ),
+      // 7. Grid lines (7개, frame x=66, w=292, y=378..521)
+      for (final y in const [
+        378.0,
+        402.0,
+        426.0,
+        450.0,
+        473.0,
+        497.0,
+        521.0,
+      ])
+        f.at(
+          x: 66,
+          y: y,
+          w: 292,
+          h: 1,
+          child: Container(color: _muted.withValues(alpha: 0.25)),
+        ),
+      // 8. 데이터 dot (Ellipse 49 at frame 126,422, 7×7 #0A89FC)
+      f.at(
+        x: 126,
+        y: 422,
+        w: 7,
+        h: 7,
+        child: Container(
+          decoration: const BoxDecoration(
+            color: DotColors.primary,
+            shape: BoxShape.circle,
+          ),
+        ),
+      ),
+    ];
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
+    return Stack(
       children: [
-        Container(
-          width: 10,
-          height: 10,
-          decoration: BoxDecoration(
-            color: color,
-            borderRadius: BorderRadius.circular(2),
+        // ─── 로고 (35×30 at 15,56) ────────────────────────────────
+        f.at(
+          x: 15,
+          y: 56,
+          w: 35,
+          h: 30,
+          child: Image.asset('assets/dot/logo.png', fit: BoxFit.contain),
+        ),
+        // ─── 설정 / 알림 ──────────────────────────────────────────
+        f.at(
+          x: 358,
+          y: 53,
+          w: 28,
+          h: 28,
+          child: Image.asset('assets/dot/icon_settings.png', fit: BoxFit.contain),
+        ),
+        f.at(
+          x: 311,
+          y: 53,
+          w: 30,
+          h: 30,
+          child: Image.asset('assets/dot/icon_bell.png', fit: BoxFit.contain),
+        ),
+        // ─── "추이" (15 SemiBold opacity 0.7 at 19,110) ───────────
+        f.at(
+          x: 19,
+          y: 105,
+          child: Text(
+            '추이',
+            style: TextStyle(
+              fontSize: f.sx(15),
+              fontWeight: FontWeight.w600,
+              color: _ink.withValues(alpha: 0.7),
+              fontFamily: BlowfitTheme.fontFamily,
+            ),
           ),
         ),
-        const SizedBox(width: 6),
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: BlowfitColors.ink2,
+        // ─── "얼마나 성장했어요!" (20 Bold at 19,131) ─────────────
+        f.at(
+          x: 19,
+          y: 127,
+          child: Text(
+            '얼마나 성장했어요!',
+            style: TextStyle(
+              fontSize: f.sx(20),
+              fontWeight: FontWeight.w700,
+              color: _ink,
+              letterSpacing: -0.4,
+              fontFamily: BlowfitTheme.fontFamily,
+            ),
+          ),
+        ),
+
+        // ─── Summary 카드 (362×91 at 20,168, white opacity 0.8, r10)
+        f.at(
+          x: 20,
+          y: 168,
+          w: 362,
+          h: 91,
+          child: _SummaryCard(f: f, textColor: _ink),
+        ),
+
+        // ─── 탭 + 차트 카드 (Figma Union 1:2136 모양) ─────────────
+        //   union = 일간 indicator(20,280,79,40.64) + 차트카드(20,320,362,234)
+        //   다른 탭 (주간/월간/년간) 텍스트는 union 밖 — 배경 잔디가 비침.
+        ..._buildChartArea(),
+
+        // ─── 캘린더 카드 (362×348 at 20,575) ──────────────────────
+        f.at(
+          x: 20,
+          y: 575,
+          w: 362,
+          h: 348,
+          child: _CalendarCard(
+            f: f,
+            month: calendarMonth,
+            onPrev: onPrevMonth,
+            onNext: onNextMonth,
+            ink: _ink,
+            calGray: _calGray,
+          ),
+        ),
+
+        // ─── 업적 카드 (362×348 at 20,944) ────────────────────────
+        f.at(
+          x: 20,
+          y: 944,
+          w: 362,
+          h: 348,
+          child: _AchievementsCard(f: f, ink: _ink),
+        ),
+
+        // ─── 페이지 indicator (Group 53 at 191,1320) ──────────────
+        f.at(
+          x: 191,
+          y: 1320,
+          w: 19,
+          h: 6,
+          child: Row(
+            children: [
+              Container(
+                width: f.sx(6),
+                height: f.sx(6),
+                decoration: const BoxDecoration(
+                  color: Colors.black26,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              SizedBox(width: f.sx(7)),
+              Container(
+                width: f.sx(6),
+                height: f.sx(6),
+                decoration: const BoxDecoration(
+                  color: DotColors.primary,
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ],
           ),
         ),
       ],
@@ -554,324 +538,309 @@ class _Legend extends StatelessWidget {
   }
 }
 
-// ---------------------------------------------------------------------------
-// 2x1 direction summary cards
-// ---------------------------------------------------------------------------
+// ─────────────────────────────────────────────────────────────────────────────
+// Summary 카드 — 이번 주 1회 | 이번 달 1일 | 지금까지 1회
+// ─────────────────────────────────────────────────────────────────────────────
 
-class _DirectionGrid extends StatelessWidget {
-  const _DirectionGrid({
-    required this.exhaleFrom,
-    required this.exhaleTo,
-  });
-
-  /// 활성 첫 주 / 마지막 주 호기 평균. activeWeeks.length >= 2 일 때만 호출됨.
-  final double exhaleFrom;
-  final double exhaleTo;
-
-  int _delta(double from, double to) {
-    if (from <= 0) return 0;
-    return ((to - from) / from * 100).round();
-  }
+class _SummaryCard extends StatelessWidget {
+  const _SummaryCard({required this.f, required this.textColor});
+  final _Frame f;
+  final Color textColor;
 
   @override
   Widget build(BuildContext context) {
-    // IntrinsicHeight + stretch — 두 카드의 높이를 호기 (긴 쪽) 기준으로 통일.
-    return IntrinsicHeight(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.8),
+        borderRadius: BorderRadius.circular(f.sx(10)),
+      ),
+      child: Stack(
         children: [
-          Expanded(
-            child: _DirectionCard(
-              label: '호기 (내쉬기)',
-              color: BlowfitColors.blue500,
-              from: exhaleFrom,
-              to: exhaleTo,
-              deltaPct: _delta(exhaleFrom, exhaleTo),
-            ),
+          // "이번 주" (60, 186 → card 40,18)
+          Positioned(
+            left: f.sx(40),
+            top: f.sx(18),
+            child: _label('이번 주', textColor),
           ),
-          const SizedBox(width: 10),
-          const Expanded(
-            child: _PlaceholderDirectionCard(
-              label: '흡기 (들이쉬기)',
-              color: Color(0xFF0099CC),
-            ),
+          // "1회" (57, 203 → card 37, 35)
+          Positioned(
+            left: f.sx(37),
+            top: f.sx(35),
+            child: _value('1회', textColor),
+          ),
+          // divider 1 (137, 185, w=0, h=58 → card 117, 17)
+          Positioned(
+            left: f.sx(117),
+            top: f.sx(17),
+            child: Container(width: 1, height: f.sx(58), color: Colors.black12),
+          ),
+          // "이번 달" (184, 186 → card 164, 18)
+          Positioned(
+            left: f.sx(164),
+            top: f.sx(18),
+            child: _label('이번 달', textColor),
+          ),
+          // "1일" (181, 203 → card 161, 35)
+          Positioned(
+            left: f.sx(161),
+            top: f.sx(35),
+            child: _value('1일', textColor),
+          ),
+          // divider 2 (261, 185 → card 241, 17)
+          Positioned(
+            left: f.sx(241),
+            top: f.sx(17),
+            child: Container(width: 1, height: f.sx(58), color: Colors.black12),
+          ),
+          // "지금까지" (304, 186 → card 284, 18)
+          Positioned(
+            left: f.sx(284),
+            top: f.sx(18),
+            child: _label('지금까지', textColor),
+          ),
+          // "1회" (305, 203 → card 285, 35)
+          Positioned(
+            left: f.sx(285),
+            top: f.sx(35),
+            child: _value('1회', textColor),
           ),
         ],
       ),
     );
   }
+
+  Widget _label(String t, Color c) => Text(
+        t,
+        style: TextStyle(
+          fontSize: f.sx(12),
+          fontWeight: FontWeight.w500,
+          color: c,
+          fontFamily: BlowfitTheme.fontFamily,
+        ),
+      );
+
+  Widget _value(String t, Color c) => Text(
+        t,
+        // height 명시 안 함 — figma 의 AUTO lineHeight 와 일치.
+        style: TextStyle(
+          fontSize: f.sx(30),
+          fontWeight: FontWeight.w700,
+          color: c,
+          fontFamily: BlowfitTheme.fontFamily,
+        ),
+      );
 }
 
-/// 흡기 카드 — 하드웨어 미지원 placeholder.
-class _PlaceholderDirectionCard extends StatelessWidget {
-  const _PlaceholderDirectionCard({
-    required this.label,
-    required this.color,
+// ─────────────────────────────────────────────────────────────────────────────
+// Calendar 카드 — 2026년 5월
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _CalendarCard extends StatelessWidget {
+  const _CalendarCard({
+    required this.f,
+    required this.month,
+    required this.onPrev,
+    required this.onNext,
+    required this.ink,
+    required this.calGray,
   });
-  final String label;
-  final Color color;
+  final _Frame f;
+  final DateTime month;
+  final VoidCallback onPrev;
+  final VoidCallback onNext;
+  final Color ink;
+  final Color calGray;
 
   @override
   Widget build(BuildContext context) {
-    return BlowfitCard(
-      padding: const EdgeInsets.all(14),
-      // 박스 높이는 부모의 IntrinsicHeight 가 호기 카드에 맞춰 늘려줌.
-      // 내부 "—" 는 가운데 정렬로 자연스럽게 배치.
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    // 카드 (20, 575) ~ (382, 923). card-local 좌표:
+    //   < (50, 603, 5x10) → card (30, 28)
+    //   "2026년 5월" (163, 601, 77x14) → card (143, 26), centered around 200
+    //   > (353, 613, 5x10) → card (333, 38)
+    //   요일 (50/98/148/196/246/294/344, 641) → card y=66
+    //   날짜 (47~352, 676~885) → card y=101~310
+    //
+    // 요일 색: 일=red, 토=#08F, 평일=ink
+    // 날짜: 13px Bold, #808080
+    //
+    // 5월 2026 시작: 1일 = 금요일 (frame 297, 676). 즉 첫 주 일~목 비고.
+    //   1주차: -, -, -, -, -, 1, 2
+    //   2주차: 3, 4, 5, 6, 7, 8, 9
+    //   ...
+    final firstDow = DateTime(month.year, month.month, 1).weekday % 7; // Sun=0
+    final daysInMonth = DateTime(month.year, month.month + 1, 0).day;
+    const dayLabels = ['일', '월', '화', '수', '목', '금', '토'];
+    // 요일별 x 좌표 (frame): 50, 98, 148, 196, 246, 294, 344
+    const dayXs = [50.0, 98.0, 148.0, 196.0, 246.0, 294.0, 344.0];
+    // 주차별 y 좌표 (frame): 676, 717, 758, 799, 842, 885 (간격 ~41)
+    const weekYs = [676.0, 717.0, 758.0, 799.0, 842.0, 885.0];
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(f.sx(10)),
+      ),
+      child: Stack(
         children: [
-          Row(
-            children: [
-              Container(
-                width: 8,
-                height: 8,
-                decoration: BoxDecoration(
-                  color: color,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  color: BlowfitColors.ink2,
-                ),
-              ),
-            ],
+          // 좌측 화살표
+          Positioned(
+            left: f.sx(50 - 20),
+            top: f.sx(603 - 575),
+            child: GestureDetector(
+              onTap: onPrev,
+              child: Icon(Icons.chevron_left, color: ink, size: f.sx(18)),
+            ),
           ),
-          // 단일 "—" 를 남은 공간 가운데에 둠.
-          const Expanded(
+          // 우측 화살표
+          Positioned(
+            left: f.sx(353 - 20),
+            top: f.sx(613 - 575),
+            child: GestureDetector(
+              onTap: onNext,
+              child: Icon(Icons.chevron_right, color: ink, size: f.sx(18)),
+            ),
+          ),
+          // 월 표시 "2026년 5월"
+          Positioned(
+            left: 0,
+            right: 0,
+            top: f.sx(601 - 575),
             child: Center(
               child: Text(
-                '—',
+                '${month.year}년 ${month.month}월',
                 style: TextStyle(
-                  fontSize: 22,
+                  fontSize: f.sx(15),
                   fontWeight: FontWeight.w700,
-                  color: BlowfitColors.gray400,
-                  letterSpacing: -0.44,
-                  fontFeatures: [FontFeature.tabularFigures()],
+                  color: ink,
+                  fontFamily: BlowfitTheme.fontFamily,
                 ),
               ),
             ),
           ),
-        ],
-      ),
-    );
-  }
-}
-
-class _DirectionCard extends StatelessWidget {
-  const _DirectionCard({
-    required this.label,
-    required this.color,
-    required this.from,
-    required this.to,
-    required this.deltaPct,
-  });
-
-  final String label;
-  final Color color;
-  final double from;
-  final double to;
-  final int deltaPct;
-
-  @override
-  Widget build(BuildContext context) {
-    return BlowfitCard(
-      padding: const EdgeInsets.all(14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 8,
-                height: 8,
-                decoration: BoxDecoration(
-                  color: color,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  color: BlowfitColors.ink2,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
-            children: [
-              Text(
-                from.toStringAsFixed(1),
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: BlowfitColors.ink3,
-                  fontFeatures: [FontFeature.tabularFigures()],
-                ),
-              ),
-              const SizedBox(width: 4),
-              const Icon(Icons.arrow_forward,
-                  size: 12, color: BlowfitColors.ink3),
-              const SizedBox(width: 4),
-              Text(
-                to.toStringAsFixed(1),
+          // 요일 헤더
+          for (var i = 0; i < 7; i++)
+            Positioned(
+              left: f.sx(dayXs[i] - 20),
+              top: f.sx(641 - 575),
+              child: Text(
+                dayLabels[i],
                 style: TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w700,
-                  color: color,
-                  letterSpacing: -0.44,
-                  fontFeatures: const [FontFeature.tabularFigures()],
+                  fontSize: f.sx(11),
+                  fontWeight: FontWeight.w500,
+                  color: i == 0
+                      ? DotColors.sunday
+                      : i == 6
+                          ? DotColors.saturday
+                          : ink,
+                  fontFamily: BlowfitTheme.fontFamily,
                 ),
               ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          // 양수 → 초록 ↑, 음수 → 빨강 ↓, 0 → 회색.
-          Builder(builder: (_) {
-            final positive = deltaPct > 0;
-            final negative = deltaPct < 0;
-            final pctColor = positive
-                ? BlowfitColors.green500
-                : negative
-                    ? BlowfitColors.red500
-                    : BlowfitColors.ink3;
-            final sign = positive ? '+' : ''; // 음수는 toString 에 '-' 포함
-            return Row(
-              children: [
-                if (positive)
-                  Icon(Icons.arrow_upward, size: 11, color: pctColor)
-                else if (negative)
-                  Icon(Icons.arrow_downward, size: 11, color: pctColor),
-                if (positive || negative) const SizedBox(width: 2),
-                Text(
-                  '$sign$deltaPct%',
+            ),
+          // 날짜 셀
+          for (var d = 1; d <= daysInMonth; d++)
+            () {
+              final idx = d - 1 + firstDow;
+              final row = idx ~/ 7;
+              final col = idx % 7;
+              if (row >= weekYs.length) return const SizedBox.shrink();
+              return Positioned(
+                left: f.sx(dayXs[col] - 20),
+                top: f.sx(weekYs[row] - 575),
+                child: Text(
+                  '$d',
                   style: TextStyle(
-                    fontSize: 12,
+                    fontSize: f.sx(13),
                     fontWeight: FontWeight.w700,
-                    color: pctColor,
+                    color: calGray,
+                    fontFamily: BlowfitTheme.fontFamily,
                   ),
                 ),
-              ],
-            );
-          }),
+              );
+            }(),
         ],
       ),
     );
   }
 }
 
-// ---------------------------------------------------------------------------
-// Milestones card
-// ---------------------------------------------------------------------------
+// ─────────────────────────────────────────────────────────────────────────────
+// Achievements 카드
+// ─────────────────────────────────────────────────────────────────────────────
 
-class _MilestonesCard extends StatelessWidget {
-  const _MilestonesCard({required this.milestones, required this.loading});
-
-  final List<Milestone> milestones;
-  final bool loading;
+class _AchievementsCard extends StatelessWidget {
+  const _AchievementsCard({required this.f, required this.ink});
+  final _Frame f;
+  final Color ink;
 
   @override
   Widget build(BuildContext context) {
-    return BlowfitCard(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    // 카드 (20, 944) ~ (382, 1292). card-local:
+    //   "업적" (44, 970, 17 Bold) → (24, 26)
+    //   items at y=1017/1056/1098/1140/1182/1224 (간격 ~41)
+    //   체크박스 (51, 1018, 15x15) → (31, 74)
+    //   item 텍스트 (82, 1017) → (62, 73), 13 SemiBold
+    const items = [
+      '1주차 - 첫 훈련 완료',
+      '2주차 - 연속 훈련 완료',
+      '2주차 - 연속 훈련 완료',
+      '2주차 - 연속 훈련 완료',
+      '2주차 - 연속 훈련 완료',
+      '2주차 - 연속 훈련 완료',
+    ];
+    const itemYs = [1017.0, 1056.0, 1098.0, 1140.0, 1182.0, 1224.0];
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(f.sx(10)),
+      ),
+      child: Stack(
         children: [
-          const Text(
-            '마일스톤',
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w700,
-              color: BlowfitColors.ink,
+          // 업적 타이틀
+          Positioned(
+            left: f.sx(44 - 20),
+            top: f.sx(970 - 944),
+            child: Text(
+              '업적',
+              style: TextStyle(
+                fontSize: f.sx(17),
+                fontWeight: FontWeight.w700,
+                color: ink,
+                fontFamily: BlowfitTheme.fontFamily,
+              ),
             ),
           ),
-          const SizedBox(height: 12),
-          if (loading && milestones.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 24),
-              child: Center(
-                child: SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
+          // items
+          for (var i = 0; i < items.length; i++) ...[
+            // 체크박스
+            Positioned(
+              left: f.sx(51 - 20),
+              top: f.sx(itemYs[i] + 1 - 944),
+              child: Container(
+                width: f.sx(15),
+                height: f.sx(15),
+                decoration: BoxDecoration(
+                  color: DotColors.primary,
+                  borderRadius: BorderRadius.circular(f.sx(3)),
+                ),
+                child: Icon(Icons.check, size: f.sx(11), color: Colors.white),
+              ),
+            ),
+            // 텍스트
+            Positioned(
+              left: f.sx(82 - 20),
+              top: f.sx(itemYs[i] - 944),
+              child: Text(
+                items[i],
+                style: TextStyle(
+                  fontSize: f.sx(13),
+                  fontWeight: FontWeight.w600,
+                  color: ink,
+                  fontFamily: BlowfitTheme.fontFamily,
                 ),
               ),
-            )
-          else
-            for (var i = 0; i < milestones.length; i++) ...[
-              if (i > 0) const Divider(height: 1, color: BlowfitColors.gray150),
-              _MilestoneRow(milestone: milestones[i]),
-            ],
-        ],
-      ),
-    );
-  }
-}
-
-class _MilestoneRow extends StatelessWidget {
-  const _MilestoneRow({required this.milestone});
-  final Milestone milestone;
-
-  /// 달성 → 날짜, 미달성 → '진행 중' 으로 통일.
-  String _dateLabel() {
-    final at = milestone.achievedAt;
-    if (at != null) return DateFormat('M월 d일', 'ko').format(at);
-    return '진행 중';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10),
-      child: Row(
-        children: [
-          Container(
-            width: 28,
-            height: 28,
-            decoration: BoxDecoration(
-              color: milestone.achieved
-                  ? BlowfitColors.green100
-                  : BlowfitColors.gray100,
-              shape: BoxShape.circle,
             ),
-            child: Icon(
-              milestone.achieved ? Icons.check : Icons.emoji_events,
-              size: milestone.achieved ? 16 : 14,
-              color: milestone.achieved
-                  ? BlowfitColors.greenInk
-                  : BlowfitColors.gray400,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              milestone.title,
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: milestone.achieved
-                    ? BlowfitColors.ink
-                    : BlowfitColors.ink2,
-              ),
-            ),
-          ),
-          Text(
-            _dateLabel(),
-            style: const TextStyle(
-              fontSize: 12,
-              color: BlowfitColors.ink3,
-            ),
-          ),
+          ],
         ],
       ),
     );

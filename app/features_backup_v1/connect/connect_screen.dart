@@ -114,13 +114,10 @@ class _ConnectScreenState extends ConsumerState<ConnectScreen> {
       final store = await ref.read(lastDeviceStoreProvider.future);
       await store.save(LastDevice(id: d.id, name: d.name));
 
-      // 마지막 페어링 device 저장 (autoReconnectProvider 의 targeted scan 용).
+      // Foreground service 를 위해 SharedPreferences 에도 저장 (별도 isolate 에서 접근).
       await BleForegroundService.saveLastDeviceId(d.id, d.name);
-      // BleForegroundService.startService() 는 더 이상 호출 안 함 — service 가
-      // 별도 process 에서 BLE 연결 잡으면 main app 의 manager 와 split-brain
-      // 발생 (앱 종료 시 잠깐 끊겼다가 service 가 즉시 재연결, 디바이스 LCD 는
-      // "연결" 유지, main app 의 startSession write 는 실패). BLE 의 sole
-      // owner 는 main app process 의 RealBleManager 로 통일.
+      // Service 시작 — 앱 종료 후에도 자동 재연결 유지.
+      await BleForegroundService.startService();
 
       if (!mounted) return true;
       if (context.canPop()) {

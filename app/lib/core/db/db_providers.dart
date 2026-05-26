@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../ble/ble_providers.dart';
@@ -58,12 +59,29 @@ final autoReconnectProvider = Provider<void>((ref) {
   Future.delayed(const Duration(seconds: 1), () async {
     // 이미 연결됐으면 (e.g. 사용자가 빨리 manual scan 진행) skip.
     if ((ref.read(connectionProvider).valueOrNull ?? false)) return;
+    final manager = ref.read(bleManagerProvider);
+
+    // STEP 1 — BleForegroundService (별도 isolate) 가 잡고 있는 OS-level
+    // GATT connection 흡수 시도. flutter_blue_plus 는 process-level singleton
+    // 이라 service isolate 의 connectedDevices 가 main isolate 에서도 보임.
+    // Service 가 연결 잡은 상태에서 device 는 advertising 안 함 → scan 으로는
+    // 못 찾음. 이 path 가 split-brain (디바이스 LCD=연결, 앱=미연결) 해결.
+    try {
+      if (await manager.tryAdoptExistingConnection()) {
+        debugPrint('[auto] adopted existing OS connection — skip scan');
+        return;
+      }
+    } catch (e) {
+      debugPrint('[auto] adopt threw: $e');
+    }
+
+    // STEP 2 — adopt 실패 (service 가 연결 안 잡았거나 device 가 다름) 시
+    // 기존 scan + connect 흐름.
     try {
       final store = await ref.read(lastDeviceStoreProvider.future);
       final last = store.load();
       if (last == null) return; // 처음 사용자 — manual scan 으로 진행
 
-      final manager = ref.read(bleManagerProvider);
       // 빠른 targeted scan (3s).
       final results = await manager.scan(timeout: const Duration(seconds: 3));
       // 마지막 device id 와 일치하는 거 찾기 (없으면 null).

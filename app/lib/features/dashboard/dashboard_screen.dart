@@ -1,132 +1,90 @@
+// Figma DoT — 홈 화면 (라이트 + 다크).
+//
+// 디자인 출처:
+//   1:2060  홈화면 - 라이트모드 (402 × 874)
+//   1:2261  홈화면 - 다크모드   (402 × 874)
+//
+// Asset 출처:
+//   home_light.png 에서 직접 crop +alpha 처리:
+//     - grass.png : 잔디 영역 (mascot 영역은 transparent, 나머지는 column-fill)
+//     - mascot.png: mascot 영역 (sky/grass 색은 transparent)
+//     - mascot_dark.png: home_dark.png 의 mascot 영역
+//     - icon_settings.png, icon_bell.png: 우상단 아이콘 (검정만 keep)
+//     - logo.png: 좌상단 로고 (검정 alpha)
+//
+// 좌표는 Figma 402×874 frame px 그대로. 화면 너비/402 로 scale.
+// 페이지 indicator dots 가 system nav bar 에 가려지지 않도록 SafeArea bottom.
+// top 은 status bar 영역까지 컨텐츠가 보이도록 (logo 가 status bar 와 가까이).
+
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:intl/intl.dart';
 
 import '../../core/ble/ble_providers.dart';
-import '../../core/coach/coaching_engine.dart';
-import '../../core/db/db_providers.dart';
-import '../../core/models/pressure_sample.dart';
-import '../../core/storage/storage_providers.dart';
+import '../../core/ble/blowfit_uuids.dart';
 import '../../core/theme/blowfit_colors.dart';
-import '../../core/theme/blowfit_widgets.dart';
+import '../../core/theme/blowfit_theme.dart';
+import '../settings/settings_screen.dart';
 
-/// Phase 3 디자인: 인사 → 디바이스 카드 → 그라데이션 CTA → 통계 타일 → 코칭.
+const double _kFrameW = 402;
+
+class _Frame {
+  _Frame(this.screenW) : scale = screenW / _kFrameW;
+  final double screenW;
+  final double scale;
+
+  double sx(double v) => v * scale;
+  double sy(double v) => v * scale;
+
+  Positioned at({
+    required double x,
+    required double y,
+    double? w,
+    double? h,
+    required Widget child,
+  }) {
+    return Positioned(
+      left: sx(x),
+      top: sy(y),
+      width: w == null ? null : sx(w),
+      height: h == null ? null : sy(h),
+      child: child,
+    );
+  }
+}
+
 class DashboardScreen extends ConsumerWidget {
   const DashboardScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final connected = ref.watch(connectionProvider).valueOrNull ?? false;
-    final state = ref.watch(deviceStateProvider).valueOrNull;
-    final lowBattery = state != null &&
-        (state.lowBattery || state.batteryPct < 20);
-    final consecutiveDays =
-        ref.watch(consecutiveDaysProvider).valueOrNull ?? 0;
-    final weekHits = ref.watch(weekHitsProvider).valueOrNull ?? 0;
-    final pressurePair =
-        ref.watch(weekAvgPressureProvider).valueOrNull;
-    final profile =
-        ref.watch(userProfileStoreProvider).valueOrNull?.load();
-    final health = ref.watch(bleHealthProvider).valueOrNull;
+    final mode = ref.watch(themeModeProvider);
+    final isDark = mode == ThemeMode.dark;
+    final media = MediaQuery.of(context);
+    final f = _Frame(media.size.width);
 
     return Scaffold(
-      // AppBar 는 디자인의 52px 헤더로 직접 그림 — 표준 AppBar 보다 컴팩트.
-      body: SafeArea(
-        child: Column(
-          children: [
-            const _TopBar(),
-            Expanded(
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
-                children: [
-                  _Greeting(
-                    streakDays: consecutiveDays,
-                    userName: profile?.name,
-                  ),
-                  const SizedBox(height: 14),
-                  _DeviceStatusCard(
-                    connected: connected,
-                    state: state,
-                    healthDegraded: health?.isDegraded ?? false,
-                    onTap: () => context.push('/connect'),
-                  ),
-                  const SizedBox(height: 10),
-                  _TrainingCta(
-                    connected: connected,
-                    orificeLevel: state?.orificeLevel,
-                    onStart: () => context.push('/training-intro'),
-                    onConnect: () => context.push('/connect'),
-                  ),
-                  const SizedBox(height: 10),
-                  _QuickStats(
-                    weekHits: weekHits,
-                    onTap: () => context.push('/trend'),
-                  ),
-                  const SizedBox(height: 10),
-                  if (lowBattery && connected)
-                    _LowBatteryBanner(snapshot: state),
-                  if (lowBattery && connected) const SizedBox(height: 10),
-                  _CoachingCard(
-                    tip: CoachingEngine.dashboardWeekly(
-                      weekHits: weekHits,
-                      currentStreak: consecutiveDays,
-                      thisWeekAvg: pressurePair?.thisWeek,
-                      lastWeekAvg: pressurePair?.lastWeek,
-                    ),
-                    onTap: () => context.push('/trend'),
-                  ),
-                ],
+      backgroundColor: isDark ? DotColors.darkBg : null,
+      body: Stack(
+        children: [
+          // 배경 — Figma 의 두 회전 ellipse 를 frame 좌표 그대로 그림.
+          // 화면 전체 cover. LayoutBuilder 로 painter 가 받는 size 명시.
+          Positioned.fill(
+            child: LayoutBuilder(
+              builder: (_, c) => CustomPaint(
+                size: Size(c.maxWidth, c.maxHeight),
+                painter: _BgPainter(isDark: isDark),
               ),
             ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Top bar — 52px 컴팩트 헤더 (로고 + 알림 벨)
-// ---------------------------------------------------------------------------
-
-class _TopBar extends StatelessWidget {
-  const _TopBar();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 52,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Row(
-        children: [
-          Container(
-            width: 28,
-            height: 28,
-            decoration: BoxDecoration(
-              color: BlowfitColors.blue500,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: const Icon(Icons.air, size: 18, color: Colors.white),
           ),
-          const SizedBox(width: 8),
-          const Text(
-            'BlowFit',
-            style: TextStyle(
-              fontSize: 17,
-              fontWeight: FontWeight.w700,
-              letterSpacing: -0.34,
-            ),
-          ),
-          const Spacer(),
-          _IconButton(
-            icon: Icons.notifications_outlined,
-            badge: true,
-            onTap: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('알림 기능은 곧 출시됩니다')),
-              );
-            },
+          // 컨텐츠.
+          _HomeContent(
+            f: f,
+            isDark: isDark,
+            ref: ref,
+            bottomInset: media.padding.bottom,
           ),
         ],
       ),
@@ -134,737 +92,498 @@ class _TopBar extends StatelessWidget {
   }
 }
 
-class _IconButton extends StatelessWidget {
-  const _IconButton({
-    required this.icon,
-    required this.onTap,
-    this.badge = false,
-  });
+// ─────────────────────────────────────────────────────────────────────────────
+// 배경 페인터 — Figma Ellipse 47 + Ellipse 48 을 frame(402×874) 좌표 그대로
+//
+//   Ellipse 47 (어두운 잔디, 뒷쪽): x=-348, y=338, w=985, h=786, rotate 4.82°
+//   Ellipse 48 (밝은 잔디, 앞쪽) : x=312,  y=328, w=638, h=640, rotate 41.08°
+//
+// 색상은 home_light.png 픽셀 추출 기준: 진한 잔디 #A2DB79, 밝은 잔디 #B5E981.
+// ─────────────────────────────────────────────────────────────────────────────
 
-  final IconData icon;
-  final VoidCallback onTap;
-  final bool badge;
+class _BgPainter extends CustomPainter {
+  _BgPainter({required this.isDark});
+  final bool isDark;
+
+  // Figma plugin API 로 직접 추출한 Ellipse 47 / 48 의 정확한 데이터.
+  // (file Shu32okKe6gBb7gUoqxdRT, nodes 1:2063 + 1:2062)
+  //
+  // 각 ellipse 의 fill 은 GRADIENT_LINEAR (단색 아님). gradientTransform 분석상
+  // unit space y-up 기준이라 position 0 (밝은 색) = ellipse local top, position 1
+  // (진한 색) = local bottom. Flutter LinearGradient(begin: topCenter, end:
+  // bottomCenter) 와 매핑됨.
+  //
+  // relativeTransform 은 figma frame 좌표계에서 ellipse 의 회전+이동. Flutter
+  // canvas.transform 으로 그대로 적용 가능.
+
+  // ─── Ellipse 47 (라이트) — 뒷쪽 큰 잔디 곡선 ─────────────────
+  static const _e47Width = 929.5265502929688;
+  static const _e47Height = 710.48974609375;
+  static const _e47Transform = [
+    [0.9964643716812134, -0.08401674032211304, -348.306884765625],
+    [0.08401674032211304, 0.9964643716812134, 338.3779296875],
+  ];
+  static const _e47Colors = [
+    Color(0xFFCFFF94),
+    Color(0xFF89C76A),
+    Color(0xFF4BA22B),
+  ];
+  static const _e47Stops = [0.0, 0.5144, 1.0];
+
+  // ─── Ellipse 48 (라이트) — 앞쪽 작은 잔디 곡선 ───────────────
+  static const _e48Width = 446.32281494140625;
+  static const _e48Height = 460.0470886230469;
+  static const _e48Transform = [
+    [0.7538431286811829, -0.6570544242858887, 312.7431640625],
+    [0.6570544242858887, 0.7538431286811829, 328.080078125],
+  ];
+  static const _e48Colors = [
+    Color(0xFFE2F8C8),
+    Color(0xFF78CA59),
+  ];
+  static const _e48Stops = [0.0, 1.0];
+
+  // ─── Ellipse 47 (다크) — figma 1:2264 ───────────────────────
+  //   x 가 라이트(-348.31)와 살짝 다름 (-351.93). 회전/크기는 같음.
+  static const _e47DarkTransform = [
+    [0.9964643716812134, -0.08401674032211304, -351.9313049316406],
+    [0.08401674032211304, 0.9964643716812134, 338.3775634765625],
+  ];
+  static const _e47DarkColors = [
+    Color(0xFF34346A), // pos 0.0    (어두운 보라/네이비, 잔디 위 가장자리)
+    Color(0xFF1D1E45), // pos 0.13
+    Color(0xFF10112F), // pos 0.365
+    Color(0xFF05061B), // pos 1.0    (매우 어두운 네이비)
+  ];
+  static const _e47DarkStops = [0.0, 0.1298, 0.3654, 1.0];
+
+  // ─── Ellipse 48 (다크) — figma 1:2263 ───────────────────────
+  static const _e48DarkColors = [
+    Color(0xFF161841), // pos 0.0
+    Color(0xFF05061B), // pos 1.0
+  ];
+  static const _e48DarkStops = [0.0, 1.0];
 
   @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(999),
-        onTap: onTap,
-        child: Stack(
-          children: [
-            Container(
-              width: 36,
-              height: 36,
-              decoration: const BoxDecoration(
-                color: BlowfitColors.gray100,
-                shape: BoxShape.circle,
-              ),
-              child: Icon(icon, size: 20, color: BlowfitColors.gray700),
-            ),
-            if (badge)
-              Positioned(
-                top: 8,
-                right: 8,
-                child: Container(
-                  width: 8,
-                  height: 8,
-                  decoration: BoxDecoration(
-                    color: BlowfitColors.red500,
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white, width: 2),
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
+  void paint(Canvas canvas, Size size) {
+    final rect = Offset.zero & size;
+    final paint = Paint();
+    final scale = size.width / _kFrameW;
+
+    if (isDark) {
+      // 다크 모드 배경 — figma Rectangle 69 (1:2262) 단색 #060725
+      paint.color = const Color(0xFF060725);
+      canvas.drawRect(rect, paint);
+      // 48 먼저 (뒤) → 47 그 위에.
+      _drawEllipse(
+        canvas, scale, _e48Transform, _e48Width, _e48Height,
+        _e48DarkColors, _e48DarkStops,
+      );
+      _drawEllipse(
+        canvas, scale, _e47DarkTransform, _e47Width, _e47Height,
+        _e47DarkColors, _e47DarkStops,
+      );
+      return;
+    }
+
+    // 라이트: 하늘 그라데이션 → 잔디 ellipse 두 개 (각각 gradient fill).
+    paint.shader = const LinearGradient(
+      begin: Alignment(-0.4, -1.0),
+      end: Alignment(0.4, 1.0),
+      stops: [0.082, 0.589, 1.0],
+      colors: [
+        DotColors.lightBgTop,
+        DotColors.lightBgBottom,
+        DotColors.lightBgBottom,
+      ],
+    ).createShader(rect);
+    canvas.drawRect(rect, paint);
+    paint.shader = null;
+
+    // 48 먼저 (뒤) → 47 그 위에 그려서 47 이 시각적으로 앞쪽에 보이게.
+    _drawEllipse(
+      canvas, scale, _e48Transform, _e48Width, _e48Height,
+      _e48Colors, _e48Stops,
+    );
+    _drawEllipse(
+      canvas, scale, _e47Transform, _e47Width, _e47Height,
+      _e47Colors, _e47Stops,
     );
   }
+
+  /// Figma 의 relativeTransform 을 Flutter canvas 에 그대로 적용하고 ellipse 의
+  /// 회전 전 local 좌표계 (0, 0)~(w, h) 에 oval 을 그린다. gradient 도 같은 local
+  /// 좌표계에서 top → bottom 방향 (figma gradientTransform 결과).
+  void _drawEllipse(
+    Canvas canvas,
+    double scale,
+    List<List<double>> m,
+    double w,
+    double h,
+    List<Color> colors,
+    List<double> stops,
+  ) {
+    canvas.save();
+    // Frame(402) → Screen scale.
+    canvas.scale(scale, scale);
+    // Ellipse 의 figma transform (회전 + translate). Float64List 는
+    // column-major 4×4. figma 의 2×3 affine 을 4×4 로 확장.
+    canvas.transform(
+      Float64List.fromList(<double>[
+        m[0][0], m[1][0], 0, 0, // col 0
+        m[0][1], m[1][1], 0, 0, // col 1
+        0, 0, 1, 0, // col 2
+        m[0][2], m[1][2], 0, 1, // col 3 (translate)
+      ]),
+    );
+    final rect = Rect.fromLTWH(0, 0, w, h);
+    final shader = LinearGradient(
+      begin: Alignment.topCenter,
+      end: Alignment.bottomCenter,
+      colors: colors,
+      stops: stops,
+    ).createShader(rect);
+    canvas.drawOval(rect, Paint()..shader = shader);
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(_BgPainter old) => old.isDark != isDark;
 }
 
-// ---------------------------------------------------------------------------
-// Greeting — 날짜 + 인사 + streak
-// ---------------------------------------------------------------------------
-
-class _Greeting extends StatelessWidget {
-  const _Greeting({required this.streakDays, this.userName});
-  final int streakDays;
-  final String? userName;
+class _HomeContent extends StatelessWidget {
+  const _HomeContent({
+    required this.f,
+    required this.isDark,
+    required this.ref,
+    required this.bottomInset,
+  });
+  final _Frame f;
+  final bool isDark;
+  final WidgetRef ref;
+  final double bottomInset;
 
   @override
   Widget build(BuildContext context) {
-    final date = DateFormat('M월 d일 EEEE', 'ko').format(DateTime.now());
-    final greeting = (userName != null && userName!.isNotEmpty)
-        ? '안녕하세요, $userName님'
-        : '안녕하세요';
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            date,
-            style: const TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w500,
-              color: BlowfitColors.ink3,
-            ),
-          ),
-          const SizedBox(height: 3),
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  greeting,
-                  style: const TextStyle(
-                    fontSize: 23,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: -0.7,
-                    height: 1.2,
-                    color: BlowfitColors.ink,
-                  ),
+    final textPrimary =
+        isDark ? DotColors.darkTextPrimary : DotColors.lightTextPrimary;
+    final mascotAsset =
+        isDark ? 'assets/dot/mascot_dark.png' : 'assets/dot/mascot.png';
+
+    // 라이트: 검정 그대로, 다크: invert (흰색)
+    final ColorFilter? invertFilter = isDark
+        ? const ColorFilter.matrix([
+            -1, 0, 0, 0, 255, //
+            0, -1, 0, 0, 255, //
+            0, 0, -1, 0, 255, //
+            0, 0, 0, 1, 0, //
+          ])
+        : null;
+
+    Widget buildIcon(String asset, double w, double h) {
+      final img = Image.asset(asset, fit: BoxFit.contain);
+      if (invertFilter == null) return img;
+      return ColorFiltered(colorFilter: invertFilter, child: img);
+    }
+
+    return Stack(
+      children: [
+        // ─── 로고 (35×30 at 16,55) ────────────────────────────────
+        f.at(x: 16, y: 55, w: 35, h: 30, child: buildIcon('assets/dot/logo.png', 35, 30)),
+
+        // ─── 설정 아이콘 (28×28, hit 영역 60×60) ──────────────────
+        f.at(
+          x: 340,
+          y: 35,
+          w: 60,
+          h: 60,
+          child: Builder(
+            builder: (ctx) => GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => Navigator.of(ctx, rootNavigator: true).push(
+                MaterialPageRoute(
+                  builder: (_) => const SettingsScreen(),
                 ),
               ),
-              if (streakDays > 0) StreakBadge(days: streakDays),
+              child: Container(
+                color: Colors.transparent,
+                alignment: Alignment.center,
+                child: SizedBox(
+                  width: f.sx(28),
+                  height: f.sx(28),
+                  child: buildIcon(
+                      'assets/dot/icon_settings.png', 28, 28),
+                ),
+              ),
+            ),
+          ),
+        ),
+
+        // ─── 알림 종 (20×19 at 320,60) ────────────────────────────
+        f.at(
+          x: 311,
+          y: 53,
+          w: 30,
+          h: 30,
+          child: buildIcon('assets/dot/icon_bell.png', 30, 30),
+        ),
+
+        // ─── "안녕하세요. 오재원님" (15 SemiBold at 19,112) ────────
+        f.at(
+          x: 19,
+          y: 108,
+          child: Row(
+            children: [
+              Text(
+                '안녕하세요. 오재원님',
+                style: TextStyle(
+                  fontSize: f.sx(15),
+                  fontWeight: FontWeight.w600,
+                  height: 1.2,
+                  color: textPrimary,
+                  fontFamily: BlowfitTheme.fontFamily,
+                ),
+              ),
+              SizedBox(width: f.sx(4)),
+              // Figma 의 12×12 노란 smiley 이모지 (home_light.png 에서 직접 추출).
+              SizedBox(
+                width: f.sx(12),
+                height: f.sx(12),
+                child: Image.asset('assets/dot/emoji.png', fit: BoxFit.contain),
+              ),
             ],
           ),
-        ],
-      ),
-    );
-  }
-}
+        ),
 
-// ---------------------------------------------------------------------------
-// Device status card — BLE / 배터리 / 다이얼
-// ---------------------------------------------------------------------------
+        // ─── "얼마나 성장했어요!" (25 Bold at 19,133) ─────────────
+        f.at(
+          x: 19,
+          y: 130,
+          child: Text(
+            '얼마나 성장했어요!',
+            style: TextStyle(
+              fontSize: f.sx(25),
+              fontWeight: FontWeight.w700,
+              letterSpacing: -0.5,
+              height: 1.2,
+              color: textPrimary,
+              fontFamily: BlowfitTheme.fontFamily,
+            ),
+          ),
+        ),
 
-class _DeviceStatusCard extends StatelessWidget {
-  const _DeviceStatusCard({
-    required this.connected,
-    required this.state,
-    required this.healthDegraded,
-    required this.onTap,
-  });
+        // ─── "훈련하기" pill (93×43 at 289,114) — /training 으로 이동 ──
+        f.at(
+          x: 289,
+          y: 114,
+          w: 93,
+          h: 43,
+          child: Builder(
+            builder: (ctx) => GestureDetector(
+              onTap: () {
+                debugPrint('[home] 훈련하기 onTap');
+                final mgr = ref.read(bleManagerProvider);
+                // BLE write — fire-and-forget. RealBleManager.startSession 이
+                // 내부에서 ensureConnected (readRssi + 필요 시 hard reconnect)
+                // 를 수행하므로 dashboard 가 multi-step 복구 로직 가질 필요 X.
+                // 미연결이라 startSession 실패해도 navigation 은 진행 — 훈련
+                // 화면이 자체적으로 연결 상태 표시.
+                () async {
+                  try {
+                    await mgr.startSession(OrificeLevel.medium);
+                  } catch (e) {
+                    debugPrint('[home] startSession failed: $e');
+                  }
+                }();
+                ctx.push('/training');
+              },
+              child: Container(
+                decoration: BoxDecoration(
+                  color:
+                      isDark ? DotColors.darkCardSoft : DotColors.lightCtaBg,
+                  borderRadius: BorderRadius.circular(f.sx(10)),
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  '훈련하기',
+                  style: TextStyle(
+                    fontSize: f.sx(17),
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white,
+                    fontFamily: BlowfitTheme.fontFamily,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
 
-  final bool connected;
-  final DeviceSnapshot? state;
-  final bool healthDegraded;
-  final VoidCallback onTap;
+        // ─── 마스코트 (216×183 at 93,345) ─────────────────────────
+        f.at(
+          x: 93,
+          y: 345,
+          w: 216,
+          h: 183,
+          child: Image.asset(mascotAsset, fit: BoxFit.contain),
+        ),
 
-  @override
-  Widget build(BuildContext context) {
-    final battery = state?.batteryPct ?? 0;
-    final orificeLevel = state?.orificeLevel ?? 0;
-    final lowBattery = state?.lowBattery ?? (connected && battery < 20);
+        // ─── 통계 카드 (362×194) — 화면 bottom 기준 ──────────────
+        // dots 영역 (16 gap + 6 dot + 16 gap) 위에 카드를 둠 — 화면 어떤
+        // 사이즈에서도 dots 가 nav bar 위에 보이고, 카드와 dots 사이 간격
+        // Figma 와 동일 (16dp). bottomInset 으로 system nav bar 회피.
+        Positioned(
+          left: f.sx(20),
+          right: f.sx(20),
+          bottom: bottomInset + f.sx(16 + 6 + 16),
+          height: f.sx(194),
+          child: _StatsCard(f: f, isDark: isDark),
+        ),
 
-    return BlowfitCard(
-      onTap: onTap,
-      padding: const EdgeInsets.all(14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // ---- top row: avatar + 기기명/연결 상태 + chevron ----
-          Row(
+        // ─── 페이지 indicator dots — system nav 위 16dp ───────────
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: bottomInset + f.sx(16),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Container(
-                width: 58,
-                height: 58,
+                width: f.sx(6),
+                height: f.sx(6),
+                decoration: const BoxDecoration(
+                  color: DotColors.primary,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              SizedBox(width: f.sx(7)),
+              Container(
+                width: f.sx(6),
+                height: f.sx(6),
                 decoration: BoxDecoration(
-                  color: BlowfitColors.blue50,
-                  borderRadius: BorderRadius.circular(15),
-                ),
-                child: Icon(
-                  connected
-                      ? Icons.bluetooth_connected
-                      : Icons.bluetooth_disabled,
-                  size: 29,
-                  color: connected
-                      ? BlowfitColors.blue500
-                      : BlowfitColors.gray500,
+                  color: isDark ? Colors.white24 : Colors.black26,
+                  shape: BoxShape.circle,
                 ),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      connected ? 'BlowFit Pro' : '기기 연결 안 됨',
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: BlowfitColors.ink,
-                        letterSpacing: -0.16,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        Container(
-                          width: 8,
-                          height: 8,
-                          decoration: BoxDecoration(
-                            color: connected
-                                ? BlowfitColors.green500
-                                : BlowfitColors.gray400,
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          connected ? '연결됨' : '연결 끊김',
-                          style: const TextStyle(
-                            fontSize: 13,
-                            color: BlowfitColors.ink2,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              const Icon(Icons.chevron_right,
-                  color: BlowfitColors.gray400, size: 20),
             ],
           ),
-          const SizedBox(height: 12),
-          // ---- metrics grid: 배터리 / 저항 다이얼 / 신호 ----
-          Container(
-            decoration: BoxDecoration(
-              color: BlowfitColors.gray50,
-              borderRadius: BorderRadius.circular(13),
-            ),
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 11),
-            child: IntrinsicHeight(
-              child: Row(
-                children: [
-                  Expanded(
-                    child: _Metric(
-                      label: '배터리',
-                      value: connected ? '$battery%' : '끊김',
-                      icon: connected
-                          ? _batteryIcon(battery, state?.charging ?? false)
-                          : Icons.battery_std,
-                      warn: connected && lowBattery,
-                      dim: !connected,
-                    ),
-                  ),
-                  const _MetricDivider(),
-                  Expanded(
-                    child: _Metric(
-                      label: '저항 다이얼',
-                      value: connected ? '${orificeLevel + 1}단' : '2단',
-                      dim: !connected,
-                    ),
-                  ),
-                  const _MetricDivider(),
-                  Expanded(
-                    child: _Metric(
-                      label: '신호',
-                      value: connected
-                          ? (healthDegraded ? '약함' : '강함')
-                          : '끊김',
-                      icon: connected
-                          ? Icons.bluetooth
-                          : Icons.bluetooth_disabled,
-                      warn: connected && healthDegraded,
-                      dim: !connected,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  IconData _batteryIcon(int pct, bool charging) {
-    if (charging) return Icons.battery_charging_full;
-    if (pct >= 90) return Icons.battery_full;
-    if (pct >= 60) return Icons.battery_5_bar;
-    if (pct >= 40) return Icons.battery_4_bar;
-    if (pct >= 20) return Icons.battery_2_bar;
-    return Icons.battery_alert;
-  }
-}
-
-class _Metric extends StatelessWidget {
-  const _Metric({
-    required this.label,
-    required this.value,
-    this.icon,
-    this.warn = false,
-    this.dim = false,
-  });
-
-  final String label;
-  final String value;
-  final IconData? icon;
-  final bool warn;
-
-  /// 비활성 상태 (예: 기기 미연결) — 라벨/값/아이콘 모두 회색 dim 처리.
-  /// dim 이 true 면 warn 은 무시된다 (끊긴 상태에선 빨강 경고가 의미 없음).
-  final bool dim;
-
-  @override
-  Widget build(BuildContext context) {
-    final Color labelColor =
-        dim ? BlowfitColors.gray400 : BlowfitColors.gray500;
-    final Color valueColor = dim
-        ? BlowfitColors.gray400
-        : (warn ? BlowfitColors.red500 : BlowfitColors.ink);
-    final Color iconColor =
-        dim ? BlowfitColors.gray400 : BlowfitColors.blue500;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w500,
-            color: labelColor,
-          ),
         ),
-        const SizedBox(height: 4),
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            if (icon != null) ...[
-              Icon(icon, size: 14, color: iconColor),
-              const SizedBox(width: 4),
-            ],
-            Text(
-              value,
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-                color: valueColor,
-                letterSpacing: -0.32,
-                fontFeatures: const [FontFeature.tabularFigures()],
-              ),
-            ),
-          ],
-        ),
+
       ],
     );
   }
 }
 
-class _MetricDivider extends StatelessWidget {
-  const _MetricDivider();
+// ─────────────────────────────────────────────────────────────────────────────
+// 통계 카드
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _StatsCard extends StatelessWidget {
+  const _StatsCard({required this.f, required this.isDark});
+  final _Frame f;
+  final bool isDark;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 1,
-      color: BlowfitColors.gray150,
-      margin: const EdgeInsets.symmetric(horizontal: 4),
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Training CTA — 그라데이션 카드
-// ---------------------------------------------------------------------------
-
-class _TrainingCta extends StatelessWidget {
-  const _TrainingCta({
-    required this.connected,
-    required this.orificeLevel,
-    required this.onStart,
-    required this.onConnect,
-  });
-
-  final bool connected;
-
-  /// 0/1/2 (저/중/고) — 연결됐을 때만 의미 있음. null 이면 미표기.
-  final int? orificeLevel;
-  final VoidCallback onStart;
-  final VoidCallback onConnect;
-
-  @override
-  Widget build(BuildContext context) {
-    final action = connected ? onStart : onConnect;
-    final actionLabel = connected ? '지금 훈련 시작' : '기기 연결';
-    final actionIcon = connected ? Icons.play_arrow : Icons.bluetooth_searching;
-    final subtitle = (connected && orificeLevel != null)
-        ? '흡기·호기 3세트 · 다이얼 ${orificeLevel! + 1}단'
-        : '흡기·호기 3세트';
+    final cardBg = isDark ? DotColors.darkCard : DotColors.lightCard;
+    final subCardBg =
+        isDark ? DotColors.darkCardSoft : DotColors.lightCardSoft;
+    final textPrimary =
+        isDark ? DotColors.darkTextPrimary : DotColors.lightTextPrimary;
+    final trackBg = isDark ? DotColors.darkTrack : DotColors.lightTrack;
+    final percentColor = isDark ? DotColors.primaryAlt : textPrimary;
 
     return Container(
-      padding: const EdgeInsets.all(13),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(BlowfitRadius.xl),
-        gradient: const LinearGradient(
-          colors: [BlowfitColors.blue500, BlowfitColors.blue700],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        boxShadow: const [
-          BoxShadow(
-            color: Color.fromRGBO(0, 102, 255, 0.24),
-            blurRadius: 24,
-            offset: Offset(0, 8),
-          ),
-        ],
-      ),
-      child: Stack(
-        clipBehavior: Clip.hardEdge,
-        children: [
-          // Decorative circles.
-          Positioned(
-            top: -20,
-            right: -20,
-            child: Container(
-              width: 130,
-              height: 130,
-              decoration: const BoxDecoration(
-                color: Color.fromRGBO(255, 255, 255, 0.08),
-                shape: BoxShape.circle,
-              ),
-            ),
-          ),
-          Positioned(
-            bottom: -28,
-            right: 28,
-            child: Container(
-              width: 75,
-              height: 75,
-              decoration: const BoxDecoration(
-                color: Color.fromRGBO(255, 255, 255, 0.06),
-                shape: BoxShape.circle,
-              ),
-            ),
-          ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                '오늘의 훈련',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: Color.fromRGBO(255, 255, 255, 0.8),
-                  letterSpacing: 0.24,
-                ),
-              ),
-              const SizedBox(height: 3),
-              const Text(
-                '5분 호흡 훈련',
-                style: TextStyle(
-                  fontSize: 19,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.white,
-                  letterSpacing: -0.38,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                subtitle,
-                style: const TextStyle(
-                  fontSize: 13,
-                  color: Color.fromRGBO(255, 255, 255, 0.85),
-                ),
-              ),
-              const SizedBox(height: 11),
-              FilledButton.icon(
-                onPressed: action,
-                icon: Icon(actionIcon, size: 18),
-                label: Text(actionLabel),
-                style: FilledButton.styleFrom(
-                  backgroundColor: Colors.white,
-                  foregroundColor: BlowfitColors.blue600,
-                  minimumSize: const Size(0, 42),
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  textStyle: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Quick stats — 이번 주 / 평균 호기 압력
-// ---------------------------------------------------------------------------
-
-class _QuickStats extends StatelessWidget {
-  const _QuickStats({
-    required this.weekHits,
-    required this.onTap,
-  });
-  final int weekHits;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    // 레이아웃 옵션 ③:
-    // 위 — "이번 주" 풀폭 1줄 얇은 카드 (라벨 + N/7회 + 진행바)
-    // 아래 — 호기 / 흡기 1:1 Row (IntrinsicHeight + stretch 로 동일 높이)
-    //
-    // 호기/흡기 모두 0 으로 하드코딩 — 차후 실데이터 연결 시
-    // _PressureCard.value 만 교체하면 됨 (보조 라인 위젯은 이미 제거됨).
-    return Column(
-      children: [
-        _WeekProgressBar(weekHits: weekHits, onTap: onTap),
-        const SizedBox(height: 8),
-        IntrinsicHeight(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Expanded(
-                child: _PressureCard(
-                  label: '평균 호기 압력',
-                  value: '0',
-                  onTap: onTap,
-                ),
-              ),
-              const SizedBox(width: 10),
-              const Expanded(
-                child: _PressureCard(
-                  label: '평균 흡기 압력',
-                  value: '0',
-                  onTap: null,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-/// 풀폭 1줄 "이번 주" 진행바. 라벨 + N/7회 + 가로 progress bar.
-class _WeekProgressBar extends StatelessWidget {
-  const _WeekProgressBar({required this.weekHits, required this.onTap});
-  final int weekHits;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final ratio = (weekHits / 7).clamp(0.0, 1.0);
-    return BlowfitCard(
-      onTap: onTap,
-      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
-      child: Row(
-        children: [
-          const Text(
-            '이번 주',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: BlowfitColors.ink3,
-            ),
-          ),
-          const SizedBox(width: 8),
-          Text(
-            '$weekHits',
-            style: const TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w700,
-              letterSpacing: -0.28,
-              color: BlowfitColors.ink,
-              fontFeatures: [FontFeature.tabularFigures()],
-            ),
-          ),
-          const Text(
-            ' / 7회',
-            style: TextStyle(
-              fontSize: 12,
-              color: BlowfitColors.ink3,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(999),
-              child: LinearProgressIndicator(
-                value: ratio,
-                minHeight: 6,
-                backgroundColor: BlowfitColors.gray150,
-                valueColor: const AlwaysStoppedAnimation<Color>(
-                    BlowfitColors.blue500),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// 호기/흡기 공용 압력 카드 — 라벨 + 큰 숫자 + cmH₂O.
-/// 보조 라인(델타/안내) 없이 미니멀 placeholder 표시.
-class _PressureCard extends StatelessWidget {
-  const _PressureCard({
-    required this.label,
-    required this.value,
-    required this.onTap,
-  });
-
-  final String label;
-  final String value;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return BlowfitCard(
-      onTap: onTap,
-      padding: const EdgeInsets.all(13),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: BlowfitColors.ink3,
-            ),
-          ),
-          const SizedBox(height: 5),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
-            children: [
-              Text(
-                value,
-                style: const TextStyle(
-                  fontSize: 23,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: -0.46,
-                  color: BlowfitColors.ink,
-                  fontFeatures: [FontFeature.tabularFigures()],
-                ),
-              ),
-              const SizedBox(width: 4),
-              const Text(
-                'cmH₂O',
-                style: TextStyle(
-                  fontSize: 13,
-                  color: BlowfitColors.ink3,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Coaching card
-// ---------------------------------------------------------------------------
-
-class _CoachingCard extends StatelessWidget {
-  const _CoachingCard({required this.tip, required this.onTap});
-  final CoachingTip tip;
-  final VoidCallback onTap;
-
-  /// 톤별 색상/아이콘 — positive 초록, info 파랑, warning 주황.
-  ({Color bg, Color ink, IconData icon}) get _styleTokens {
-    switch (tip.tone) {
-      case CoachingTone.positive:
-        return (
-          bg: BlowfitColors.green100,
-          ink: BlowfitColors.greenInk,
-          icon: Icons.emoji_events,
-        );
-      case CoachingTone.info:
-        return (
-          bg: BlowfitColors.blue50,
-          ink: BlowfitColors.blue700,
-          icon: Icons.lightbulb_outline,
-        );
-      case CoachingTone.warning:
-        return (
-          bg: BlowfitColors.amberBg,
-          ink: BlowfitColors.amberInk,
-          icon: Icons.warning_amber_outlined,
-        );
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final t = _styleTokens;
-    return BlowfitCard(
-      onTap: onTap,
-      padding: const EdgeInsets.all(14),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 38,
-            height: 38,
-            decoration: BoxDecoration(
-              color: t.bg,
-              borderRadius: BorderRadius.circular(11),
-            ),
-            child: Icon(t.icon, color: t.ink, size: 19),
-          ),
-          const SizedBox(width: 11),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  tip.eyebrow,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: t.ink,
-                    letterSpacing: 0.24,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  tip.body,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    height: 1.42,
-                    color: BlowfitColors.ink,
-                  ),
-                ),
-                const SizedBox(height: 7),
-                Row(
-                  children: [
-                    Text(
-                      '자세히 보기',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: Theme.of(context).colorScheme.primary,
-                      ),
-                    ),
-                    Icon(Icons.chevron_right,
-                        size: 14,
-                        color: Theme.of(context).colorScheme.primary),
-                  ],
+        color: cardBg,
+        borderRadius: BorderRadius.circular(f.sx(10)),
+        boxShadow: isDark
+            ? null
+            : [
+                BoxShadow(
+                  color: const Color.fromRGBO(0, 0, 0, 0.06),
+                  blurRadius: f.sx(16),
+                  offset: Offset(0, f.sx(4)),
                 ),
               ],
+      ),
+      child: Stack(
+        children: [
+          Positioned(
+            left: f.sx(19),
+            top: f.sx(17),
+            child: Text(
+              '오늘 총 몇 번 하셨어요!',
+              style: TextStyle(
+                fontSize: f.sx(17),
+                fontWeight: FontWeight.w700,
+                color: textPrimary,
+                fontFamily: BlowfitTheme.fontFamily,
+              ),
+            ),
+          ),
+          Positioned(
+            right: f.sx(21),
+            top: f.sx(18),
+            child: Text(
+              '0%',
+              style: TextStyle(
+                fontSize: f.sx(17),
+                fontWeight: FontWeight.w700,
+                color: percentColor,
+                fontFamily: BlowfitTheme.fontFamily,
+              ),
+            ),
+          ),
+          Positioned(
+            left: f.sx(21),
+            top: f.sx(43),
+            child: Container(
+              width: f.sx(320),
+              height: f.sx(13),
+              decoration: BoxDecoration(
+                color: trackBg,
+                borderRadius: BorderRadius.circular(f.sx(6.5)),
+              ),
+            ),
+          ),
+          Positioned(
+            left: f.sx(21),
+            top: f.sx(43),
+            child: Container(
+              width: f.sx(19),
+              height: f.sx(13),
+              decoration: BoxDecoration(
+                color: DotColors.primary,
+                borderRadius: BorderRadius.circular(f.sx(6.5)),
+              ),
+            ),
+          ),
+          Positioned(
+            left: f.sx(21),
+            top: f.sx(72),
+            width: f.sx(155),
+            height: f.sx(106),
+            child: _BreathSubCard(
+              f: f,
+              label: '호기',
+              count: '1회',
+              duration: '00분',
+              bg: subCardBg,
+              textPrimary: textPrimary,
+            ),
+          ),
+          Positioned(
+            left: f.sx(186),
+            top: f.sx(72),
+            width: f.sx(155),
+            height: f.sx(106),
+            child: _BreathSubCard(
+              f: f,
+              label: '흡기',
+              count: '1회',
+              duration: '00분',
+              bg: subCardBg,
+              textPrimary: textPrimary,
             ),
           ),
         ],
@@ -873,41 +592,77 @@ class _CoachingCard extends StatelessWidget {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Low battery banner (기존 유지, 톤만 새 토큰으로 맞춤)
-// ---------------------------------------------------------------------------
-
-class _LowBatteryBanner extends StatelessWidget {
-  const _LowBatteryBanner({required this.snapshot});
-  final DeviceSnapshot snapshot;
+class _BreathSubCard extends StatelessWidget {
+  const _BreathSubCard({
+    required this.f,
+    required this.label,
+    required this.count,
+    required this.duration,
+    required this.bg,
+    required this.textPrimary,
+  });
+  final _Frame f;
+  final String label;
+  final String count;
+  final String duration;
+  final Color bg;
+  final Color textPrimary;
 
   @override
   Widget build(BuildContext context) {
+    // Figma sub-card 안 좌표 (sub-card top-left = 0,0):
+    //   "호기" 라벨 : (14, 14), font 12 Medium
+    //   "1회"     : (35, 41), font 30 Bold
+    //   "00분"    : (85, 54), font 17 Medium
+    // baseline-aligned (1회 bottom y=77, 00분 bottom y=74 — 거의 같음).
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: BlowfitColors.red100,
-        borderRadius: BorderRadius.circular(BlowfitRadius.lg),
+        color: bg,
+        borderRadius: BorderRadius.circular(f.sx(10)),
       ),
-      child: Row(
+      child: Stack(
         children: [
-          Icon(
-            snapshot.charging
-                ? Icons.battery_charging_full
-                : Icons.battery_alert,
-            color: BlowfitColors.redInk,
-            size: 20,
-          ),
-          const SizedBox(width: 10),
-          Expanded(
+          // 라벨 좌상단
+          Positioned(
+            left: f.sx(14),
+            top: f.sx(14),
             child: Text(
-              snapshot.charging
-                  ? '배터리 부족 — 충전 중입니다 (${snapshot.batteryPct}%)'
-                  : '배터리 잔량이 ${snapshot.batteryPct}% 입니다. 곧 충전해주세요.',
-              style: const TextStyle(
-                color: BlowfitColors.redInk,
-                fontWeight: FontWeight.w600,
-                fontSize: 13,
+              label,
+              style: TextStyle(
+                fontSize: f.sx(12),
+                fontWeight: FontWeight.w500,
+                color: textPrimary,
+                fontFamily: BlowfitTheme.fontFamily,
+              ),
+            ),
+          ),
+          // "1회" — 라벨보다 21px 안쪽 들여쓰기 (Figma 좌표 그대로)
+          Positioned(
+            left: f.sx(35),
+            top: f.sx(41),
+            child: Text(
+              count,
+              style: TextStyle(
+                fontSize: f.sx(30),
+                fontWeight: FontWeight.w700,
+                color: textPrimary,
+                height: 1.0,
+                fontFamily: BlowfitTheme.fontFamily,
+              ),
+            ),
+          ),
+          // "00분" — "1회" 옆 baseline 정렬
+          Positioned(
+            left: f.sx(85),
+            top: f.sx(54),
+            child: Text(
+              duration,
+              style: TextStyle(
+                fontSize: f.sx(17),
+                fontWeight: FontWeight.w500,
+                color: textPrimary,
+                height: 1.0,
+                fontFamily: BlowfitTheme.fontFamily,
               ),
             ),
           ),
