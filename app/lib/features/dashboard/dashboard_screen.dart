@@ -20,6 +20,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/ble/ble_providers.dart';
@@ -189,14 +190,20 @@ class _BgPainter extends CustomPainter {
     }
 
     // 라이트: 하늘 그라데이션 → 잔디 ellipse 두 개 (각각 gradient fill).
+    //
+    // Figma plugin 직접 추출:
+    //   Rectangle 69 fill = GRADIENT_LINEAR
+    //     stop 0 (pos 0): #99EBFC (lightBgTop)
+    //     stop 1 (pos 1): #DBF9FF (lightBgBottom)
+    //   SVG output: linearGradient (x1=201, y1=0) → (x2=393, y2=447.5)
+    //     in 402×874 frame. 정규화: begin (0, -1) top center → end
+    //     (0.955, 0.024) right-mid. 약 ~157° (남남동).
     paint.shader = const LinearGradient(
-      begin: Alignment(-0.4, -1.0),
-      end: Alignment(0.4, 1.0),
-      stops: [0.082, 0.589, 1.0],
+      begin: Alignment(0.0, -1.0),
+      end: Alignment(0.955, 0.024),
       colors: [
-        DotColors.lightBgTop,
-        DotColors.lightBgBottom,
-        DotColors.lightBgBottom,
+        DotColors.lightBgTop,    // #99EBFC
+        DotColors.lightBgBottom, // #DBF9FF
       ],
     ).createShader(rect);
     canvas.drawRect(rect, paint);
@@ -269,36 +276,35 @@ class _HomeContent extends StatelessWidget {
   Widget build(BuildContext context) {
     final textPrimary =
         isDark ? DotColors.darkTextPrimary : DotColors.lightTextPrimary;
-    final mascotAsset =
-        isDark ? 'assets/dot/mascot_dark.png' : 'assets/dot/mascot.png';
 
-    // 라이트: 검정 그대로, 다크: invert (흰색)
-    final ColorFilter? invertFilter = isDark
-        ? const ColorFilter.matrix([
-            -1, 0, 0, 0, 255, //
-            0, -1, 0, 0, 255, //
-            0, 0, -1, 0, 255, //
-            0, 0, 0, 1, 0, //
-          ])
-        : null;
-
-    Widget buildIcon(String asset, double w, double h) {
-      final img = Image.asset(asset, fit: BoxFit.contain);
-      if (invertFilter == null) return img;
-      return ColorFiltered(colorFilter: invertFilter, child: img);
-    }
+    // (이전 raster PNG 용 invertFilter / buildIcon 은 SVG 전환 후 제거됨.
+    //  SVG 는 SvgPicture.asset 의 colorFilter 파라미터로 다크 모드 처리.)
 
     return Stack(
       children: [
-        // ─── 로고 (35×30 at 16,55) ────────────────────────────────
-        f.at(x: 16, y: 55, w: 35, h: 30, child: buildIcon('assets/dot/logo.png', 35, 30)),
-
-        // ─── 설정 아이콘 (28×28, hit 영역 60×60) ──────────────────
+        // ─── 로고 (81×22 at 17,56) — Figma 새 가로형 로고 ──────────
+        // 새 디자인은 가로 wordmark 형태. 1024×277 raster export 후 fit:contain
+        // 으로 표시 — 어떤 DPI 에서도 sharp.
         f.at(
-          x: 340,
-          y: 35,
-          w: 60,
-          h: 60,
+          x: 17,
+          y: 56,
+          w: 81,
+          h: 22,
+          child: Image.asset(
+            'assets/dot/logo.png',
+            fit: BoxFit.contain,
+            filterQuality: FilterQuality.high,
+          ),
+        ),
+
+        // ─── 설정 아이콘 (Figma SVG, 톱니바퀴) — Figma 원본 위치 ────
+        // Figma 좌표: vector (320, 60) 20×19. Hit 영역 44×44 로 확대.
+        // 다크 모드 시 ColorFilter 로 색상 invert (검정 stroke → 흰색).
+        f.at(
+          x: 308,
+          y: 41,
+          w: 44,
+          h: 44,
           child: Builder(
             builder: (ctx) => GestureDetector(
               behavior: HitTestBehavior.opaque,
@@ -310,24 +316,50 @@ class _HomeContent extends StatelessWidget {
               child: Container(
                 color: Colors.transparent,
                 alignment: Alignment.center,
-                child: SizedBox(
-                  width: f.sx(28),
-                  height: f.sx(28),
-                  child: buildIcon(
-                      'assets/dot/icon_settings.png', 28, 28),
+                child: SvgPicture.asset(
+                  'assets/dot/icon_settings.svg',
+                  width: f.sx(22),
+                  height: f.sx(21),
+                  colorFilter:
+                      ColorFilter.mode(textPrimary, BlendMode.srcIn),
                 ),
               ),
             ),
           ),
         ),
 
-        // ─── 알림 종 (20×19 at 320,60) ────────────────────────────
+        // ─── 알림 종 (Figma SVG) — Figma 원본 위치 (우측) ──────────
+        // Figma 좌표: vector (366, 60) 16×18. Hit 영역 44×44.
+        // 알림 기능 미구현 — placeholder SnackBar.
         f.at(
-          x: 311,
-          y: 53,
-          w: 30,
-          h: 30,
-          child: buildIcon('assets/dot/icon_bell.png', 30, 30),
+          x: 354,
+          y: 41,
+          w: 44,
+          h: 44,
+          child: Builder(
+            builder: (ctx) => GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () {
+                ScaffoldMessenger.maybeOf(ctx)
+                  ?..removeCurrentSnackBar()
+                  ..showSnackBar(const SnackBar(
+                    content: Text('알림 기능 준비 중'),
+                    duration: Duration(seconds: 1),
+                  ));
+              },
+              child: Container(
+                color: Colors.transparent,
+                alignment: Alignment.center,
+                child: SvgPicture.asset(
+                  'assets/dot/icon_bell.svg',
+                  width: f.sx(18),
+                  height: f.sx(20),
+                  colorFilter:
+                      ColorFilter.mode(textPrimary, BlendMode.srcIn),
+                ),
+              ),
+            ),
+          ),
         ),
 
         // ─── "안녕하세요. {이름}님" (15 SemiBold at 19,112) ────────
@@ -365,29 +397,37 @@ class _HomeContent extends StatelessWidget {
           ),
         ),
 
-        // ─── "얼마나 성장했어요!" (25 Bold at 19,133) ─────────────
+        // ─── 메인 헤드라인 (25 Bold at 19,140, multi-line) ────────
+        // Figma 새 디자인: "7일 전보다 평균 압력이 10% 증가했어요!" — 232×70 박스
+        // 안에서 줄바꿈. 추후 가능하면 weekAvgPressureProvider 의 thisWeek/
+        // lastWeek 비교 결과로 % 동적 생성 (현재는 정적 문구).
         f.at(
           x: 19,
-          y: 130,
+          y: 140,
+          w: 260,
           child: Text(
-            '얼마나 성장했어요!',
+            '7일 전보다 평균 압력이\n10% 증가했어요!',
             style: TextStyle(
               fontSize: f.sx(25),
               fontWeight: FontWeight.w700,
               letterSpacing: -0.5,
-              height: 1.2,
+              height: 1.19,
               color: textPrimary,
               fontFamily: BlowfitTheme.fontFamily,
             ),
           ),
         ),
 
-        // ─── "훈련하기" pill (93×43 at 289,114) — /training 으로 이동 ──
-        f.at(
-          x: 289,
-          y: 114,
-          w: 93,
-          h: 43,
+        // ─── "훈련하기" pill (93×43) — /training 으로 이동 ──────────
+        // Figma 에선 frame y=567 (통계 카드 y=620 바로 위 10dp gap) 이지만,
+        // 통계 카드가 bottom-anchored (system nav 회피) 라서 버튼도 동일하게
+        // bottom-anchored — 통계 카드 위 10dp 로 고정. 어떤 폰 aspect 에서도
+        // 카드와 겹치지 않음. 우측 정렬 (frame 기준 left=289 → 우측 20dp).
+        Positioned(
+          right: f.sx(20),
+          bottom: bottomInset + f.sx(16 + 6 + 16 + 194 + 10),
+          width: f.sx(93),
+          height: f.sx(43),
           child: Builder(
             builder: (ctx) => GestureDetector(
               onTap: () {
@@ -428,19 +468,90 @@ class _HomeContent extends StatelessWidget {
           ),
         ),
 
-        // ─── 마스코트 (216×183 at 93,345) ─────────────────────────
+        // ─── 다크 모드 토글 (icon-only at 262,41, hit 44×44) ───────
+        // 새 Figma 디자인은 훈련하기가 한참 아래로 내려가서 pill 형태의 토글이
+        // 어울리는 자리가 없음. 설정/알람 옆 작은 icon 으로 통일.
         f.at(
-          x: 93,
-          y: 345,
-          w: 216,
-          h: 183,
-          child: Image.asset(mascotAsset, fit: BoxFit.contain),
+          x: 262,
+          y: 41,
+          w: 44,
+          h: 44,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => ref.read(themeModeProvider.notifier).toggle(),
+            child: Container(
+              color: Colors.transparent,
+              alignment: Alignment.center,
+              child: Icon(
+                isDark
+                    ? Icons.light_mode_outlined
+                    : Icons.dark_mode_outlined,
+                size: f.sx(22),
+                color: textPrimary,
+              ),
+            ),
+          ),
+        ),
+
+        // ─── 말풍선 박스 (Rectangle 77 at 115,264, 176×50) ────────
+        // 가운데 정렬 흰색 둥근 사각형. 안에 "저와 함께 훈련해요~!" 텍스트.
+        f.at(
+          x: 115,
+          y: 264,
+          w: 176,
+          h: 50,
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(f.sx(10)),
+            ),
+            alignment: Alignment.center,
+            child: Text(
+              '저와 함께 훈련해요~!',
+              style: TextStyle(
+                fontSize: f.sx(15),
+                fontWeight: FontWeight.w700,
+                color: Colors.black,
+                fontFamily: BlowfitTheme.fontFamily,
+              ),
+            ),
+          ),
+        ),
+
+        // ─── 말풍선 꼬리 (Vector 6117 at 133,311, 17×14) ──────────
+        // 작은 삼각형이 캐릭터 쪽으로 내려옴. CustomPaint 로 그림.
+        f.at(
+          x: 133,
+          y: 311,
+          w: 17,
+          h: 14,
+          child: CustomPaint(
+            painter: _SpeechBubbleTailPainter(color: Colors.white),
+          ),
+        ),
+
+        // ─── 캐릭터 마스코트 (232.4×225.2 at 85.8,340) — 새 디자인 ─
+        // 그라데이션 라운드 body + 팔/다리/그림자(blur 포함) + 표정(도트 브러시).
+        // 캔버스를 그림자 blur 까지 포함하도록 확장 (body 는 frame 119.33,340
+        // 그대로 유지되도록 bbox 원점 85.8 로 잡음).
+        f.at(
+          x: 85.8,
+          y: 340,
+          w: 232.4,
+          h: 225.2,
+          child: Image.asset(
+            'assets/dot/mascot.png',
+            fit: BoxFit.contain,
+            filterQuality: FilterQuality.high,
+          ),
         ),
 
         // ─── 통계 카드 (362×194) — 화면 bottom 기준 ──────────────
         // dots 영역 (16 gap + 6 dot + 16 gap) 위에 카드를 둠 — 화면 어떤
         // 사이즈에서도 dots 가 nav bar 위에 보이고, 카드와 dots 사이 간격
         // Figma 와 동일 (16dp). bottomInset 으로 system nav bar 회피.
+        // (기존 레이아웃 유지 — 절대 frame y 절대좌표로 바꾸지 말 것: 폰의
+        //  system nav 영역에 dots 가 가려짐.)
         Positioned(
           left: f.sx(20),
           right: f.sx(20),
@@ -666,38 +777,70 @@ class _BreathSubCard extends StatelessWidget {
               ),
             ),
           ),
-          // "1회" — 라벨보다 21px 안쪽 들여쓰기 (Figma 좌표 그대로)
+          // 횟수 (30 Bold) + 분 (17 Medium) — baseline 정렬 Row.
+          // 절대좌표 대신 Row 로 흘려서 "23회" 처럼 2자리수여도 "분" 과 안 겹침.
           Positioned(
             left: f.sx(35),
             top: f.sx(41),
-            child: Text(
-              count,
-              style: TextStyle(
-                fontSize: f.sx(30),
-                fontWeight: FontWeight.w700,
-                color: textPrimary,
-                height: 1.0,
-                fontFamily: BlowfitTheme.fontFamily,
-              ),
-            ),
-          ),
-          // "00분" — "1회" 옆 baseline 정렬
-          Positioned(
-            left: f.sx(85),
-            top: f.sx(54),
-            child: Text(
-              duration,
-              style: TextStyle(
-                fontSize: f.sx(17),
-                fontWeight: FontWeight.w500,
-                color: textPrimary,
-                height: 1.0,
-                fontFamily: BlowfitTheme.fontFamily,
-              ),
+            right: f.sx(8),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.baseline,
+              textBaseline: TextBaseline.alphabetic,
+              children: [
+                Text(
+                  count,
+                  style: TextStyle(
+                    fontSize: f.sx(30),
+                    fontWeight: FontWeight.w700,
+                    color: textPrimary,
+                    height: 1.0,
+                    fontFamily: BlowfitTheme.fontFamily,
+                  ),
+                ),
+                SizedBox(width: f.sx(5)),
+                Text(
+                  duration,
+                  style: TextStyle(
+                    fontSize: f.sx(17),
+                    fontWeight: FontWeight.w500,
+                    color: textPrimary,
+                    height: 1.0,
+                    fontFamily: BlowfitTheme.fontFamily,
+                  ),
+                ),
+              ],
             ),
           ),
         ],
       ),
     );
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 말풍선 꼬리 — 작은 삼각형 모양으로 캐릭터 쪽 (아래) 을 가리킴.
+// Figma Vector 6117 (17×14) 의 단순 근사 — 정확한 path 가 필요해지면
+// flutter_svg + SVG asset 으로 교체 가능.
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _SpeechBubbleTailPainter extends CustomPainter {
+  _SpeechBubbleTailPainter({required this.color});
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.fill;
+    // 위쪽 가로 변 ─ 말풍선 박스 하단과 매칭. 아래로 좁아지는 삼각형.
+    final path = Path()
+      ..moveTo(0, 0)
+      ..lineTo(size.width, 0)
+      ..lineTo(size.width * 0.35, size.height)
+      ..close();
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(_SpeechBubbleTailPainter old) => old.color != color;
 }

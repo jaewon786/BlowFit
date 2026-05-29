@@ -62,6 +62,16 @@ class SettingsScreen extends ConsumerWidget {
               onTap: () => _comingSoon(context, '펌웨어 업데이트'),
             ),
             _SettingsTile(
+              icon: Icons.replay_outlined,
+              label: '제품 소개 다시 보기',
+              onTap: () => context.push('/onboarding'),
+            ),
+            _SettingsTile(
+              icon: Icons.menu_book_outlined,
+              label: '훈련 가이드 다시 보기',
+              onTap: () => context.push('/guide'),
+            ),
+            _SettingsTile(
               icon: Icons.help_outline,
               label: '도움말',
               onTap: () => _comingSoon(context, '도움말'),

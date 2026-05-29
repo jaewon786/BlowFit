@@ -11,6 +11,7 @@ dependencies:
   flutter:
     sdk: flutter
   flutter_blue_plus: ^1.32.0
+  flutter_svg: ^2.0.10
   fl_chart: ^0.68.0
   drift: ^2.18.0
   drift_flutter: ^0.2.0
@@ -32,6 +33,15 @@ dev_dependencies:
   flutter_lints: ^4.0.0
   build_runner: ^2.4.11
   drift_dev: ^2.18.0
+  flutter_launcher_icons: ^0.13.1
+
+# Figma 에서 export 한 app_icon.png (1024×1024) 로 안드로이드/iOS 아이콘 생성.
+# dart run flutter_launcher_icons 실행 시 platform 별 적절한 사이즈로 자동 생성.
+flutter_launcher_icons:
+  android: "ic_launcher"
+  ios: false  # 본 프로젝트는 Android only — iOS 디렉토리 없음
+  image_path: "assets/icon/app_icon.png"
+  min_sdk_android: 21
 
 flutter:
   uses-material-design: true

@@ -172,13 +172,13 @@ final monthTrainedDaysProvider =
   });
 });
 
-/// Trend 화면 Summary 카드 — "이번 주 N회 | 이번 달 N일 | 지금까지 N회".
-///   thisWeekSessions: 이번 주 (월요일 시작) 의 총 세션 수.
-///   thisMonthDays   : 이번 달의 distinct 날짜 수 (세션 1개 이상인 날).
-///   totalSessions   : 지금까지 누적 세션 수.
+/// Trend 화면 Summary 카드 — "이번 주 N회 | 이번 달 N회 | 지금까지 N회".
+///   thisWeekSessions : 이번 주 (월요일 시작) 의 총 세션 수.
+///   thisMonthSessions: 이번 달의 총 세션 수 (회수).
+///   totalSessions    : 지금까지 누적 세션 수.
 typedef TrendSummaryStats = ({
   int thisWeekSessions,
-  int thisMonthDays,
+  int thisMonthSessions,
   int totalSessions,
 });
 
@@ -197,17 +197,17 @@ final trendSummaryStatsProvider = StreamProvider<TrendSummaryStats>((ref) {
     final monthStart = DateTime(now.year, now.month, 1);
 
     var weekSessions = 0;
-    final monthDays = <DateTime>{};
+    var monthSessions = 0;
     for (final s in sessions) {
       final t = s.receivedAt;
       if (!t.isBefore(monday)) weekSessions++;
       if (!t.isBefore(monthStart) && t.year == now.year && t.month == now.month) {
-        monthDays.add(DateTime(t.year, t.month, t.day));
+        monthSessions++;
       }
     }
     return (
       thisWeekSessions: weekSessions,
-      thisMonthDays: monthDays.length,
+      thisMonthSessions: monthSessions,
       totalSessions: sessions.length,
     );
   });
