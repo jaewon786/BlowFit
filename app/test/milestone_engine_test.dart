@@ -14,6 +14,8 @@ Session _s({
       durationSec: 240,
       maxPressure: maxPressure,
       avgPressure: 22,
+      avgInhale: 0,
+      maxInhale: 0,
       enduranceSec: 180,
       orificeLevel: 1,
       targetHits: 3,

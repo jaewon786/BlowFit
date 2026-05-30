@@ -149,6 +149,8 @@ void main() {
           durationSec: 240,
           maxPressure: 28.0,
           avgPressure: 22.0,
+          avgInhale: 0,
+          maxInhale: 0,
           enduranceSec: 180,
           orificeLevel: 1,
           targetHits: 3,
@@ -202,6 +204,7 @@ void main() {
     Session sessionAt(DateTime t) => Session(
           id: 0, deviceSessionId: 0, startedAt: null,
           durationSec: 240, maxPressure: 0, avgPressure: 0,
+          avgInhale: 0, maxInhale: 0,
           enduranceSec: 0, orificeLevel: 0, targetHits: 0,
           sampleCount: 0, crc32: 0, receivedAt: t,
         );
@@ -273,6 +276,8 @@ void main() {
         durationSec: 240,
         maxPressure: maxPressure,
         avgPressure: avgPressure,
+        avgInhale: 0,
+        maxInhale: 0,
         enduranceSec: 180,
         orificeLevel: 1,
         targetHits: 3,

@@ -50,13 +50,15 @@ class SessionSummary {
   final int sessionId;
   final DateTime? startedAt;
   final Duration duration;
-  final double maxPressure;
-  final double avgPressure;
+  final double maxPressure; // 호기(양압) 최대
+  final double avgPressure; // 호기(양압) 평균
   final Duration endurance;
   final int orificeLevel;
   final int targetHits;
   final int sampleCount;
   final int crc32;
+  final double avgInhale; // 흡기(음압) 평균 magnitude — 구버전 펌웨어면 0
+  final double maxInhale; // 흡기(음압) 최대 magnitude — 구버전 펌웨어면 0
 
   const SessionSummary({
     required this.sessionId,
@@ -69,5 +71,7 @@ class SessionSummary {
     required this.targetHits,
     required this.sampleCount,
     required this.crc32,
+    this.avgInhale = 0,
+    this.maxInhale = 0,
   });
 }

@@ -17,6 +17,8 @@ class SessionRepository {
       durationSec: s.duration.inSeconds,
       maxPressure: s.maxPressure,
       avgPressure: s.avgPressure,
+      avgInhale: Value(s.avgInhale),
+      maxInhale: Value(s.maxInhale),
       enduranceSec: s.endurance.inSeconds,
       orificeLevel: s.orificeLevel,
       targetHits: s.targetHits,

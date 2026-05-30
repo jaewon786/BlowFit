@@ -23,6 +23,9 @@ class TrendBucket {
   final String label;
   final double? avgExhale;
   final double? maxExhale;
+
+  /// 흡기(음압) 평균 magnitude. v4.0+ 펌웨어 세션만 > 0. 레거시/구버전은 0.
+  final double? avgInhale;
   final int sessionCount;
 
   /// 디버깅용 — 어느 날짜/주/월에 해당하는지.
@@ -33,6 +36,7 @@ class TrendBucket {
     required this.label,
     required this.avgExhale,
     required this.maxExhale,
+    required this.avgInhale,
     required this.sessionCount,
     required this.bucketStart,
   });
@@ -179,6 +183,7 @@ class _Acc {
   final DateTime start;
   double avgSum = 0;
   double maxOfBucket = -double.infinity;
+  double avgInhaleSum = 0;
   int n = 0;
 
   _Acc({required this.start});
@@ -186,6 +191,7 @@ class _Acc {
   void add(Session s) {
     avgSum += s.avgPressure;
     if (s.maxPressure > maxOfBucket) maxOfBucket = s.maxPressure;
+    avgInhaleSum += s.avgInhale;
     n++;
   }
 
@@ -195,6 +201,7 @@ class _Acc {
       label: label,
       avgExhale: n > 0 ? avgSum / n : null,
       maxExhale: n > 0 ? maxOfBucket : null,
+      avgInhale: n > 0 ? avgInhaleSum / n : null,
       sessionCount: n,
       bucketStart: start,
     );

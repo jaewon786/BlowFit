@@ -12,8 +12,11 @@ class Sessions extends Table {
 
   DateTimeColumn get startedAt => dateTime().nullable()();
   IntColumn get durationSec => integer()();
-  RealColumn get maxPressure => real()();
-  RealColumn get avgPressure => real()();
+  RealColumn get maxPressure => real()(); // 호기(양압) 최대
+  RealColumn get avgPressure => real()(); // 호기(양압) 평균
+  // 흡기(음압) 통계 — v4.0+ 펌웨어. 구버전/레거시 세션은 0 (default).
+  RealColumn get avgInhale => real().withDefault(const Constant(0))();
+  RealColumn get maxInhale => real().withDefault(const Constant(0))();
   IntColumn get enduranceSec => integer()();
   IntColumn get orificeLevel => integer()();
   IntColumn get targetHits => integer()();
@@ -38,7 +41,19 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(QueryExecutor e) : super(e);
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
+
+  @override
+  MigrationStrategy get migration => MigrationStrategy(
+        onCreate: (m) => m.createAll(),
+        onUpgrade: (m, from, to) async {
+          // v1 → v2: 흡기(음압) 통계 컬럼 추가 (기존 행은 default 0).
+          if (from < 2) {
+            await m.addColumn(sessions, sessions.avgInhale);
+            await m.addColumn(sessions, sessions.maxInhale);
+          }
+        },
+      );
 
   static QueryExecutor _open() =>
       driftDatabase(name: 'blowfit', native: const DriftNativeOptions());

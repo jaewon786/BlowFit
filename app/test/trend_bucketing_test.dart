@@ -7,6 +7,8 @@ Session _s({
   int id = 0,
   double avgPressure = 22.0,
   double maxPressure = 28.0,
+  double avgInhale = 0,
+  double maxInhale = 0,
 }) =>
     Session(
       id: id,
@@ -15,6 +17,8 @@ Session _s({
       durationSec: 240,
       maxPressure: maxPressure,
       avgPressure: avgPressure,
+      avgInhale: avgInhale,
+      maxInhale: maxInhale,
       enduranceSec: 180,
       orificeLevel: 1,
       targetHits: 3,

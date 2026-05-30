@@ -23,6 +23,8 @@ Session _session({
     durationSec: durationSec,
     maxPressure: maxPressure,
     avgPressure: avgPressure,
+    avgInhale: 0,
+    maxInhale: 0,
     enduranceSec: enduranceSec,
     orificeLevel: orificeLevel,
     targetHits: targetHits,

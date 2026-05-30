@@ -151,6 +151,9 @@ class FakeBleManager implements BleManager {
       duration: duration,
       maxPressure: _sessionMax,
       avgPressure: avg,
+      // 흡기는 보통 호기보다 약하게 — 호기의 ~70% 로 모사 (실데이터처럼 미러 X).
+      avgInhale: avg * 0.7,
+      maxInhale: _sessionMax * 0.7,
       endurance: Duration(seconds: _enduranceSec.round()),
       orificeLevel: _orifice.value,
       targetHits: _targetHits,

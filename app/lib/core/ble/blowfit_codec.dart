@@ -11,7 +11,8 @@ class BlowfitCodec {
   BlowfitCodec._();
 
   static const int pressurePacketBytes = 22;
-  static const int summaryPacketBytes = 32;
+  static const int summaryPacketBytes = 40; // v4.0+ 호기/흡기 분리 (32B → 40B)
+  static const int summaryPacketMinBytes = 32; // 구버전 펌웨어 (흡기 필드 없음)
   static const int samplesPerPacket = 10;
   static const int sampleIntervalMs = 10; // 100 Hz
 
@@ -47,23 +48,28 @@ class BlowfitCodec {
     return PressureBlock(seq: seq, samples: samples);
   }
 
-  /// Decodes a 32-byte session summary packet. Returns null on short input.
+  /// Decodes a session summary packet. Returns null on short input.
   ///
   /// Layout (LE):
   ///   0..3   u32 startEpochSec (0 = unknown)
   ///   4..7   u32 durationSec
-  ///   8..11  f32 maxPressure (cmH2O)
-  ///   12..15 f32 avgPressure (cmH2O)
+  ///   8..11  f32 maxPressure (cmH2O — 호기/양압 최대)
+  ///   12..15 f32 avgPressure (cmH2O — 호기/양압 평균)
   ///   16..19 u32 enduranceSec
   ///   20     u8  orificeLevel
   ///   21     u8  targetHits
   ///   22..23 u16 sampleCount
   ///   24..27 u32 crc32
   ///   28..31 u32 sessionId
+  ///   32..35 f32 avgInhale (cmH2O — 흡기/음압 평균 magnitude)   ← v4.0+ (40B)
+  ///   36..39 f32 maxInhale (cmH2O — 흡기/음압 최대 magnitude)   ← v4.0+ (40B)
+  ///
+  /// 32B 만 보내는 구버전 펌웨어와 호환: 길이가 40 미만이면 흡기 필드 0.
   static SessionSummary? decodeSummary(List<int> bytes) {
-    if (bytes.length < summaryPacketBytes) return null;
+    if (bytes.length < summaryPacketMinBytes) return null;
     final bd = ByteData.sublistView(Uint8List.fromList(bytes));
     final startEpoch = bd.getUint32(0, Endian.little);
+    final hasInhale = bytes.length >= summaryPacketBytes;
     return SessionSummary(
       sessionId: bd.getUint32(28, Endian.little),
       startedAt: startEpoch == 0
@@ -77,6 +83,8 @@ class BlowfitCodec {
       targetHits: bd.getUint8(21),
       sampleCount: bd.getUint16(22, Endian.little),
       crc32: bd.getUint32(24, Endian.little),
+      avgInhale: hasInhale ? bd.getFloat32(32, Endian.little) : 0.0,
+      maxInhale: hasInhale ? bd.getFloat32(36, Endian.little) : 0.0,
     );
   }
 }
