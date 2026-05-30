@@ -88,4 +88,8 @@ namespace session {
   float targetLow();
   float targetHigh();
 
+  /// Train 세션 길이 설정 (BLE SET_DURATION opcode). 1~60분으로 clamp.
+  void setTrainDuration(uint32_t ms);
+  uint32_t trainDurationMs();
+
 }  // namespace session

@@ -29,6 +29,7 @@ namespace opcode {
   constexpr uint8_t SYNC_TIME      = 0x03;
   constexpr uint8_t ZERO_CALIBRATE = 0x04;
   constexpr uint8_t SET_TARGET     = 0x05;
+  constexpr uint8_t SET_DURATION   = 0x06;  // 2B uint16 sec — Train 세션 길이
 }
 
 // 광고 이름 + 펌웨어 버전

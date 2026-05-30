@@ -93,6 +93,14 @@ namespace {
             session::setTarget(lo, hi);
           }
           break;
+        case opcode::SET_DURATION:
+          if (plen >= 2) {
+            uint16_t sec = 0;
+            std::memcpy(&sec, payload, 2);  // uint16 LE seconds
+            Serial.printf("[ble] SET_DURATION sec=%u\n", (unsigned)sec);
+            session::setTrainDuration(static_cast<uint32_t>(sec) * 1000u);
+          }
+          break;
         default:
           Serial.printf("[ble] unknown opcode 0x%02X\n", (unsigned)op);
           break;

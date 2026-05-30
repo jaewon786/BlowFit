@@ -1,5 +1,5 @@
-// 양방향 압력 센서 모듈 (XGZP6847A010KPGPN33, ±102 cmH₂O).
-// v3.2 의 양압 전용 센서와 달리 음압도 측정 가능.
+// 양방향 차압 센서 (MPXV7007DP, MikroE Diff Press Click + MCP3221 12-bit I²C ADC,
+// ±7 kPa ≈ ±71 cmH₂O). 차압이라 호기(양압)/흡기(음압) 모두 측정 가능.
 //
 // API 는 v3.2 sensor.h 와 호환되도록 설계 — state_machine.cpp 등 상위
 // 모듈은 거의 그대로 포팅 가능.

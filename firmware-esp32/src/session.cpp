@@ -15,16 +15,16 @@ namespace {
   // TRAIN_MS=240000, REST_MS=30000 으로 조정.
   // ============================================================
   constexpr uint32_t PREP_DURATION_MS    = 0;        // PREP 스킵 — 즉시 TRAIN
-  constexpr uint32_t TRAIN_DURATION_MS   = 600000;   // 10분 (사용자가 stop 까지)
-  constexpr uint32_t REST_DURATION_MS    = 3000;     // set 사이 휴식 3초
+  constexpr uint32_t TRAIN_DURATION_DEFAULT_MS = 300000;  // 기본 5분 (앱이 변경 가능)
+  constexpr uint32_t REST_DURATION_MS    = 5000;     // set 사이 휴식 5초
   constexpr uint32_t SUMMARY_DURATION_MS = 8000;     // 8초 자동 복귀
   constexpr uint8_t  DEMO_TOTAL_SETS     = 1;        // sets 단순화 — 1 set
   // Train 내부 4-phase turn cycle (앱 spec 일치):
-  //   Exhale 10s → ExhaleRest 3s → Inhale 10s → InhaleRest 3s = 26s/cycle
+  //   Exhale 10s → ExhaleRest 5s → Inhale 10s → InhaleRest 5s = 30s/cycle
   constexpr uint32_t TURN_EXHALE_MS      = 10000;
-  constexpr uint32_t TURN_EXHALE_REST_MS = 3000;
+  constexpr uint32_t TURN_EXHALE_REST_MS = 5000;
   constexpr uint32_t TURN_INHALE_MS      = 10000;
-  constexpr uint32_t TURN_INHALE_REST_MS = 3000;
+  constexpr uint32_t TURN_INHALE_REST_MS = 5000;
   constexpr uint32_t TURN_CYCLE_MS =
       TURN_EXHALE_MS + TURN_EXHALE_REST_MS +
       TURN_INHALE_MS + TURN_INHALE_REST_MS;
@@ -36,6 +36,8 @@ namespace {
   uint8_t  g_set_index   = 0;   // 1-base, 0 = none
   float    g_target_low  = TARGET_LOW_DEFAULT;
   float    g_target_high = TARGET_HIGH_DEFAULT;
+  // Train 세션 길이 — 앱이 SET_DURATION (opcode 0x06) 으로 변경. 기본 5분.
+  uint32_t g_train_duration_ms = TRAIN_DURATION_DEFAULT_MS;
 
   // 통계 누적.
   double   g_sum_abs_p   = 0.0;
@@ -214,7 +216,7 @@ void tick(uint32_t now_ms, float p) {
       g_turn = turnAt(elapsed);
 
       // Train 끝 → Rest 또는 Summary
-      if (elapsed >= TRAIN_DURATION_MS) {
+      if (elapsed >= g_train_duration_ms) {
         if (g_set_index >= DEMO_TOTAL_SETS) {
           finalizeStats(now_ms);
           transition(State::Summary, now_ms);
@@ -256,7 +258,7 @@ uint16_t remainingSec() {
   uint32_t total = 0;
   switch (g_state) {
     case State::Prep:    total = PREP_DURATION_MS;    break;
-    case State::Train:   total = TRAIN_DURATION_MS;   break;
+    case State::Train:   total = g_train_duration_ms; break;
     case State::Rest:    total = REST_DURATION_MS;    break;
     case State::Summary: total = SUMMARY_DURATION_MS; break;
     default:             return 0;
@@ -279,7 +281,7 @@ uint8_t progressPercent() {
   float p = (g_set_index - 1) * per_set;
   if (g_state == State::Train) {
     const uint32_t e = millis() - g_state_start;
-    p += per_set * ((float)e / TRAIN_DURATION_MS);
+    p += per_set * ((float)e / g_train_duration_ms);
   } else if (g_state == State::Rest) {
     p += per_set;  // 세트 끝
   } else if (g_state == State::Prep) {
@@ -297,5 +299,14 @@ void setTarget(float low, float high) {
 }
 float targetLow()  { return g_target_low; }
 float targetHigh() { return g_target_high; }
+
+void setTrainDuration(uint32_t ms) {
+  // 안전 범위 1~60분으로 clamp.
+  if (ms < 60000)   ms = 60000;
+  if (ms > 3600000) ms = 3600000;
+  g_train_duration_ms = ms;
+  Serial.printf("[session] train duration = %u ms\n", (unsigned)g_train_duration_ms);
+}
+uint32_t trainDurationMs() { return g_train_duration_ms; }
 
 }  // namespace session

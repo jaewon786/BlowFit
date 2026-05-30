@@ -153,7 +153,7 @@ void setup() {
   sensor::calibrateZero();
   Serial.printf("Zero offset = %.2f cmH2O\n", sensor::zeroOffset());
 
-  pinMode(pins::VIBRATION, OUTPUT);
+  pinMode(pins::HAPTIC_EN, OUTPUT);  // DRV2605L EN/trigger (실제 효과는 I²C)
   pinMode(pins::LED_STATUS, OUTPUT);
   pinMode(pins::BUTTON_BOOT, INPUT_PULLUP);
   pinMode(pins::BUTTON_USER, INPUT_PULLUP);

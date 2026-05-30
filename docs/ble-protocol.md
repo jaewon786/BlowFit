@@ -57,7 +57,7 @@ offset  size  field        encoding
 - 해상도: `value = bytes / 10.0` (예: 253 → 25.3 cmH2O, -150 → -15.0 cmH2O)
 - 범위: -1024 ~ +3276.8 (int16 / 10.0). 실 사용:
   - v3.2 (XGZP6847A005KPG): 0 ~ +50 cmH2O (양압만)
-  - v4.0 (XGZP6847A010KPGPN33): -102 ~ +102 cmH2O (양방향)
+  - v4.0 (MPXV7007DP, ±7 kPa): -71 ~ +71 cmH2O (양방향 차압)
 - 시퀀스 누락 시 앱은 `HistoryList` 재요청 고려
 
 ### 3.2 Session Control (Write, 1-6 B)
@@ -74,6 +74,9 @@ bytes 1..: payload (opcode 별)
 | `0x03` | SYNC_TIME | 4B uint32 epoch (sec) | 세션 타임스탬프 동기화 |
 | `0x04` | ZERO_CALIBRATE | — | 10초간 대기압 측정·보정 |
 | `0x05` | SET_TARGET | 1B low + 1B high (cmH2O) | 목표 구간 재설정 (기본 20~30) |
+| `0x06` | SET_DURATION | 2B uint16 LE seconds | Train 세션 길이 설정 (1~60분 clamp, 기본 5분) |
+
+> 호흡 cycle: Exhale 10s → ExhaleRest 5s → Inhale 10s → InhaleRest 5s = 30s/cycle.
 
 ### 3.3 Session Summary (Read/Notify, 40 B)
 

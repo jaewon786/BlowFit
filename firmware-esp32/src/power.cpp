@@ -15,7 +15,7 @@ namespace {
   uint32_t g_boot_press_start_ms = 0;  // BOOT 버튼 누름 시작 시점 (0 = not pressed)
   bool     g_boot_long_fired     = false;  // 한 번 fire 후 release 까지 무시
 
-  // PWR_BUTTON (외부, ETP164L) — debounce + falling edge 감지.
+  // PWR_BUTTON (외부, PB61412L) — debounce + falling edge 감지.
   bool     g_pwr_last_raw     = HIGH;
   bool     g_pwr_stable       = HIGH;
   uint32_t g_pwr_last_change  = 0;
@@ -75,7 +75,7 @@ void tick(uint32_t now_ms) {
   }
 
   // ---------- 외부 PWR_BUTTON short-press 감지 (debounced) ----------
-  // ETP164L 같은 외부 tact 버튼. short-press 만으로 deep sleep (켜고 끄기).
+  // PB61412L 외부 tact 버튼. short-press 만으로 deep sleep (켜고 끄기).
   const bool pwr_raw = (digitalRead(pins::PWR_BUTTON) == LOW);
   if (pwr_raw != g_pwr_last_raw) {
     g_pwr_last_raw = pwr_raw;

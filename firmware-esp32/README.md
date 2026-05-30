@@ -4,6 +4,22 @@ Target: **LILYGO T-Display S3** (ESP32-S3R8, 듀얼코어 240MHz, 16MB Flash, 8M
 
 화면 방향: **세로 (170 × 320)** — `setRotation(0)`.
 
+## 현재 제품 구성 (BOM)
+
+| 구성품 | 부품 | 비고 |
+|---|---|---|
+| 메인보드 / MCU | **LILYGO T-Display-S3** (ESP32-S3) | 일체형 1.9" IPS 170×320, USB-C, BLE 내장 |
+| 압력 센서 | **MPXV7007DP** (MikroE Diff Press Click) | 양방향 차압 ±7 kPa(±71 cmH₂O), MCP3221 12-bit I²C ADC(0x4D) |
+| 배터리 | **LiPo 400 mAh** | 보드 내장 충전/VBAT 모니터 회로 |
+| 전원 버튼 | **PB61412L** | 외부 tact 스위치 + LED, deep-sleep wake (EXT0) |
+| 햅틱 모터 | **진동 모터** | 목표 압력 도달 시 피드백 |
+| 햅틱 드라이버 | **DRV2605L** | SparkFun Qwiic Haptic Motor Driver, I²C(0x5A), EN=GPIO10, 모터=OUT+/OUT− |
+
+> I²C 버스(SDA=GPIO43, SCL=GPIO44)에 MCP3221 ADC(0x4D)와 DRV2605L 햅틱(0x5A)이 함께 연결됨.
+> ⚠️ 두 보드 모두 I²C 풀업을 가지고 있어 병렬 시 합성 저항이 과도하게 낮아짐 →
+> SparkFun 보드의 풀업 제거 점퍼(`I2C`, clearable)를 잘라 한쪽만 남길 것.
+> DRV2605L `EN` 핀은 HIGH 여야 동작(GPIO10), 효과 트리거는 I²C GO bit (internal trigger).
+
 > v3.2 (XIAO BLE nRF52840) 펌웨어는 [`../firmware/`](../firmware/) 에 backup 으로 유지. 본 폴더는 v4.0 마이그레이션 작업 디렉토리.
 
 ## 개발 흐름 (마일스톤)
@@ -108,7 +124,7 @@ ESP32 BLE Arduino + Preferences 는 framework (arduino-esp32) 에 포함되어 �
 | GPIO44 | Click SCL | I²C SCL (UART0 RX default) |
 | 3V3 | Click 3V3 + Click 5V (분기 or 보드 위 short) | 단일 3.3V 레일 운용 (B1) |
 | GND | Click GND | |
-| GPIO10 | 진동 모터 (PWM) | 목표 도달 시 진동 (M10 예정) |
+| GPIO10 | 햅틱 모터 EN/트리거 (DRV2605L) | DRV2605L I²C(0x5A) 경유 구동 (M10 예정) |
 | GPIO11 | LED (선택) | 상태 표시 (M10 예정) |
 
 ### 내장 핀 (수정 불가)

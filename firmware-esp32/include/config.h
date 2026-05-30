@@ -35,9 +35,12 @@ namespace pins {
   // 압력 센서는 MikroE Diff Press Click (MPXV7007DP + MCP3221 12-bit I²C ADC).
   // 보드 내장 MCP3221 이 0~5V analog 를 받아 I²C 로 변환 → MCU 측 GPIO 는 3.3V
   // logic 만 노출되어 안전. 자세한 내용은 docs/mpxv7007_migration.md 참조.
+  // I²C 버스 (MCP3221 ADC + DRV2605L 햅틱 드라이버 공유).
   constexpr uint8_t I2C_SDA         = 43;  // GPIO43 (UART0 TX, USB-CDC 사용 중이라 free)
   constexpr uint8_t I2C_SCL         = 44;  // GPIO44 (UART0 RX, 위와 동일)
-  constexpr uint8_t VIBRATION       = 10;  // GPIO10 PWM — 진동 모터
+  // 햅틱(진동) 모터는 DRV2605L 햅틱 드라이버(I²C, addr 0x5A)로 구동.
+  // GPIO10 = DRV2605L EN/트리거 라인 (효과 트리거는 I²C GO bit). 직접 PWM 아님.
+  constexpr uint8_t HAPTIC_EN       = 10;  // GPIO10 — DRV2605L EN/trigger
   constexpr uint8_t LED_STATUS      = 11;  // GPIO11 — 상태 LED (선택)
 
   // 내장 — TFT_eSPI Setup206 가 자동 처리. 참고용으로만 명시:
@@ -54,7 +57,7 @@ namespace pins {
   constexpr uint8_t BUTTON_BOOT = 0;   // 부트 버튼 (short = startSession, long = deep sleep)
   constexpr uint8_t BUTTON_USER = 14;  // 사용자 버튼 (short = stopSession)
 
-  // 외부 전원 버튼 (M11) — ETP164L 6x6 tact + LED.
+  // 외부 전원 버튼 (M11) — PB61412L tact 스위치 + LED.
   // ESP32-S3 의 모든 GPIO 가 RTC GPIO 라 EXT0 deep sleep wakeup 가능.
   // GPIO12 는 좌측 헤더 free + ADC1 가능 (배터리 측정 후 옵션).
   constexpr uint8_t PWR_BUTTON  = 12;  // 외부 전원 버튼 (input pullup)
@@ -68,7 +71,7 @@ namespace power {
   // Deep sleep 진입 조건.
   constexpr uint32_t LONG_PRESS_MS    = 2000;   // 전원 버튼 long-press = 2초
   // BOOT 버튼은 short-press 가 startSession 이라 long-press 로 deep sleep.
-  // 외부 PWR_BUTTON (ETP164L) 은 short-press 만으로 deep sleep (별도 long
+  // 외부 PWR_BUTTON (PB61412L) 은 short-press 만으로 deep sleep (별도 long
   // press 의미 없음, 그저 켜고 끄기).
 
   // Standby idle 시 자동 deep sleep (옵션 — 추후 활성화).
