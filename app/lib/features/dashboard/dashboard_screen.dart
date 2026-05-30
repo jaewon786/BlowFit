@@ -25,6 +25,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/ble/ble_providers.dart';
 import '../../core/ble/blowfit_uuids.dart';
+import '../../core/coach/growth_message.dart';
 import '../../core/db/db_providers.dart';
 import '../../core/storage/storage_providers.dart';
 import '../../core/theme/blowfit_colors.dart';
@@ -55,6 +56,20 @@ class _Frame {
       height: h == null ? null : sy(h),
       child: child,
     );
+  }
+}
+
+/// 홈 헤드라인 문구 — 주간 호기 평균 증감 3분기 + 무데이터 격려.
+String _homeHeadline(({GrowthTrend trend, int pct}) g) {
+  switch (g.trend) {
+    case GrowthTrend.up:
+      return '지난주보다 평균 압력이\n${g.pct}% 증가했어요!';
+    case GrowthTrend.down:
+      return '지난주보다 평균 압력이\n${g.pct}% 감소했어요!';
+    case GrowthTrend.flat:
+      return '지난주와 평균 압력이\n비슷해요!';
+    case GrowthTrend.noData:
+      return '꾸준히 훈련을\n시작해봐요!';
   }
 }
 
@@ -342,10 +357,12 @@ class _HomeContent extends StatelessWidget {
               onTap: () {
                 ScaffoldMessenger.maybeOf(ctx)
                   ?..removeCurrentSnackBar()
-                  ..showSnackBar(const SnackBar(
-                    content: Text('알림 기능 준비 중'),
-                    duration: Duration(seconds: 1),
-                  ));
+                  ..showSnackBar(
+                    const SnackBar(
+                      content: Text('알림 기능 준비 중'),
+                      duration: Duration(seconds: 1),
+                    ),
+                  );
               },
               child: Container(
                 color: Colors.transparent,
@@ -398,23 +415,31 @@ class _HomeContent extends StatelessWidget {
         ),
 
         // ─── 메인 헤드라인 (25 Bold at 19,140, multi-line) ────────
-        // Figma 새 디자인: "7일 전보다 평균 압력이 10% 증가했어요!" — 232×70 박스
-        // 안에서 줄바꿈. 추후 가능하면 weekAvgPressureProvider 의 thisWeek/
-        // lastWeek 비교 결과로 % 동적 생성 (현재는 정적 문구).
+        // weekAvgPressureProvider (이번주/지난주 호기 평균) 로 증감 % 동적 생성.
+        // 데이터 없으면 (첫 사용자/지난주 0) 격려 문구. 232×70 박스 안 줄바꿈.
         f.at(
           x: 19,
           y: 140,
           w: 260,
-          child: Text(
-            '7일 전보다 평균 압력이\n10% 증가했어요!',
-            style: TextStyle(
-              fontSize: f.sx(25),
-              fontWeight: FontWeight.w700,
-              letterSpacing: -0.5,
-              height: 1.19,
-              color: textPrimary,
-              fontFamily: BlowfitTheme.fontFamily,
-            ),
+          child: Consumer(
+            builder: (_, ref, __) {
+              final pair = ref.watch(weekAvgPressureProvider).valueOrNull;
+              final g = weeklyGrowth(
+                thisWeek: pair?.thisWeek,
+                lastWeek: pair?.lastWeek,
+              );
+              return Text(
+                _homeHeadline(g),
+                style: TextStyle(
+                  fontSize: f.sx(25),
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -0.5,
+                  height: 1.19,
+                  color: textPrimary,
+                  fontFamily: BlowfitTheme.fontFamily,
+                ),
+              );
+            },
           ),
         ),
 

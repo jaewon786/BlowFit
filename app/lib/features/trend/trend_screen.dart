@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
+import '../../core/coach/growth_message.dart';
 import '../../core/db/db_providers.dart';
 import '../../core/db/trend_bucketing.dart';
 import '../../core/theme/blowfit_colors.dart';
@@ -42,6 +43,20 @@ class _Frame {
       height: h == null ? null : sy(h),
       child: child,
     );
+  }
+}
+
+/// 추이 헤드라인 문구 — 주간 호기 평균 증감 3분기 + 무데이터 격려 (1줄).
+String _trendHeadline(({GrowthTrend trend, int pct}) g) {
+  switch (g.trend) {
+    case GrowthTrend.up:
+      return '지난주보다 ${g.pct}% 성장했어요!';
+    case GrowthTrend.down:
+      return '지난주보다 ${g.pct}% 줄었어요!';
+    case GrowthTrend.flat:
+      return '지난주와 비슷해요!';
+    case GrowthTrend.noData:
+      return '꾸준히 성장해 볼까요?';
   }
 }
 
@@ -464,6 +479,11 @@ class _TrendContent extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // 헤드라인 — 주간 호기 평균 증감 기반 동적 문구.
+    final avgPair = ref.watch(weekAvgPressureProvider).valueOrNull;
+    final headline = _trendHeadline(
+      weeklyGrowth(thisWeek: avgPair?.thisWeek, lastWeek: avgPair?.lastWeek),
+    );
     return Stack(
       children: [
         // ─── 로고 (81×22 at 17,56) — 홈 화면과 동일한 BRELOW wordmark ───
@@ -556,12 +576,12 @@ class _TrendContent extends ConsumerWidget {
             ),
           ),
         ),
-        // ─── "얼마나 성장했어요!" (20 Bold at 19,131) ─────────────
+        // ─── 동적 헤드라인 (20 Bold at 19,127) ────────────────────
         f.at(
           x: 19,
           y: 127,
           child: Text(
-            '얼마나 성장했어요!',
+            headline,
             style: TextStyle(
               fontSize: f.sx(20),
               fontWeight: FontWeight.w700,
@@ -1008,9 +1028,12 @@ class _ChartLinePainter extends CustomPainter {
       if (b.isEmpty || b.avgExhale == null) continue;
       final cx = (_chartLeft + (b.xPos - 0.5) * spacing) * s;
       final eY = (_zeroY - b.avgExhale! * _pxPerCmH2O) * s;
-      // DB 에 흡기 별도 stat 없음 → 호기 평균을 음수로 미러링. 펌웨어가
-      // 호기/흡기 분리 stat 보내면 그때 실제 흡기 평균 사용.
-      final iY = (_zeroY + b.avgExhale! * _pxPerCmH2O) * s;
+      // 흡기선 — v4.0+ 펌웨어가 보낸 실제 흡기 평균(magnitude) 사용. 레거시/
+      // 구버전 세션(avgInhale=0)은 데이터가 없으므로 호기 평균을 음수로 미러링.
+      final inhaleMag = (b.avgInhale != null && b.avgInhale! > 0)
+          ? b.avgInhale!
+          : b.avgExhale!;
+      final iY = (_zeroY + inhaleMag * _pxPerCmH2O) * s;
       exhale.add(Offset(cx, eY));
       inhale.add(Offset(cx, iY));
     }

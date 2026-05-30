@@ -17,8 +17,10 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
 import '../../core/ble/ble_providers.dart';
+import '../../core/db/db_providers.dart';
 import '../../core/theme/blowfit_theme.dart';
 
 const double _kFrameW = 402;
@@ -80,6 +82,10 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen>
   double _exhaleArc = 0; // 0~180°, 파란 호 길이
   double _inhaleArc = 0; // 0~180°, 초록 호 길이
   double _currentPressure = 0; // cmH₂O (양/음 모두 가능)
+  // 사이클별 peak-hold — 하단 호기/흡기 숫자에 표시. 호기 phase 진입 시
+  // _peakExhale, 흡기 phase 진입 시 _peakInhale 리셋 → phase 동안 누적 최대/최소.
+  double _peakExhale = 0; // 최대 양압 (호기)
+  double _peakInhale = 0; // 최소 음압 (흡기, 음수)
   Duration _lastTick = Duration.zero;
 
   @override
@@ -103,23 +109,31 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen>
     _lastTick = elapsed;
 
     final phaseDur = _phaseDuration[_phase]!;
-    final pressureArc =
-        (_currentPressure.abs() / _maxPressureCmH2O * 180).clamp(0.0, 180.0);
 
     setState(() {
       _phaseElapsed += dt;
 
-      // active phase 에서만 arc 업데이트 (실시간 압력 매핑)
+      // active phase 에서만, 그리고 phase 방향에 맞는 압력에만 반응.
+      //   호기 phase: 양압(p>0)만 → 흡기(음압)해도 arc/peak 안 움직임.
+      //   흡기 phase: 음압(p<0)만 → 호기(양압)해도 arc/peak 안 움직임.
+      // arc 는 실시간(instantaneous), peak 는 최댓값 hold.
       if (_phase == _Phase.exhale) {
-        _exhaleArc = pressureArc;
+        final p = _currentPressure > 0 ? _currentPressure : 0.0;
+        _exhaleArc = (p / _maxPressureCmH2O * 180).clamp(0.0, 180.0);
+        if (p > _peakExhale) _peakExhale = p;
       } else if (_phase == _Phase.inhale) {
-        _inhaleArc = pressureArc;
+        final p = _currentPressure < 0 ? _currentPressure : 0.0; // ≤ 0
+        _inhaleArc = (-p / _maxPressureCmH2O * 180).clamp(0.0, 180.0);
+        if (p < _peakInhale) _peakInhale = p; // 더 깊은 음압
       }
 
       // phase 전환
       if (_phaseElapsed >= phaseDur) {
         _phaseElapsed = 0;
         _phase = _nextPhase(_phase);
+        // phase 진입 시 해당 peak 리셋 → 새 호흡마다 0 부터 다시 측정.
+        if (_phase == _Phase.exhale) _peakExhale = 0;
+        if (_phase == _Phase.inhale) _peakInhale = 0;
         // inhaleRest 진입 시 — 다음 cycle 준비, 두 arc 모두 reset
         if (_phase == _Phase.inhaleRest) {
           _exhaleArc = 0;
@@ -176,6 +190,8 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen>
             exhaleArc: _exhaleArc,
             inhaleArc: _inhaleArc,
             remainingSec: remainingSec,
+            peakExhale: _peakExhale,
+            peakInhale: _peakInhale,
           ),
         ],
       ),
@@ -282,49 +298,86 @@ class _TrainBgPainter extends CustomPainter {
 // 훈련 콘텐츠 — 정적 layout + 동적 ring/타이머
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _TrainingContent extends StatelessWidget {
+class _TrainingContent extends ConsumerWidget {
   const _TrainingContent({
     required this.f,
     required this.phase,
     required this.exhaleArc,
     required this.inhaleArc,
     required this.remainingSec,
+    required this.peakExhale,
+    required this.peakInhale,
   });
   final _Frame f;
   final _Phase phase;
   final double exhaleArc;
   final double inhaleArc;
   final int remainingSec;
+  final double peakExhale; // 이번 호기 최대 압력 (양수)
+  final double peakInhale; // 이번 흡기 최소 압력 (음수)
 
   static const _ink = Color(0xFF101010);
 
+  /// 오늘 날짜 → "5월 30일, 토요일" 형식.
+  static String _koreanDate(DateTime d) {
+    const wk = ['월', '화', '수', '목', '금', '토', '일'];
+    return '${d.month}월 ${d.day}일, ${wk[d.weekday - 1]}요일';
+  }
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    // 상단 통계 — 추이 화면과 동일 provider (이번주/이번달/누적 회수).
+    final stats = ref.watch(trendSummaryStatsProvider).valueOrNull;
+    final weekCount = stats?.thisWeekSessions ?? 0;
+    final monthCount = stats?.thisMonthSessions ?? 0;
+    final totalCount = stats?.totalSessions ?? 0;
     return Stack(
       children: [
-        // ─── 우상단 아이콘 (설정/알림) ────────────────────────────
+        // ─── 브랜드 로고 (81×22 at 17,56) — 홈·추이와 동일 BRELOW wordmark ──
         f.at(
-          x: 358,
-          y: 53,
-          w: 28,
-          h: 28,
-          child:
-              Image.asset('assets/dot/icon_settings.png', fit: BoxFit.contain),
-        ),
-        f.at(
-          x: 311,
-          y: 53,
-          w: 30,
-          h: 30,
-          child: Image.asset('assets/dot/icon_bell.png', fit: BoxFit.contain),
+          x: 17,
+          y: 56,
+          w: 81,
+          h: 22,
+          child: Image.asset(
+            'assets/dot/logo.png',
+            fit: BoxFit.contain,
+            filterQuality: FilterQuality.high,
+          ),
         ),
 
-        // ─── 날짜 ─────────────────────────────────────────────────
+        // ─── 우상단 아이콘 (설정 좌 / 알림 우) — 홈·추이와 동일 SVG ──
+        // Figma 1:2236: settings vector (320,60) 20×19, bell vector (366,60)
+        // 16×18. 기존 코드가 좌우 뒤바뀌고 raster PNG 였던 것 → SVG + Figma 위치.
+        f.at(
+          x: 320,
+          y: 60,
+          w: 20,
+          h: 19,
+          child: SvgPicture.asset(
+            'assets/dot/icon_settings.svg',
+            fit: BoxFit.contain,
+            colorFilter: const ColorFilter.mode(_ink, BlendMode.srcIn),
+          ),
+        ),
+        f.at(
+          x: 366,
+          y: 60,
+          w: 16,
+          h: 18,
+          child: SvgPicture.asset(
+            'assets/dot/icon_bell.svg',
+            fit: BoxFit.contain,
+            colorFilter: const ColorFilter.mode(_ink, BlendMode.srcIn),
+          ),
+        ),
+
+        // ─── 날짜 (오늘 날짜 동적) ─────────────────────────────────
         f.at(
           x: 19,
           y: 113,
           child: Text(
-            '5월 22일, 금요일',
+            _koreanDate(DateTime.now()),
             style: TextStyle(
               fontSize: f.sx(15),
               fontWeight: FontWeight.w600,
@@ -334,21 +387,21 @@ class _TrainingContent extends StatelessWidget {
           ),
         ),
 
-        // ─── 상단 통계 ─────────────────────────────────────────────
+        // ─── 상단 통계 (이번주/이번달/누적 회수 — 실데이터) ────────
         f.at(
           x: 57,
           y: 171,
-          child: _statNum('1회'),
+          child: _statNum('$weekCount회'),
         ),
         f.at(
           x: 181,
           y: 171,
-          child: _statNum('1일'),
+          child: _statNum('$monthCount회'),
         ),
         f.at(
           x: 305,
           y: 171,
-          child: _statNum('1회'),
+          child: _statNum('$totalCount회'),
         ),
         f.at(
           x: 137,
@@ -442,29 +495,38 @@ class _TrainingContent extends StatelessWidget {
             ),
           ),
         ),
-        f.at(
-          x: 57,
-          y: 706,
-          child: Text(
-            '14',
-            style: TextStyle(
-              fontSize: f.sx(45),
-              fontWeight: FontWeight.w700,
-              color: _ink,
-              fontFamily: BlowfitTheme.fontFamily,
+        // 호기 실시간 peak (양압) — 호기 라벨(중심 x≈85) 아래 가운데 정렬.
+        // 미연결/무압력 시 0. 폭 120 박스에서 Center → 자릿수와 무관하게 중앙.
+        Positioned(
+          left: f.sx(85 - 60),
+          top: f.sy(706),
+          width: f.sx(120),
+          child: Center(
+            child: Text(
+              '${peakExhale.round()}',
+              style: TextStyle(
+                fontSize: f.sx(45),
+                fontWeight: FontWeight.w700,
+                color: _ink,
+                fontFamily: BlowfitTheme.fontFamily,
+              ),
             ),
           ),
         ),
-        f.at(
-          x: 277,
-          y: 706,
-          child: Text(
-            '-14',
-            style: TextStyle(
-              fontSize: f.sx(45),
-              fontWeight: FontWeight.w700,
-              color: _ink,
-              fontFamily: BlowfitTheme.fontFamily,
+        // 흡기 실시간 peak (음압) — 흡기 라벨(중심 x≈315) 아래 가운데 정렬.
+        Positioned(
+          left: f.sx(315 - 60),
+          top: f.sy(706),
+          width: f.sx(120),
+          child: Center(
+            child: Text(
+              '${peakInhale.round()}',
+              style: TextStyle(
+                fontSize: f.sx(45),
+                fontWeight: FontWeight.w700,
+                color: _ink,
+                fontFamily: BlowfitTheme.fontFamily,
+              ),
             ),
           ),
         ),
