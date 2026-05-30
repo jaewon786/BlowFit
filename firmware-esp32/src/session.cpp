@@ -41,6 +41,13 @@ namespace {
   double   g_sum_abs_p   = 0.0;
   uint32_t g_sum_n       = 0;
   float    g_max_abs_p   = 0.0f;
+  // 호기(양압)/흡기(음압) 분리 누적 — 앱 추이 차트의 호기/흡기선 실데이터용.
+  double   g_sum_exhale  = 0.0;
+  uint32_t g_n_exhale    = 0;
+  float    g_max_exhale  = 0.0f;
+  double   g_sum_inhale  = 0.0;  // |p| 누적 (음압의 절댓값)
+  uint32_t g_n_inhale    = 0;
+  float    g_max_inhale  = 0.0f;  // 최대 음압 magnitude
   uint32_t g_hit_ms      = 0;
   uint32_t g_train_ms    = 0;
   Stats    g_stats       = {};
@@ -58,6 +65,12 @@ namespace {
     g_sum_abs_p = 0;
     g_sum_n     = 0;
     g_max_abs_p = 0;
+    g_sum_exhale = 0;
+    g_n_exhale   = 0;
+    g_max_exhale = 0;
+    g_sum_inhale = 0;
+    g_n_inhale   = 0;
+    g_max_inhale = 0;
     g_hit_ms    = 0;
     g_train_ms  = 0;
     g_session_start = 0;
@@ -69,6 +82,14 @@ namespace {
         ? (float)(g_sum_abs_p / g_sum_n)
         : 0.0f;
     g_stats.max_pressure = g_max_abs_p;
+    g_stats.avg_exhale = g_n_exhale > 0
+        ? (float)(g_sum_exhale / g_n_exhale)
+        : 0.0f;
+    g_stats.max_exhale = g_max_exhale;
+    g_stats.avg_inhale = g_n_inhale > 0
+        ? (float)(g_sum_inhale / g_n_inhale)
+        : 0.0f;
+    g_stats.max_inhale = g_max_inhale;
     g_stats.hit_ms       = g_hit_ms;
     g_stats.train_ms     = g_train_ms;
     g_stats.hit_percent  = g_train_ms > 0
@@ -170,6 +191,17 @@ void tick(uint32_t now_ms, float p) {
       if (abs_p > g_max_abs_p) g_max_abs_p = abs_p;
       g_sum_abs_p += abs_p;
       g_sum_n += 1;
+      // 호기/흡기 분리 — 양압은 호기, 음압은 흡기 (magnitude 로 누적).
+      if (p > 0.0f) {
+        g_sum_exhale += p;
+        g_n_exhale += 1;
+        if (p > g_max_exhale) g_max_exhale = p;
+      } else if (p < 0.0f) {
+        const float mag = -p;
+        g_sum_inhale += mag;
+        g_n_inhale += 1;
+        if (mag > g_max_inhale) g_max_inhale = mag;
+      }
       g_train_ms += dt;
 
       // zone 안 (양압 OR 음압) 시간 누적.

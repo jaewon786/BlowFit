@@ -29,7 +29,7 @@
 |---|---|---|---|---|
 | Pressure Stream | `B411` | Notify | 22B | 100Hz 샘플을 20Hz로 묶음 전송 |
 | Session Control | `B412` | Write | 1-6B | 앱→기기 명령 |
-| Session Summary | `B413` | Read, Notify | 32B | 세션 종료 시 요약 |
+| Session Summary | `B413` | Read, Notify | 40B | 세션 종료 시 요약 (호기/흡기 분리) |
 | Device State | `B414` | Read, Notify | 4B | 현재 상태·오리피스·배터리 |
 | History List | `B415` | Read | ≤244B | 최근 30개 세션 요약 배열 |
 
@@ -75,21 +75,27 @@ bytes 1..: payload (opcode 별)
 | `0x04` | ZERO_CALIBRATE | — | 10초간 대기압 측정·보정 |
 | `0x05` | SET_TARGET | 1B low + 1B high (cmH2O) | 목표 구간 재설정 (기본 20~30) |
 
-### 3.3 Session Summary (Read/Notify, 32 B)
+### 3.3 Session Summary (Read/Notify, 40 B)
 
 ```
 offset  size  field
  0      4     startEpoch      (uint32, SYNC_TIME 전이면 0)
  4      4     durationSec     (uint32)
- 8      4     maxPressure     (float, cmH2O)
-12      4     avgPressure     (float, cmH2O)
+ 8      4     maxPressure     (float, cmH2O — 호기/양압 최대)
+12      4     avgPressure     (float, cmH2O — 호기/양압 평균)
 16      4     enduranceSec    (uint32, 목표 구간 유지 합계)
 20      1     orificeLevel    (uint8)
 21      1     targetHits      (uint8, 15초 이상 유지 횟수)
 22      2     sampleCount     (uint16, 원본 파형 개수)
 24      4     crc32           (uint32, 헤더 + 파형)
 28      4     sessionId       (uint32, 기기 내 고유 ID)
+32      4     avgInhale       (float, cmH2O — 흡기/음압 평균 magnitude, 양수)
+36      4     maxInhale       (float, cmH2O — 흡기/음압 최대 magnitude, 양수)
 ```
+
+> v4.0+ 40B 확장: 0..31 은 기존 32B 와 동일 (append-only 호환). `maxPressure`/
+> `avgPressure` 는 호기(양압 p>0) 통계, `avgInhale`/`maxInhale` 은 흡기(음압 p<0)
+> 통계를 양수 magnitude 로 전송. 32B 만 받는 구버전 앱은 흡기 필드 무시.
 
 세션 종료 시 Notify 로 푸시. 앱은 수신 후 로컬 DB에 저장하고 사용자에게 요약 화면 표시.
 

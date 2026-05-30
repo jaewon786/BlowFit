@@ -33,18 +33,22 @@ namespace ble_service {
   /// Device State (4B) notify. state 변경 시 호출.
   void pushState(uint8_t state_id, uint8_t orifice, uint8_t battery, bool charging);
 
-  /// Session Summary (32B) notify. Summary state 진입 시 호출.
+  /// Session Summary (40B) notify. Summary state 진입 시 호출.
+  /// maxPressure/avgPressure 는 호기(양압) 통계, avgInhale/maxInhale 은 흡기(음압)
+  /// 통계 (양수 magnitude). 0..31 은 기존 32B 레이아웃과 동일, 32..39 append.
   struct SummaryFields {
     uint32_t startEpoch;     // SYNC_TIME 전이면 0
     uint32_t durationSec;
-    float    maxPressure;    // cmH2O
-    float    avgPressure;
+    float    maxPressure;    // 호기 최대 (cmH2O)
+    float    avgPressure;    // 호기 평균
     uint32_t enduranceSec;   // zone hold 누적
     uint8_t  orificeLevel;
     uint8_t  targetHits;
     uint16_t sampleCount;
     uint32_t crc32;
     uint32_t sessionId;
+    float    avgInhale;      // 흡기 평균 magnitude (양수)
+    float    maxInhale;      // 흡기 최대 magnitude (양수)
   };
   void pushSummary(const SummaryFields& s);
 

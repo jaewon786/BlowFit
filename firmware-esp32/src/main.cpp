@@ -268,14 +268,15 @@ void loop() {
     // Device State notify (4B). orifice/battery 는 placeholder (M9 NVS 후 실값).
     ble_service::pushState((uint8_t)cur, /*orifice=*/0, /*battery=*/100, /*charging=*/false);
 
-    // Summary 진입 시 Session Summary notify (32B). state machine 의 stats() 활용.
+    // Summary 진입 시 Session Summary notify (40B). state machine 의 stats() 활용.
+    // maxPressure/avgPressure 는 호기(양압) 통계, avgInhale/maxInhale 은 흡기(음압).
     if (cur == session::State::Summary) {
       const auto& st = session::stats();
       ble_service::SummaryFields s = {
         .startEpoch    = ble_service::startEpoch(),
         .durationSec   = st.duration_sec,
-        .maxPressure   = st.max_pressure,
-        .avgPressure   = st.avg_pressure,
+        .maxPressure   = st.max_exhale,
+        .avgPressure   = st.avg_exhale,
         .enduranceSec  = st.hit_ms / 1000,
         .orificeLevel  = 0,     // TODO M9
         .targetHits    = 0,     // TODO M9 (15s hold count)
@@ -283,6 +284,8 @@ void loop() {
                                     : (uint16_t)((uint32_t)st.duration_sec * 100u)),
         .crc32         = 0,     // TODO M9
         .sessionId     = 0,     // TODO M9 (NVS counter)
+        .avgInhale     = st.avg_inhale,
+        .maxInhale     = st.max_inhale,
       };
       ble_service::pushSummary(s);
     }

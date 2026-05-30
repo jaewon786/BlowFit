@@ -38,8 +38,12 @@ namespace session {
   };
 
   struct Stats {
-    float    avg_pressure;  // 세션 평균 |p| (cmH2O)
+    float    avg_pressure;  // 세션 평균 |p| (cmH2O) — 기기 자체 Summary 화면용
     float    max_pressure;  // 세션 max |p|
+    float    avg_exhale;    // 호기(양압 p>0) 평균
+    float    max_exhale;    // 호기 최대
+    float    avg_inhale;    // 흡기(음압 p<0) 평균 — 양수 magnitude
+    float    max_inhale;    // 흡기 최대 magnitude
     uint32_t hit_ms;        // zone 안 머문 총 시간 (ms)
     uint32_t train_ms;      // 총 train 시간 (ms, 분모)
     uint8_t  hit_percent;   // hit_ms / train_ms * 100

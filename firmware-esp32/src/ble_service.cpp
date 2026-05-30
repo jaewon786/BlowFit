@@ -143,7 +143,7 @@ void begin() {
       BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY);
   g_stateChar->addDescriptor(new BLE2902());
 
-  // Session Summary (Read + Notify, 32B)
+  // Session Summary (Read + Notify, 40B)
   g_summaryChar = svc->createCharacteristic(
       uuids::SESSION_SUMMARY,
       BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY);
@@ -236,7 +236,7 @@ void pushState(uint8_t state_id, uint8_t orifice, uint8_t battery, bool charging
 void pushSummary(const SummaryFields& s) {
   if (!g_summaryChar) return;
 
-  uint8_t buf[32] = {0};
+  uint8_t buf[40] = {0};
   std::memcpy(buf + 0,  &s.startEpoch,    4);
   std::memcpy(buf + 4,  &s.durationSec,   4);
   std::memcpy(buf + 8,  &s.maxPressure,   4);
@@ -247,8 +247,10 @@ void pushSummary(const SummaryFields& s) {
   std::memcpy(buf + 22, &s.sampleCount,   2);
   std::memcpy(buf + 24, &s.crc32,         4);
   std::memcpy(buf + 28, &s.sessionId,     4);
+  std::memcpy(buf + 32, &s.avgInhale,     4);
+  std::memcpy(buf + 36, &s.maxInhale,     4);
 
-  g_summaryChar->setValue(buf, 32);
+  g_summaryChar->setValue(buf, 40);
   if (g_connected) g_summaryChar->notify();
 }
 
