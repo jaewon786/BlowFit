@@ -45,5 +45,8 @@ abstract class BleManager {
   Future<void> zeroCalibrate();
   Future<void> setTarget(int lowCmH2O, int highCmH2O);
 
+  /// Train 세션 길이 (초) 를 기기로 전송 (SET_DURATION opcode).
+  Future<void> setTrainDuration(int seconds);
+
   void dispose();
 }

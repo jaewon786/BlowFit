@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'last_device_store.dart';
 import 'target_settings_store.dart';
+import 'train_duration_store.dart';
 import 'user_profile_store.dart';
 
 /// Async because SharedPreferences.getInstance() is async on first call.
@@ -12,6 +13,10 @@ final lastDeviceStoreProvider = FutureProvider<LastDeviceStore>((ref) {
 
 final targetSettingsStoreProvider = FutureProvider<TargetSettingsStore>((ref) {
   return TargetSettingsStore.open();
+});
+
+final trainDurationStoreProvider = FutureProvider<TrainDurationStore>((ref) {
+  return TrainDurationStore.open();
 });
 
 final userProfileStoreProvider = FutureProvider<UserProfileStore>((ref) {

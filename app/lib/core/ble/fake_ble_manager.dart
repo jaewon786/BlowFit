@@ -169,6 +169,9 @@ class FakeBleManager implements BleManager {
   @override
   Future<void> setTarget(int lowCmH2O, int highCmH2O) async {}
 
+  @override
+  Future<void> setTrainDuration(int seconds) async {}
+
   void _emitSample(double dt) {
     _sessionT += dt;
     final p = _waveform(_sessionT) + _rng.nextDouble() * 0.8 - 0.4;

@@ -44,6 +44,12 @@ final targetSyncProvider = Provider<void>((ref) {
         final store = await ref.read(targetSettingsStoreProvider.future);
         final zone = store.load();
         await ref.read(bleManagerProvider).setTarget(zone.low, zone.high);
+        // 훈련 시간도 함께 sync — 펌웨어 reboot 시 default(10분) 로 리셋되므로
+        // 사용자가 설정한 값을 매 connect 마다 재전송.
+        final durStore = await ref.read(trainDurationStoreProvider.future);
+        await ref
+            .read(bleManagerProvider)
+            .setTrainDuration(durStore.loadMinutes() * 60);
       } catch (_) {
         // 실패 시 사용자가 설정 화면에서 다시 저장하면 복구. silently ignore.
       }

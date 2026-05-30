@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/ble/ble_providers.dart';
 import '../../core/storage/last_device_store.dart';
 import '../../core/storage/storage_providers.dart';
+import '../../core/storage/train_duration_store.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -18,6 +19,8 @@ class SettingsScreen extends ConsumerWidget {
     final state = ref.watch(deviceStateProvider).valueOrNull;
     final lastDevice = ref.watch(lastDeviceStoreProvider).valueOrNull?.load();
     final targetZone = ref.watch(targetSettingsStoreProvider).valueOrNull?.load();
+    final trainMinutes = ref.watch(trainDurationStoreProvider).valueOrNull?.loadMinutes() ??
+        TrainDurationStore.defaultMinutes;
     // 펌웨어 버전은 BLE Device Information characteristic 으로 보고되지만 현재
     // 미파싱 상태. 연결됐을 때만 placeholder 를 보여주고, 미연결이면 공란.
     final fwVersion = connected && state != null ? '확인 중' : '—';
@@ -42,6 +45,12 @@ class SettingsScreen extends ConsumerWidget {
                   ? '— cmH₂O'
                   : '${targetZone.low}-${targetZone.high} cmH₂O',
               onTap: () => context.push('/settings/target'),
+            ),
+            _SettingsTile(
+              icon: Icons.timer_outlined,
+              label: '훈련 시간',
+              trailing: '$trainMinutes분',
+              onTap: () => _pickDuration(context, ref, trainMinutes),
             ),
             _SettingsTile(
               icon: Icons.notifications_none,
@@ -92,6 +101,57 @@ class SettingsScreen extends ConsumerWidget {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('$label 기능은 곧 출시됩니다')),
     );
+  }
+
+  /// 훈련 시간(분) 선택 바텀시트. 선택 시 저장 + (연결됐으면) 기기로 전송.
+  Future<void> _pickDuration(
+    BuildContext context,
+    WidgetRef ref,
+    int current,
+  ) async {
+    final primary = Theme.of(context).colorScheme.primary;
+    final selected = await showModalBottomSheet<int>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  '훈련 시간 선택',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ),
+            for (final m in TrainDurationStore.options)
+              ListTile(
+                title: Text('$m분'),
+                trailing: m == current
+                    ? Icon(Icons.check, color: primary)
+                    : null,
+                onTap: () => Navigator.of(ctx).pop(m),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (selected == null || selected == current) return;
+    final store = await ref.read(trainDurationStoreProvider.future);
+    await store.save(selected);
+    ref.invalidate(trainDurationStoreProvider);
+    // 연결돼 있으면 기기로 즉시 전송 (초 단위).
+    final connected = ref.read(connectionProvider).valueOrNull ?? false;
+    if (connected) {
+      try {
+        await ref.read(bleManagerProvider).setTrainDuration(selected * 60);
+      } catch (_) {
+        // 실패해도 다음 connect 때 targetSyncProvider 가 재전송.
+      }
+    }
   }
 
   void _showAbout(BuildContext context) {

@@ -20,7 +20,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
 import '../../core/ble/ble_providers.dart';
-import '../../core/db/db_providers.dart';
+import '../../core/storage/storage_providers.dart';
 import '../../core/theme/blowfit_theme.dart';
 
 const double _kFrameW = 402;
@@ -57,9 +57,9 @@ enum _Phase { exhale, exhaleRest, inhale, inhaleRest }
 
 const _phaseDuration = <_Phase, double>{
   _Phase.exhale: 10.0,
-  _Phase.exhaleRest: 3.0,
+  _Phase.exhaleRest: 5.0, // 쉬는 시간 5초 (펌웨어 session.cpp 와 동일)
   _Phase.inhale: 10.0,
-  _Phase.inhaleRest: 3.0,
+  _Phase.inhaleRest: 5.0,
 };
 
 // 색상 — 추이 차트와 동일 스킴.
@@ -86,6 +86,9 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen>
   // _peakExhale, 흡기 phase 진입 시 _peakInhale 리셋 → phase 동안 누적 최대/최소.
   double _peakExhale = 0; // 최대 양압 (호기)
   double _peakInhale = 0; // 최소 음압 (흡기, 음수)
+  // 이번 세션 (= 훈련 화면 진입 후) 정보 — 상단 카드에 표시.
+  double _sessionElapsed = 0; // 누적 경과 초
+  int _breathCount = 0; // 완료한 호흡(호기+흡기 1 cycle) 수
   Duration _lastTick = Duration.zero;
 
   @override
@@ -112,6 +115,7 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen>
 
     setState(() {
       _phaseElapsed += dt;
+      _sessionElapsed += dt;
 
       // active phase 에서만, 그리고 phase 방향에 맞는 압력에만 반응.
       //   호기 phase: 양압(p>0)만 → 흡기(음압)해도 arc/peak 안 움직임.
@@ -134,10 +138,11 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen>
         // phase 진입 시 해당 peak 리셋 → 새 호흡마다 0 부터 다시 측정.
         if (_phase == _Phase.exhale) _peakExhale = 0;
         if (_phase == _Phase.inhale) _peakInhale = 0;
-        // inhaleRest 진입 시 — 다음 cycle 준비, 두 arc 모두 reset
+        // inhaleRest 진입 시 — 한 호흡(호기+흡기) 완료. 다음 cycle 준비.
         if (_phase == _Phase.inhaleRest) {
           _exhaleArc = 0;
           _inhaleArc = 0;
+          _breathCount += 1;
         }
       }
     });
@@ -192,6 +197,8 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen>
             remainingSec: remainingSec,
             peakExhale: _peakExhale,
             peakInhale: _peakInhale,
+            sessionElapsed: _sessionElapsed,
+            breathCount: _breathCount,
           ),
         ],
       ),
@@ -307,6 +314,8 @@ class _TrainingContent extends ConsumerWidget {
     required this.remainingSec,
     required this.peakExhale,
     required this.peakInhale,
+    required this.sessionElapsed,
+    required this.breathCount,
   });
   final _Frame f;
   final _Phase phase;
@@ -315,8 +324,11 @@ class _TrainingContent extends ConsumerWidget {
   final int remainingSec;
   final double peakExhale; // 이번 호기 최대 압력 (양수)
   final double peakInhale; // 이번 흡기 최소 압력 (음수)
+  final double sessionElapsed; // 이번 세션 경과 초
+  final int breathCount; // 완료한 호흡 수
 
   static const _ink = Color(0xFF101010);
+  static const _restColor = Color(0xFF9E9E9E); // 휴식 — 중립 회색
 
   /// 오늘 날짜 → "5월 30일, 토요일" 형식.
   static String _koreanDate(DateTime d) {
@@ -324,13 +336,45 @@ class _TrainingContent extends ConsumerWidget {
     return '${d.month}월 ${d.day}일, ${wk[d.weekday - 1]}요일';
   }
 
+  /// 경과 초 → "mm:ss".
+  static String _fmtElapsed(double seconds) {
+    final t = seconds.floor();
+    final m = (t ~/ 60).toString().padLeft(2, '0');
+    final s = (t % 60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
+
+  /// 현재 phase 의 가운데 라벨 텍스트.
+  static String _phaseLabel(_Phase p) {
+    switch (p) {
+      case _Phase.exhale:
+        return '호기';
+      case _Phase.inhale:
+        return '흡기';
+      case _Phase.exhaleRest:
+      case _Phase.inhaleRest:
+        return '휴식';
+    }
+  }
+
+  /// 현재 phase 의 라벨/강조 색.
+  static Color _phaseColor(_Phase p) {
+    switch (p) {
+      case _Phase.exhale:
+        return _exhaleColor;
+      case _Phase.inhale:
+        return _inhaleColor;
+      case _Phase.exhaleRest:
+      case _Phase.inhaleRest:
+        return _restColor;
+    }
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // 상단 통계 — 추이 화면과 동일 provider (이번주/이번달/누적 회수).
-    final stats = ref.watch(trendSummaryStatsProvider).valueOrNull;
-    final weekCount = stats?.thisWeekSessions ?? 0;
-    final monthCount = stats?.thisMonthSessions ?? 0;
-    final totalCount = stats?.totalSessions ?? 0;
+    // 상단 — 이번 세션 정보 (경과 시간 / 호흡 횟수 / 목표 압력대).
+    final zone = ref.watch(targetSettingsStoreProvider).valueOrNull?.load();
+    final targetText = zone != null ? '${zone.low}~${zone.high}' : '20~30';
     return Stack(
       children: [
         // ─── 브랜드 로고 (81×22 at 17,56) — 홈·추이와 동일 BRELOW wordmark ──
@@ -387,22 +431,12 @@ class _TrainingContent extends ConsumerWidget {
           ),
         ),
 
-        // ─── 상단 통계 (이번주/이번달/누적 회수 — 실데이터) ────────
-        f.at(
-          x: 57,
-          y: 171,
-          child: _statNum('$weekCount회'),
-        ),
-        f.at(
-          x: 181,
-          y: 171,
-          child: _statNum('$monthCount회'),
-        ),
-        f.at(
-          x: 305,
-          y: 171,
-          child: _statNum('$totalCount회'),
-        ),
+        // ─── 상단 — 이번 세션 정보 (경과 시간 / 호흡 / 목표 압력) ────
+        // 누적 통계(주/달/누적)는 홈·추이 영역 → 훈련 중엔 세션 진행 정보 표시.
+        // divider(137,261) 기준 3컬럼 중앙 정렬 (자릿수 무관 가운데).
+        _sessionCol(20, 137, _fmtElapsed(sessionElapsed), '경과 시간'),
+        _sessionCol(137, 261, '$breathCount회', '호흡'),
+        _sessionCol(261, 382, targetText, '목표 압력'),
         f.at(
           x: 137,
           y: 174,
@@ -416,21 +450,6 @@ class _TrainingContent extends ConsumerWidget {
           w: 1,
           h: 58,
           child: Container(color: Colors.black.withValues(alpha: 0.15)),
-        ),
-        f.at(
-          x: 60,
-          y: 215,
-          child: _statLabel('이번 주'),
-        ),
-        f.at(
-          x: 184,
-          y: 215,
-          child: _statLabel('이번 달'),
-        ),
-        f.at(
-          x: 304,
-          y: 215,
-          child: _statLabel('지금까지'),
         ),
 
         // ─── 원형 ring (도넛 + arc + dot) ─────────────────────────
@@ -449,21 +468,37 @@ class _TrainingContent extends ConsumerWidget {
           ),
         ),
 
-        // ─── 가운데 카운트다운 텍스트 ─────────────────────────────
+        // ─── 가운데 phase 라벨 + 카운트다운 ───────────────────────
+        // 호기/흡기/휴식 단어(색상) + 남은 초. 안쪽 원 배경색과 함께 명확히 구분.
         f.at(
           x: 45,
           y: 291,
           w: 312,
           h: 312,
           child: Center(
-            child: Text(
-              '$remainingSec초',
-              style: TextStyle(
-                fontSize: f.sx(40),
-                fontWeight: FontWeight.w700,
-                color: _ink, // 검정 고정
-                fontFamily: BlowfitTheme.fontFamily,
-              ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  _phaseLabel(phase),
+                  style: TextStyle(
+                    fontSize: f.sx(22),
+                    fontWeight: FontWeight.w700,
+                    color: _phaseColor(phase),
+                    fontFamily: BlowfitTheme.fontFamily,
+                  ),
+                ),
+                SizedBox(height: f.sy(4)),
+                Text(
+                  '$remainingSec초',
+                  style: TextStyle(
+                    fontSize: f.sx(40),
+                    fontWeight: FontWeight.w700,
+                    color: _ink, // 검정 고정
+                    fontFamily: BlowfitTheme.fontFamily,
+                  ),
+                ),
+              ],
             ),
           ),
         ),
@@ -534,25 +569,37 @@ class _TrainingContent extends ConsumerWidget {
     );
   }
 
-  Widget _statNum(String t) => Text(
-        t,
-        style: TextStyle(
-          fontSize: f.sx(30),
-          fontWeight: FontWeight.w700,
-          color: _ink,
-          fontFamily: BlowfitTheme.fontFamily,
-        ),
-      );
-
-  Widget _statLabel(String t) => Text(
-        t,
-        style: TextStyle(
-          fontSize: f.sx(12),
-          fontWeight: FontWeight.w500,
-          color: _ink,
-          fontFamily: BlowfitTheme.fontFamily,
-        ),
-      );
+  /// 상단 1개 컬럼 — [left]~[right] (frame px) 구간 중앙에 값(위) + 라벨(아래).
+  Widget _sessionCol(double left, double right, String value, String label) {
+    return Positioned(
+      left: f.sx(left),
+      width: f.sx(right - left),
+      top: f.sy(171),
+      child: Column(
+        children: [
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: f.sx(30),
+              fontWeight: FontWeight.w700,
+              color: _ink,
+              fontFamily: BlowfitTheme.fontFamily,
+            ),
+          ),
+          SizedBox(height: f.sy(4)),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: f.sx(12),
+              fontWeight: FontWeight.w500,
+              color: _ink,
+              fontFamily: BlowfitTheme.fontFamily,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -571,12 +618,32 @@ class _RingPainter extends CustomPainter {
   final double exhaleArc; // 0~180 degrees
   final double inhaleArc; // 0~180 degrees
 
+  // phase 별 안쪽 원 배경색 — 호기 연파랑 / 흡기 연초록 / 휴식 연회색.
+  static Color _innerColor(_Phase p) {
+    switch (p) {
+      case _Phase.exhale:
+        return const Color(0xFFE3F1FE);
+      case _Phase.inhale:
+        return const Color(0xFFE7F6EC);
+      case _Phase.exhaleRest:
+      case _Phase.inhaleRest:
+        return const Color(0xFFF0F0F0);
+    }
+  }
+
   @override
   void paint(Canvas canvas, Size size) {
     final strokeW = f.sx(50);
     final radius = (size.width - strokeW) / 2;
     final center = Offset(size.width / 2, size.height / 2);
     final ringRect = Rect.fromCircle(center: center, radius: radius);
+
+    // 0. 안쪽 원 — phase 색 배경. 도넛 안쪽 가장자리까지 채움.
+    canvas.drawCircle(
+      center,
+      radius - strokeW / 2,
+      Paint()..color = _innerColor(phase),
+    );
 
     // 1. 흰 도넛 base — 전체 ring 흰색 (figma Ellipse 50 stroke 50 INSIDE)
     final basePaint = Paint()

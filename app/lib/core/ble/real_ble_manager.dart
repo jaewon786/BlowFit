@@ -396,6 +396,17 @@ class RealBleManager implements BleManager {
     );
   }
 
+  @override
+  Future<void> setTrainDuration(int seconds) async {
+    // uint16 LE seconds.
+    final lo = seconds & 0xFF;
+    final hi = (seconds >> 8) & 0xFF;
+    await _control?.write(
+      [Opcode.setDuration, lo, hi],
+      withoutResponse: false,
+    );
+  }
+
   void _decodePressure(List<int> bytes) {
     final block = BlowfitCodec.decodePressureBlock(bytes, DateTime.now());
     if (block == null) return;

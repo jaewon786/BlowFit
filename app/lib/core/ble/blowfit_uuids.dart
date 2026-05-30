@@ -29,6 +29,7 @@ class Opcode {
   static const syncTime      = 0x03;
   static const zeroCalibrate = 0x04;
   static const setTarget     = 0x05;
+  static const setDuration   = 0x06; // 2B uint16 LE sec — Train 세션 길이
 }
 
 // Device states (keep enum ordinal in sync with protocol byte value)
