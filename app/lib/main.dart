@@ -21,6 +21,7 @@ import 'features/session_detail/session_detail_screen.dart';
 import 'features/settings/samsung_health_test_screen.dart';
 import 'features/settings/settings_screen.dart';
 import 'features/sleep/sleep_effect_screen.dart';
+import 'features/sleep/sleep_trend_screen.dart';
 import 'features/settings/target_settings_screen.dart';
 import 'features/shell/main_shell.dart';
 import 'features/training/training_intro_screen.dart';
@@ -152,6 +153,12 @@ final _router = GoRouter(
       parentNavigatorKey: _rootNavKey,
       path: '/sleep-effect',
       builder: (_, __) => const SleepEffectScreen(),
+    ),
+    // 수면 추이 (추이 화면 스타일).
+    GoRoute(
+      parentNavigatorKey: _rootNavKey,
+      path: '/sleep-trend',
+      builder: (_, __) => const SleepTrendScreen(),
     ),
   ],
 );
