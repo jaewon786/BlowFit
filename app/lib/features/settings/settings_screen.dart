@@ -91,6 +91,20 @@ class SettingsScreen extends ConsumerWidget {
               trailing: 'v$_appVersion',
               onTap: () => _showAbout(context),
             ),
+            const _SectionGap(),
+            _SettingsTile(
+              icon: Icons.bedtime_outlined,
+              label: '수면 효과',
+              trailing: '베타',
+              onTap: () => context.push('/sleep-effect'),
+            ),
+            // 개발용 — Samsung Health Data SDK 연동 검증.
+            _SettingsTile(
+              icon: Icons.watch_outlined,
+              label: 'Samsung Health 연동 테스트',
+              trailing: '개발용',
+              onTap: () => context.push('/shealth-test'),
+            ),
           ],
         ),
       ),

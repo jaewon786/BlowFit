@@ -33,7 +33,37 @@ class Sessions extends Table {
       ];
 }
 
-@DriftDatabase(tables: [Sessions])
+/// Samsung Health 에서 동기화한 하룻밤 수면 레코드 (밤 1건/일).
+class SleepRecords extends Table {
+  IntColumn get id => integer().autoIncrement()();
+
+  // 그 밤의 날짜 키 (기상일, 자정 기준 DateTime). 밤당 1행 (upsert).
+  DateTimeColumn get night => dateTime()();
+
+  DateTimeColumn get startedAt => dateTime().nullable()();
+  DateTimeColumn get endedAt => dateTime().nullable()();
+  IntColumn get score => integer().nullable()(); // 수면 점수 0~100
+  IntColumn get durationMin => integer().nullable()(); // 총 수면(분)
+
+  // 수면 중 혈중산소(SpO2) — 측정 없으면 null.
+  RealColumn get spo2Avg => real().nullable()();
+  RealColumn get spo2Min => real().nullable()();
+  RealColumn get spo2Max => real().nullable()();
+
+  // 수면무호흡 징후 (DETECTED / NOT_DETECTED / UNDEFINED). 미측정 시 null.
+  TextColumn get apneaSign => text().nullable()();
+
+  TextColumn get source =>
+      text().withDefault(const Constant('samsung_health'))();
+  DateTimeColumn get receivedAt => dateTime().withDefault(currentDateAndTime)();
+
+  @override
+  List<Set<Column>> get uniqueKeys => [
+        {night},
+      ];
+}
+
+@DriftDatabase(tables: [Sessions, SleepRecords])
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_open());
 
@@ -41,7 +71,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(QueryExecutor e) : super(e);
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -51,6 +81,14 @@ class AppDatabase extends _$AppDatabase {
           if (from < 2) {
             await m.addColumn(sessions, sessions.avgInhale);
             await m.addColumn(sessions, sessions.maxInhale);
+          }
+          // v2 → v3: Samsung Health 수면 레코드 테이블 추가.
+          if (from < 3) {
+            await m.createTable(sleepRecords);
+          }
+          // v3 → v4: 수면무호흡 징후 컬럼 추가.
+          if (from < 4) {
+            await m.addColumn(sleepRecords, sleepRecords.apneaSign);
           }
         },
       );

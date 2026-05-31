@@ -18,7 +18,9 @@ import 'features/profile/profile_screen.dart';
 import 'features/profile_setup/profile_setup_screen.dart';
 import 'features/result/result_screen.dart';
 import 'features/session_detail/session_detail_screen.dart';
+import 'features/settings/samsung_health_test_screen.dart';
 import 'features/settings/settings_screen.dart';
+import 'features/sleep/sleep_effect_screen.dart';
 import 'features/settings/target_settings_screen.dart';
 import 'features/shell/main_shell.dart';
 import 'features/training/training_intro_screen.dart';
@@ -138,6 +140,18 @@ final _router = GoRouter(
       parentNavigatorKey: _rootNavKey,
       path: '/profile-setup',
       builder: (_, __) => const ProfileSetupScreen(),
+    ),
+    // 개발용 — Samsung Health Data SDK 연동 검증 화면.
+    GoRoute(
+      parentNavigatorKey: _rootNavKey,
+      path: '/shealth-test',
+      builder: (_, __) => const SamsungHealthTestScreen(),
+    ),
+    // 수면 효과 시각화 (before/after + SpO2 추이).
+    GoRoute(
+      parentNavigatorKey: _rootNavKey,
+      path: '/sleep-effect',
+      builder: (_, __) => const SleepEffectScreen(),
     ),
   ],
 );

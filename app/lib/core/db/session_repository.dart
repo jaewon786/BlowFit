@@ -149,6 +149,49 @@ class SessionRepository {
     return (_db.select(_db.sessions)..where((t) => t.id.equals(id)))
         .getSingleOrNull();
   }
+
+  // 데모 세션 식별용 id 대역 (실세션과 분리해 안전하게 삭제).
+  static const int _demoIdBase = 900000;
+
+  /// 발표/개발용 — 사용 기간(intervention)에 훈련 세션 더미 주입.
+  /// 실세션은 건드리지 않음(별도 id 대역).
+  Future<int> seedDemoSessions({int days = 30, int startIdx = 10}) async {
+    final base = _startOfDay(DateTime.now());
+    var saved = 0;
+    for (var i = startIdx; i < days; i++) {
+      if (i % 5 == 4) continue; // 80% 정도만 훈련 (현실감)
+      final evening = base
+          .subtract(Duration(days: days - 1 - i))
+          .subtract(const Duration(hours: 3)); // 전날 21시
+      final c = SessionsCompanion.insert(
+        deviceSessionId: _demoIdBase + i,
+        startedAt: Value(evening),
+        durationSec: 300,
+        maxPressure: 28,
+        avgPressure: 24,
+        avgInhale: const Value(18),
+        maxInhale: const Value(22),
+        enduranceSec: 120,
+        orificeLevel: 2,
+        targetHits: 40,
+        sampleCount: 600,
+        crc32: 0,
+        receivedAt: Value(evening),
+      );
+      await _db.into(_db.sessions).insert(
+            c,
+            onConflict:
+                DoUpdate((_) => c, target: [_db.sessions.deviceSessionId]),
+          );
+      saved++;
+    }
+    return saved;
+  }
+
+  /// 데모 세션만 삭제 (실세션 보존).
+  Future<void> clearDemoSessions() => (_db.delete(_db.sessions)
+        ..where((t) => t.deviceSessionId.isBiggerOrEqualValue(_demoIdBase)))
+      .go();
 }
 
 DateTime _defaultNow() => DateTime.now();

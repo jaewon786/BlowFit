@@ -4,9 +4,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../ble/ble_providers.dart';
 import '../ble/discovered_device.dart';
 import '../coach/milestone_engine.dart';
+import '../health/samsung_health_service.dart';
+import '../health/sleep_sync.dart';
 import '../storage/storage_providers.dart';
 import 'app_database.dart';
 import 'session_repository.dart';
+import 'sleep_repository.dart';
 import 'trend_bucketing.dart';
 
 final appDatabaseProvider = Provider<AppDatabase>((ref) {
@@ -17,6 +20,37 @@ final appDatabaseProvider = Provider<AppDatabase>((ref) {
 
 final sessionRepositoryProvider = Provider<SessionRepository>((ref) {
   return SessionRepository(ref.watch(appDatabaseProvider));
+});
+
+// ===== Samsung Health (수면 연동) =====
+final samsungHealthServiceProvider =
+    Provider<SamsungHealthService>((ref) => SamsungHealthService());
+
+final sleepRepositoryProvider = Provider<SleepRepository>((ref) {
+  return SleepRepository(ref.watch(appDatabaseProvider));
+});
+
+final sleepSyncProvider = Provider<SleepSync>((ref) {
+  return SleepSync(
+    ref.watch(samsungHealthServiceProvider),
+    ref.watch(sleepRepositoryProvider),
+  );
+});
+
+/// 저장된 수면 레코드 (최신순) — 시각화/분석 화면용.
+final recentSleepProvider = StreamProvider<List<SleepRecord>>((ref) {
+  return ref.watch(sleepRepositoryProvider).watchRecent();
+});
+
+/// 훈련한 날짜(자정 기준) 집합 — 최근 90일. 수면 효과 화면 순응도 오버레이용.
+final trainedDatesProvider = StreamProvider<Set<DateTime>>((ref) {
+  final since = DateTime.now().subtract(const Duration(days: 90));
+  return ref.watch(sessionRepositoryProvider).watchSince(since).map(
+        (sessions) => sessions
+            .map((s) => DateTime(
+                s.receivedAt.year, s.receivedAt.month, s.receivedAt.day))
+            .toSet(),
+      );
 });
 
 /// Listens to BLE session summaries and persists each one. Must be kept alive
