@@ -16,6 +16,7 @@
 #include "session.h"
 #include "ble_service.h"
 #include "power.h"
+#include "haptic.h"
 #include "display/lvgl_port.h"
 #include "display/theme.h"
 #include "display/screens/screen_boot.h"
@@ -157,7 +158,7 @@ void setup() {
   sensor::calibrateZero();
   Serial.printf("Zero offset = %.2f cmH2O\n", sensor::zeroOffset());
 
-  pinMode(pins::HAPTIC_EN, OUTPUT);  // DRV2605L EN/trigger (실제 효과는 I²C)
+  haptic::begin();  // DRV2605L EN HIGH + I²C 초기화 (ERM open-loop)
   pinMode(pins::LED_STATUS, OUTPUT);
   pinMode(pins::BUTTON_BOOT, INPUT_PULLUP);
   pinMode(pins::BUTTON_USER, INPUT_PULLUP);

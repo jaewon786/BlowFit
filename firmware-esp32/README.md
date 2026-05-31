@@ -12,7 +12,7 @@ Target: **LILYGO T-Display S3** (ESP32-S3R8, 듀얼코어 240MHz, 16MB Flash, 8M
 | 압력 센서 | **MPXV7007DP** (MikroE Diff Press Click) | 양방향 차압 ±7 kPa(±71 cmH₂O), MCP3221 12-bit I²C ADC(0x4D) |
 | 배터리 | **LiPo 400 mAh** | 보드 내장 충전/VBAT 모니터 회로 |
 | 전원 버튼 | **PB61412L** | 외부 tact 스위치 + LED, deep-sleep wake (EXT0) |
-| 햅틱 모터 | **진동 모터** | 목표 압력 도달 시 피드백 |
+| 햅틱 모터 | **코인형 ERM 진동 모터 (DC 3V)** | 목표 압력 도달/호흡 cue 시 피드백 |
 | 햅틱 드라이버 | **DRV2605L** | SparkFun Qwiic Haptic Motor Driver, I²C(0x5A), EN=GPIO10, 모터=OUT+/OUT− |
 
 > I²C 버스(SDA=GPIO43, SCL=GPIO44)에 MCP3221 ADC(0x4D)와 DRV2605L 햅틱(0x5A)이 함께 연결됨.

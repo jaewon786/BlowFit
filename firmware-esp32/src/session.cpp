@@ -2,6 +2,7 @@
 
 #include "session.h"
 #include "config.h"
+#include "haptic.h"
 
 #include <Arduino.h>
 #include <cmath>
@@ -31,6 +32,7 @@ namespace {
 
   State    g_state       = State::Boot;
   Turn     g_turn        = Turn::None;
+  Turn     g_prev_turn   = Turn::None;  // 햅틱 cue 용 — phase 전환 감지
   uint32_t g_state_start = 0;
   uint32_t g_session_start = 0;
   uint8_t  g_set_index   = 0;   // 1-base, 0 = none
@@ -77,6 +79,7 @@ namespace {
     g_train_ms  = 0;
     g_session_start = 0;
     g_set_index = 0;
+    g_prev_turn = Turn::None;
   }
 
   void finalizeStats(uint32_t now) {
@@ -149,6 +152,7 @@ void startSession() {
   g_session_start = now;
   g_set_index = 1;
   transition(State::Prep, now);
+  haptic::play(haptic::SESSION_START);  // 시작 진동 피드백
   Serial.println("[session] session started");
 }
 
@@ -215,10 +219,24 @@ void tick(uint32_t now_ms, float p) {
       // turn 갱신.
       g_turn = turnAt(elapsed);
 
+      // 호흡 phase 전환 시 햅틱 cue — 눈 안 보고도 호기/흡기 시점 인지.
+      // 첫 진입(None→Exhale)은 세션 시작 click 으로 대체하므로 생략.
+      if (g_turn != g_prev_turn) {
+        if (g_prev_turn != Turn::None) {
+          if (g_turn == Turn::Exhale) {
+            haptic::play(haptic::EXHALE_CUE);
+          } else if (g_turn == Turn::Inhale) {
+            haptic::play(haptic::INHALE_CUE);
+          }
+        }
+        g_prev_turn = g_turn;
+      }
+
       // Train 끝 → Rest 또는 Summary
       if (elapsed >= g_train_duration_ms) {
         if (g_set_index >= DEMO_TOTAL_SETS) {
           finalizeStats(now_ms);
+          haptic::play(haptic::SESSION_DONE);  // 완료 진동
           transition(State::Summary, now_ms);
         } else {
           transition(State::Rest, now_ms);
