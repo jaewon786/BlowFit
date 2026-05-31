@@ -5,6 +5,7 @@
 // 카드.
 
 #include "display/screens/screen_rest.h"
+#include "display/screens/status_bar.h"
 #include "display/theme.h"
 #include "config.h"
 
@@ -26,33 +27,16 @@ namespace {
 void rest_show() {
   lv_obj_t* scr = lv_screen_active();
   lv_obj_clean(scr);
-  lv_obj_set_style_bg_color(scr, theme::color(theme::DEV_BG), 0);
+  // 휴식 화면 — 앰버 세로 gradient (#FFFBF5 → #FFF1DE).
+  lv_obj_set_style_bg_color(scr, theme::color(0xFFFBF5), 0);
+  lv_obj_set_style_bg_grad_color(scr, theme::color(0xFFF1DE), 0);
+  lv_obj_set_style_bg_grad_dir(scr, LV_GRAD_DIR_VER, 0);
   lv_obj_set_style_pad_all(scr, 0, 0);
 
-  // ---------- 1. 상단 status bar ----------
-  lv_obj_t* bar = lv_obj_create(scr);
-  lv_obj_set_size(bar, display::SCREEN_W, 20);
-  lv_obj_align(bar, LV_ALIGN_TOP_MID, 0, 0);
-  lv_obj_set_style_bg_opa(bar, LV_OPA_TRANSP, 0);
-  lv_obj_set_style_border_width(bar, 0, 0);
-  lv_obj_set_style_pad_all(bar, 4, 0);
-  lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
+  // ---------- 1. 상단 status bar (BT 아이콘 + 배터리) ----------
+  make_status_bar(scr, /*connected=*/true, /*battery=*/74);
 
-  lv_obj_t* bt_dot = lv_obj_create(bar);
-  lv_obj_set_size(bt_dot, 8, 8);
-  lv_obj_align(bt_dot, LV_ALIGN_LEFT_MID, 0, 0);
-  lv_obj_set_style_bg_color(bt_dot, theme::color(theme::DEV_PRIMARY_LT), 0);
-  lv_obj_set_style_border_width(bt_dot, 0, 0);
-  lv_obj_set_style_radius(bt_dot, LV_RADIUS_CIRCLE, 0);
-  lv_obj_clear_flag(bt_dot, LV_OBJ_FLAG_SCROLLABLE);
-
-  lv_obj_t* batt = lv_label_create(bar);
-  lv_label_set_text(batt, "74%");
-  lv_obj_set_style_text_font(batt, theme::font_14(), 0);
-  lv_obj_set_style_text_color(batt, theme::color(theme::DEV_TEXT_SUB), 0);
-  lv_obj_align(batt, LV_ALIGN_RIGHT_MID, 0, 0);
-
-  // ---------- 2. REST chip ----------
+  // ---------- 2. 휴식 chip ----------
   lv_obj_t* chip = lv_obj_create(scr);
   lv_obj_set_size(chip, LV_SIZE_CONTENT, 20);
   lv_obj_align(chip, LV_ALIGN_TOP_MID, 0, 32);
@@ -65,7 +49,7 @@ void rest_show() {
   lv_obj_clear_flag(chip, LV_OBJ_FLAG_SCROLLABLE);
 
   lv_obj_t* lbl_chip = lv_label_create(chip);
-  lv_label_set_text(lbl_chip, "REST");
+  lv_label_set_text(lbl_chip, "휴식");
   lv_obj_set_style_text_font(lbl_chip, theme::font_14(), 0);
   lv_obj_set_style_text_color(lbl_chip, theme::color(theme::DEV_AMBER), 0);
   lv_obj_center(lbl_chip);
@@ -111,29 +95,8 @@ void rest_show() {
   lv_obj_set_style_text_color(hint, theme::color(theme::DEV_TEXT_SUB), 0);
   lv_obj_align(hint, LV_ALIGN_TOP_MID, 0, 216);
 
-  // ---------- 5. 하단 — 다음 세트 카드 ----------
-  lv_obj_t* card = lv_obj_create(scr);
-  lv_obj_set_size(card, 142, 38);
-  lv_obj_align(card, LV_ALIGN_BOTTOM_MID, 0, -14);
-  lv_obj_set_style_bg_color(card, theme::color(theme::DEV_SURFACE), 0);
-  lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
-  lv_obj_set_style_border_width(card, 0, 0);
-  lv_obj_set_style_radius(card, 10, 0);
-  lv_obj_set_style_pad_hor(card, 12, 0);
-  lv_obj_set_style_pad_ver(card, 6, 0);
-  lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
-
-  lv_obj_t* lbl_cap = lv_label_create(card);
-  lv_label_set_text(lbl_cap, "다음 세트");
-  lv_obj_set_style_text_font(lbl_cap, theme::font_14(), 0);
-  lv_obj_set_style_text_color(lbl_cap, theme::color(theme::DEV_TEXT_MUTE), 0);
-  lv_obj_align(lbl_cap, LV_ALIGN_LEFT_MID, 0, 0);
-
-  g_lbl_next = lv_label_create(card);
-  lv_label_set_text(g_lbl_next, "2 / 3");
-  lv_obj_set_style_text_font(g_lbl_next, theme::font_20(), 0);
-  lv_obj_set_style_text_color(g_lbl_next, theme::color(theme::DEV_PRIMARY_LT), 0);
-  lv_obj_align(g_lbl_next, LV_ALIGN_RIGHT_MID, 0, 0);
+  // 디자인(device-display.jsx ScrRest)은 단일 세트라 "다음 세트" 카드 없음.
+  // rest_set_next_set() 은 g_lbl_next == null 이라 안전하게 no-op.
 }
 
 void rest_set_remaining(uint16_t remaining_sec) {

@@ -77,7 +77,8 @@ static void switchScreenFor(session::State s) {
     case session::State::Standby:
       screens::standby_show();
       screens::standby_set_connected(false);
-      screens::standby_set_battery(-1);
+      // 실제 VBAT ADC 측정은 미구현 (M9/M11) — 타 화면과 동일하게 placeholder 76%.
+      screens::standby_set_battery(76);
       break;
     case session::State::Prep:
     case session::State::Train: {
@@ -87,11 +88,14 @@ static void switchScreenFor(session::State s) {
       const auto turn = session::currentTurn();
       screens::TrainingPhase ui_phase;
       switch (turn) {
-        case session::Turn::Exhale:     ui_phase = screens::TrainingPhase::Exhale; break;
         case session::Turn::Inhale:     ui_phase = screens::TrainingPhase::Inhale; break;
         case session::Turn::ExhaleRest:
-        case session::Turn::InhaleRest:
-        default:                        ui_phase = screens::TrainingPhase::Rest; break;
+        case session::Turn::InhaleRest: ui_phase = screens::TrainingPhase::Rest; break;
+        // None(=Prep 등) / Exhale / default → 호기(흰 배경). Prep 이 휴식(검정)
+        // 으로 평가돼 검은 화면이 깜빡이던 문제 방지.
+        case session::Turn::Exhale:
+        case session::Turn::None:
+        default:                        ui_phase = screens::TrainingPhase::Exhale; break;
       }
       screens::training_set_phase(ui_phase, session::remainingSec());
       screens::training_set_progress(session::progressPercent(),
@@ -322,11 +326,14 @@ void loop() {
       const auto turn = session::currentTurn();
       screens::TrainingPhase ui_phase;
       switch (turn) {
-        case session::Turn::Exhale:     ui_phase = screens::TrainingPhase::Exhale; break;
         case session::Turn::Inhale:     ui_phase = screens::TrainingPhase::Inhale; break;
         case session::Turn::ExhaleRest:
-        case session::Turn::InhaleRest:
-        default:                        ui_phase = screens::TrainingPhase::Rest; break;
+        case session::Turn::InhaleRest: ui_phase = screens::TrainingPhase::Rest; break;
+        // None(=Prep 등) / Exhale / default → 호기(흰 배경). Prep 이 휴식(검정)
+        // 으로 평가돼 검은 화면이 깜빡이던 문제 방지.
+        case session::Turn::Exhale:
+        case session::Turn::None:
+        default:                        ui_phase = screens::TrainingPhase::Exhale; break;
       }
       screens::training_set_phase(ui_phase, session::remainingSec());
       screens::training_set_progress(session::progressPercent(),

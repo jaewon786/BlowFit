@@ -62,22 +62,25 @@ namespace theme {
   constexpr uint32_t INK_3      = 0x6B7280;
 
   // ==========================================================================
-  // 기기 화면 다크 테마 (BlowFit.html design — LVGL palette)
+  // 기기 화면 라이트 테마 (BlowFit.html / device-display.jsx — LVGL palette)
+  //   채팅 최종 결정(chat1.md): 다크 → 연한 하늘색 라이트 테마로 전환.
+  //   rgba 반투명 텍스트색은 흰 배경에 합성한 solid hex 로 근사.
   // ==========================================================================
-  constexpr uint32_t DEV_BG        = 0x16171B;   // screen base
-  constexpr uint32_t DEV_SURFACE   = 0x22242A;   // card
-  constexpr uint32_t DEV_SURFACE2  = 0x2C2F38;   // raised
-  constexpr uint32_t DEV_TEXT      = 0xFFFFFF;
-  constexpr uint32_t DEV_TEXT_SUB  = 0x9E9FA3;   // ≈ rgba(255,255,255,.62)
-  constexpr uint32_t DEV_TEXT_MUTE = 0x616267;   // ≈ rgba(255,255,255,.38)
-  constexpr uint32_t DEV_DIVIDER   = 0x26282E;   // ≈ rgba(255,255,255,.08)
+  constexpr uint32_t DEV_BG        = 0xDCEEFF;   // screen base (연한 하늘색)
+  constexpr uint32_t DEV_SURFACE   = 0xFFFFFF;   // card / container
+  constexpr uint32_t DEV_SURFACE2  = 0xEAF4FF;   // raised
+  constexpr uint32_t DEV_TEXT      = 0x0A2540;   // 진한 네이비
+  constexpr uint32_t DEV_TEXT_SUB  = 0x5D6F81;   // ≈ rgba(10,37,64,.66) on white
+  constexpr uint32_t DEV_TEXT_MUTE = 0x98A3AF;   // ≈ rgba(10,37,64,.42) on white
+  constexpr uint32_t DEV_DIVIDER   = 0xE6E9EC;   // ≈ rgba(10,37,64,.10) on white
   constexpr uint32_t DEV_PRIMARY   = 0x0066FF;   // 호기 accent
-  constexpr uint32_t DEV_PRIMARY_LT= 0x5C8CFF;
-  constexpr uint32_t DEV_CYAN      = 0x0099CC;   // 흡기 accent (디자인 design)
-  constexpr uint32_t DEV_GREEN     = 0x00BF40;   // zone-hit / completion
-  constexpr uint32_t DEV_AMBER     = 0xFFA800;   // rest / warning
+  constexpr uint32_t DEV_PRIMARY_LT= 0x2F90FF;
+  constexpr uint32_t DEV_CYAN      = 0x0099CC;   // 흡기 accent
+  constexpr uint32_t DEV_GREEN     = 0x00A838;   // zone-hit / completion
+  constexpr uint32_t DEV_GREEN_DARK= 0x006B25;   // 흡기 in-zone (진한 초록)
+  constexpr uint32_t DEV_AMBER     = 0xE08600;   // rest / warning
   constexpr uint32_t DEV_RED       = 0xFF3B30;
-  constexpr uint32_t DEV_YELLOW    = 0xFFD600;
+  constexpr uint32_t DEV_YELLOW    = 0xF5B800;
 
   // ==========================================================================
   // 컬러 helper — uint32_t → lv_color_t

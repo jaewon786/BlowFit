@@ -5,6 +5,7 @@
 // "목표 달성/±20+" chip, 하단 카드 (남은 시간 + set dots + 진행 bar).
 
 #include "display/screens/screen_training.h"
+#include "display/screens/status_bar.h"
 #include "display/theme.h"
 #include "config.h"
 
@@ -17,23 +18,25 @@ namespace screens {
 namespace {
 
   // 화면 위젯 핸들.
-  lv_obj_t* g_chip_phase     = nullptr;
+  lv_obj_t* g_scr            = nullptr;     // 화면 root (in-zone 배경 전환용)
+  lv_obj_t* g_chip_phase     = nullptr;     // phase 행 컨테이너 (화살표+텍스트)
+  lv_obj_t* g_arrow          = nullptr;     // 방향 화살표 (호기↑/흡기↓)
   lv_obj_t* g_lbl_chip_text  = nullptr;
-  lv_obj_t* g_lbl_set        = nullptr;     // "SET 1/3"
+  lv_obj_t* g_lbl_set        = nullptr;     // (미사용 — 단일 세트) setter null-safe
 
   // 세로 bar.
   lv_obj_t* g_bar_box        = nullptr;
   lv_obj_t* g_bar_active     = nullptr;     // 동적으로 위치/크기 조정
   lv_obj_t* g_lbl_value      = nullptr;
   lv_obj_t* g_lbl_unit       = nullptr;
-  lv_obj_t* g_chip_target    = nullptr;
-  lv_obj_t* g_lbl_target     = nullptr;
+  lv_obj_t* g_lbl_target     = nullptr;     // (미사용 — target chip 제거) setter null-safe
 
-  // 하단 카드.
-  lv_obj_t* g_card_bottom    = nullptr;
+  // 하단.
   lv_obj_t* g_lbl_remaining  = nullptr;
-  lv_obj_t* g_set_dots[3]    = {nullptr, nullptr, nullptr};
-  lv_obj_t* g_progress_bar   = nullptr;
+  lv_obj_t* g_lbl_rem_cap    = nullptr;   // "남은 시간" 캡션 (rest 시 흰색 전환)
+  lv_obj_t* g_scale[3]       = {nullptr, nullptr, nullptr};  // 눈금 30/0/30 (rest 시 흰색)
+  lv_obj_t* g_set_dots[3]    = {nullptr, nullptr, nullptr};  // (미사용) setter null-safe
+  lv_obj_t* g_progress_bar   = nullptr;                       // (미사용) setter null-safe
 
   // 상태.
   TrainingPhase g_phase  = TrainingPhase::Exhale;
@@ -43,10 +46,21 @@ namespace {
   uint8_t g_total_sets   = 3;
   uint16_t g_remaining   = 0;
   float g_pressure       = 0.0f;
+  uint32_t g_prev_bg     = 0xFFFFFFFF;   // 마지막 적용 배경색 (변할 때만 갱신; 무효값 초기화)
+  int g_prev_rest        = -1;           // rest 전환 추적 (보조 텍스트 색 갱신용)
+
+  // 배경 색 — 기본 = 흰색, 호기 목표 = 파랑, 흡기 목표 = 초록, 휴식 = 검정.
+  constexpr uint32_t BG_WHITE     = 0xFFFFFF;
+  constexpr uint32_t BG_EXHALE_IN = 0x0066FF;
+  constexpr uint32_t BG_INHALE_IN = 0x00A838;
+  constexpr uint32_t BG_BLACK     = 0x000000;
 
   // bar 기하 (설계 ScrTraining 의 비례를 170px 폭에 맞춰 조정).
-  constexpr int BAR_TOTAL_H  = 168;   // 세로 bar 전체 높이
-  constexpr int BAR_HALF_H   = 82;    // 위/아래 half (zero line 중심)
+  constexpr int BAR_TOTAL_H  = 168;             // 세로 bar 전체 높이
+  constexpr int BAR_CENTER   = BAR_TOTAL_H / 2; // zero line (=84)
+  // half < CENTER 라 위/아래에 (84-76=8px) 흰색 여백 → 둥근 모서리(radius 6)에
+  // 안 잘리고 호기/흡기 상·하단에 흰 배경이 남음.
+  constexpr int BAR_HALF_H   = 76;    // 위/아래 half (full scale ±30 매핑)
   constexpr int BAR_TOP_Y    = 32;    // status bar (20) + chip row (12) 아래
   constexpr int BAR_W        = 26;    // 세로 bar 폭
   constexpr int BAR_LEFT_X   = 14;    // 좌측 margin
@@ -55,7 +69,7 @@ namespace {
   uint32_t phase_accent(TrainingPhase p) {
     switch (p) {
       case TrainingPhase::Exhale: return theme::DEV_PRIMARY;
-      case TrainingPhase::Inhale: return theme::DEV_CYAN;
+      case TrainingPhase::Inhale: return theme::DEV_GREEN;
       case TrainingPhase::Rest:   return theme::DEV_TEXT_MUTE;
     }
     return theme::DEV_TEXT_MUTE;
@@ -70,14 +84,26 @@ namespace {
     return "";
   }
 
-  /// chip 컬러 갱신 — 색만 변경, 위치/크기는 고정.
+  /// 화면 배경색 갱신 — 값이 바뀔 때만 적용 (20Hz 매번 set 방지).
+  void apply_bg(uint32_t color) {
+    if (!g_scr || color == g_prev_bg) return;
+    g_prev_bg = color;
+    lv_obj_set_style_bg_color(g_scr, theme::color(color), 0);
+  }
+
+  /// phase 행 갱신 — 화살표 방향/색 + 텍스트/색.
   void update_phase_chip(TrainingPhase p) {
-    if (!g_chip_phase || !g_lbl_chip_text) return;
+    if (!g_lbl_chip_text) return;
     const uint32_t c = phase_accent(p);
     lv_label_set_text(g_lbl_chip_text, phase_label(p));
     lv_obj_set_style_text_color(g_lbl_chip_text, theme::color(c), 0);
-    // chip bg = 어두운 surface (반투명 효과 대체)
-    lv_obj_set_style_bg_color(g_chip_phase, theme::color(theme::DEV_SURFACE), 0);
+    if (g_arrow) {
+      // 화살표 방향 반대 표시: 내쉬기=아래(↓), 들이마시기=위(↑).
+      const char* sym = (p == TrainingPhase::Exhale) ? LV_SYMBOL_DOWN
+                      : (p == TrainingPhase::Inhale) ? LV_SYMBOL_UP : "";
+      lv_label_set_text(g_arrow, sym);
+      lv_obj_set_style_text_color(g_arrow, theme::color(c), 0);
+    }
   }
 
 }  // anonymous namespace
@@ -85,95 +111,85 @@ namespace {
 void training_show() {
   lv_obj_t* scr = lv_screen_active();
   lv_obj_clean(scr);
-  lv_obj_set_style_bg_color(scr, theme::color(theme::DEV_BG), 0);
+  g_scr = scr;
+  g_prev_bg = 0xFFFFFFFF;   // 새 화면 → 배경 상태 재설정.
+  g_prev_rest = -1;
+  g_phase = TrainingPhase::Exhale;   // 첫 프레임이 휴식(검정)으로 평가되지 않게.
+  // 기본 배경 = 흰색 (단색). 목표 도달 시 set_pressure 에서 파랑/초록 전환.
+  lv_obj_set_style_bg_color(scr, theme::color(BG_WHITE), 0);
+  lv_obj_set_style_bg_grad_dir(scr, LV_GRAD_DIR_NONE, 0);
   lv_obj_set_style_pad_all(scr, 0, 0);
 
-  // ---------- 1. 상단 status bar (170 × 20) ----------
-  lv_obj_t* bar = lv_obj_create(scr);
-  lv_obj_set_size(bar, display::SCREEN_W, 20);
-  lv_obj_align(bar, LV_ALIGN_TOP_MID, 0, 0);
-  lv_obj_set_style_bg_opa(bar, LV_OPA_TRANSP, 0);
-  lv_obj_set_style_border_width(bar, 0, 0);
-  lv_obj_set_style_pad_all(bar, 4, 0);
-  lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
+  // ---------- 1. 상단 status bar (BT 아이콘 + 배터리) ----------
+  make_status_bar(scr, /*connected=*/true, /*battery=*/74);
 
-  lv_obj_t* bt_dot = lv_obj_create(bar);
-  lv_obj_set_size(bt_dot, 8, 8);
-  lv_obj_align(bt_dot, LV_ALIGN_LEFT_MID, 0, 0);
-  lv_obj_set_style_bg_color(bt_dot, theme::color(theme::DEV_PRIMARY_LT), 0);
-  lv_obj_set_style_border_width(bt_dot, 0, 0);
-  lv_obj_set_style_radius(bt_dot, LV_RADIUS_CIRCLE, 0);
-  lv_obj_clear_flag(bt_dot, LV_OBJ_FLAG_SCROLLABLE);
-
-  lv_obj_t* batt = lv_label_create(bar);
-  lv_label_set_text(batt, "74%");
-  lv_obj_set_style_text_font(batt, theme::font_14(), 0);
-  lv_obj_set_style_text_color(batt, theme::color(theme::DEV_TEXT_SUB), 0);
-  lv_obj_align(batt, LV_ALIGN_RIGHT_MID, 0, 0);
-
-  // ---------- 2. Phase chip (좌) + SET (우) ----------
+  // ---------- 2. Phase 행 — 화살표 + 텍스트 (중앙) ----------
+  const uint32_t accent = phase_accent(g_phase);
   g_chip_phase = lv_obj_create(scr);
-  lv_obj_set_size(g_chip_phase, LV_SIZE_CONTENT, 18);
-  lv_obj_align(g_chip_phase, LV_ALIGN_TOP_LEFT, 8, 22);
-  lv_obj_set_style_bg_color(g_chip_phase, theme::color(theme::DEV_SURFACE), 0);
-  lv_obj_set_style_bg_opa(g_chip_phase, LV_OPA_COVER, 0);
+  lv_obj_set_size(g_chip_phase, display::SCREEN_W, 24);
+  lv_obj_align(g_chip_phase, LV_ALIGN_TOP_MID, 0, 24);
+  lv_obj_set_style_bg_opa(g_chip_phase, LV_OPA_TRANSP, 0);
   lv_obj_set_style_border_width(g_chip_phase, 0, 0);
-  lv_obj_set_style_radius(g_chip_phase, LV_RADIUS_CIRCLE, 0);
-  lv_obj_set_style_pad_hor(g_chip_phase, 8, 0);
-  lv_obj_set_style_pad_ver(g_chip_phase, 0, 0);
+  lv_obj_set_style_pad_all(g_chip_phase, 0, 0);
+  lv_obj_set_flex_flow(g_chip_phase, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(g_chip_phase, LV_FLEX_ALIGN_CENTER,
+                        LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  lv_obj_set_style_pad_column(g_chip_phase, 5, 0);
   lv_obj_clear_flag(g_chip_phase, LV_OBJ_FLAG_SCROLLABLE);
+
+  g_arrow = lv_label_create(g_chip_phase);
+  // 화살표 방향 반대 표시: 내쉬기=아래(↓), 들이마시기=위(↑).
+  lv_label_set_text(g_arrow,
+      g_phase == TrainingPhase::Exhale ? LV_SYMBOL_DOWN
+    : g_phase == TrainingPhase::Inhale ? LV_SYMBOL_UP : "");
+  // LV_SYMBOL_* 는 PUA 글리프 → Pretendard subset 에 없음. Montserrat 사용.
+  lv_obj_set_style_text_font(g_arrow, &lv_font_montserrat_20, 0);
+  lv_obj_set_style_text_color(g_arrow, theme::color(accent), 0);
 
   g_lbl_chip_text = lv_label_create(g_chip_phase);
   lv_label_set_text(g_lbl_chip_text, phase_label(g_phase));
-  lv_obj_set_style_text_font(g_lbl_chip_text, theme::font_14(), 0);
-  lv_obj_set_style_text_color(g_lbl_chip_text,
-                              theme::color(phase_accent(g_phase)), 0);
-  lv_obj_center(g_lbl_chip_text);
+  lv_obj_set_style_text_font(g_lbl_chip_text, theme::font_20(), 0);
+  lv_obj_set_style_text_color(g_lbl_chip_text, theme::color(accent), 0);
 
-  g_lbl_set = lv_label_create(scr);
-  lv_label_set_text(g_lbl_set, "SET 1/3");
-  lv_obj_set_style_text_font(g_lbl_set, theme::font_14(), 0);
-  lv_obj_set_style_text_color(g_lbl_set, theme::color(theme::DEV_TEXT_SUB), 0);
-  lv_obj_align(g_lbl_set, LV_ALIGN_TOP_RIGHT, -8, 24);
-
-  // ---------- 3. 세로 양방향 bar (좌) ----------
+  // ---------- 3. 세로 양방향 bar (좌) + 눈금 ----------
   g_bar_box = lv_obj_create(scr);
   lv_obj_set_size(g_bar_box, BAR_W, BAR_TOTAL_H);
-  lv_obj_align(g_bar_box, LV_ALIGN_TOP_LEFT, BAR_LEFT_X, BAR_TOP_Y + 12);
+  lv_obj_align(g_bar_box, LV_ALIGN_TOP_LEFT, BAR_LEFT_X, BAR_TOP_Y + 36);
   lv_obj_set_style_bg_color(g_bar_box, theme::color(theme::DEV_SURFACE), 0);
   lv_obj_set_style_bg_opa(g_bar_box, LV_OPA_COVER, 0);
-  lv_obj_set_style_border_width(g_bar_box, 0, 0);
+  lv_obj_set_style_border_color(g_bar_box, theme::color(theme::DEV_DIVIDER), 0);
+  lv_obj_set_style_border_width(g_bar_box, 1, 0);
   lv_obj_set_style_radius(g_bar_box, 6, 0);
   lv_obj_set_style_pad_all(g_bar_box, 0, 0);
   lv_obj_clear_flag(g_bar_box, LV_OBJ_FLAG_SCROLLABLE);
 
-  // 음압 zone marker (위쪽 — green 반투명).
-  lv_obj_t* zone_neg = lv_obj_create(g_bar_box);
+  // zone marker 높이 (target 폭) 와 center 기준 픽셀 오프셋.
   const int zone_h = (int)((g_target_high - g_target_low) /
                             MAX_P_CMH2O * BAR_HALF_H);
-  const int zone_offset_top = BAR_HALF_H -
-        (int)(g_target_high / MAX_P_CMH2O * BAR_HALF_H);
+  const int px_low  = (int)(g_target_low  / MAX_P_CMH2O * BAR_HALF_H);
+  const int px_high = (int)(g_target_high / MAX_P_CMH2O * BAR_HALF_H);
+
+  // 음압 zone marker (위쪽/호기 — green 반투명). center 위로 [low..high].
+  lv_obj_t* zone_neg = lv_obj_create(g_bar_box);
   lv_obj_set_size(zone_neg, BAR_W - 4, zone_h);
-  lv_obj_align(zone_neg, LV_ALIGN_TOP_MID, 0, zone_offset_top);
+  lv_obj_set_pos(zone_neg, 2, BAR_CENTER - px_high);
   lv_obj_set_style_bg_color(zone_neg, theme::color(theme::DEV_GREEN), 0);
   lv_obj_set_style_bg_opa(zone_neg, LV_OPA_20, 0);
   lv_obj_set_style_border_width(zone_neg, 0, 0);
   lv_obj_set_style_radius(zone_neg, 2, 0);
   lv_obj_clear_flag(zone_neg, LV_OBJ_FLAG_SCROLLABLE);
 
-  // 양압 zone marker (아래쪽 — green 반투명).
+  // 양압 zone marker (아래쪽/흡기 — green 반투명). center 아래로 [low..high].
   lv_obj_t* zone_pos = lv_obj_create(g_bar_box);
   lv_obj_set_size(zone_pos, BAR_W - 4, zone_h);
-  const int zone_offset_bot = BAR_HALF_H +
-        (int)(g_target_low / MAX_P_CMH2O * BAR_HALF_H);
-  lv_obj_set_pos(zone_pos, 2, zone_offset_bot);
+  lv_obj_set_pos(zone_pos, 2, BAR_CENTER + px_low);
   lv_obj_set_style_bg_color(zone_pos, theme::color(theme::DEV_GREEN), 0);
   lv_obj_set_style_bg_opa(zone_pos, LV_OPA_20, 0);
   lv_obj_set_style_border_width(zone_pos, 0, 0);
   lv_obj_set_style_radius(zone_pos, 2, 0);
   lv_obj_clear_flag(zone_pos, LV_OBJ_FLAG_SCROLLABLE);
 
-  // Zero line (중앙 흰 가로선).
+  // Zero line (중앙 가로선).
   lv_obj_t* zero = lv_obj_create(g_bar_box);
   lv_obj_set_size(zero, BAR_W, 1);
   lv_obj_align(zero, LV_ALIGN_CENTER, 0, 0);
@@ -187,90 +203,55 @@ void training_show() {
   g_bar_active = lv_obj_create(g_bar_box);
   lv_obj_set_size(g_bar_active, BAR_W - 8, 0);   // 초기 0
   lv_obj_align(g_bar_active, LV_ALIGN_CENTER, 0, 0);
-  lv_obj_set_style_bg_color(g_bar_active, theme::color(phase_accent(g_phase)), 0);
+  lv_obj_set_style_bg_color(g_bar_active, theme::color(accent), 0);
   lv_obj_set_style_bg_opa(g_bar_active, LV_OPA_COVER, 0);
   lv_obj_set_style_border_width(g_bar_active, 0, 0);
   lv_obj_set_style_radius(g_bar_active, 2, 0);
   lv_obj_clear_flag(g_bar_active, LV_OBJ_FLAG_SCROLLABLE);
 
-  // ---------- 4. 압력 값 표시 (우) ----------
+  // 눈금 라벨 30 / 0 / 30 (bar 우측). bar box: x=14, w=26 → 우측 x≈44.
+  // center 기준 마크 위치에 맞춰 정렬 (font_14 높이 ≈16 → -8 로 수직 중앙).
+  const int bar_top_y = BAR_TOP_Y + 36;
+  const struct { const char* t; int y; } scale[] = {
+    {"30", bar_top_y + (BAR_CENTER - BAR_HALF_H) - 8},
+    {"0",  bar_top_y + BAR_CENTER - 8},
+    {"30", bar_top_y + (BAR_CENTER + BAR_HALF_H) - 8},
+  };
+  for (int i = 0; i < 3; ++i) {
+    lv_obj_t* lbl = lv_label_create(scr);
+    lv_label_set_text(lbl, scale[i].t);
+    lv_obj_set_style_text_font(lbl, theme::font_14(), 0);
+    lv_obj_set_style_text_color(lbl, theme::color(theme::DEV_TEXT_MUTE), 0);
+    lv_obj_align(lbl, LV_ALIGN_TOP_LEFT, BAR_LEFT_X + BAR_W + 4, scale[i].y);
+    g_scale[i] = lbl;
+  }
+
+  // ---------- 4. 압력 값 표시 (우, bar 중앙 높이) ----------
   g_lbl_value = lv_label_create(scr);
   lv_label_set_text(g_lbl_value, "0.0");
   lv_obj_set_style_text_font(g_lbl_value, theme::font_28(), 0);
-  lv_obj_set_style_text_color(g_lbl_value, theme::color(phase_accent(g_phase)), 0);
-  lv_obj_align(g_lbl_value, LV_ALIGN_TOP_LEFT, 70, 80);
+  lv_obj_set_style_text_color(g_lbl_value, theme::color(accent), 0);
+  lv_obj_align(g_lbl_value, LV_ALIGN_TOP_LEFT, 78, bar_top_y + 56);
 
   g_lbl_unit = lv_label_create(scr);
   lv_label_set_text(g_lbl_unit, "cmH2O");
   lv_obj_set_style_text_font(g_lbl_unit, theme::font_14(), 0);
   lv_obj_set_style_text_color(g_lbl_unit, theme::color(theme::DEV_TEXT_MUTE), 0);
-  lv_obj_align(g_lbl_unit, LV_ALIGN_TOP_LEFT, 70, 118);
+  lv_obj_align(g_lbl_unit, LV_ALIGN_TOP_LEFT, 80, bar_top_y + 92);
 
-  // 목표 chip
-  g_chip_target = lv_obj_create(scr);
-  lv_obj_set_size(g_chip_target, LV_SIZE_CONTENT, 18);
-  lv_obj_align(g_chip_target, LV_ALIGN_TOP_LEFT, 70, 144);
-  lv_obj_set_style_bg_color(g_chip_target, theme::color(theme::DEV_SURFACE), 0);
-  lv_obj_set_style_bg_opa(g_chip_target, LV_OPA_COVER, 0);
-  lv_obj_set_style_border_width(g_chip_target, 0, 0);
-  lv_obj_set_style_radius(g_chip_target, LV_RADIUS_CIRCLE, 0);
-  lv_obj_set_style_pad_hor(g_chip_target, 8, 0);
-  lv_obj_set_style_pad_ver(g_chip_target, 0, 0);
-  lv_obj_clear_flag(g_chip_target, LV_OBJ_FLAG_SCROLLABLE);
+  // ---------- 5. 하단 — 남은 시간 + 카운트다운 ----------
+  // Phase 4 폰트 재생성으로 남/은 글자 추가됨 → 한글 표기.
+  g_lbl_rem_cap = lv_label_create(scr);
+  lv_label_set_text(g_lbl_rem_cap, "남은 시간");
+  lv_obj_set_style_text_font(g_lbl_rem_cap, theme::font_14(), 0);
+  lv_obj_set_style_text_color(g_lbl_rem_cap, theme::color(theme::DEV_TEXT_MUTE), 0);
+  lv_obj_align(g_lbl_rem_cap, LV_ALIGN_BOTTOM_MID, 0, -48);
 
-  g_lbl_target = lv_label_create(g_chip_target);
-  lv_label_set_text(g_lbl_target, "TARGET 20-30");
-  lv_obj_set_style_text_font(g_lbl_target, theme::font_14(), 0);
-  lv_obj_set_style_text_color(g_lbl_target, theme::color(theme::DEV_TEXT_MUTE), 0);
-  lv_obj_center(g_lbl_target);
-
-  // ---------- 5. 하단 카드 (남은 시간 + set dots + progress) ----------
-  g_card_bottom = lv_obj_create(scr);
-  lv_obj_set_size(g_card_bottom, display::SCREEN_W, 76);
-  lv_obj_align(g_card_bottom, LV_ALIGN_BOTTOM_MID, 0, 0);
-  lv_obj_set_style_bg_color(g_card_bottom, theme::color(theme::DEV_SURFACE), 0);
-  lv_obj_set_style_bg_opa(g_card_bottom, LV_OPA_COVER, 0);
-  lv_obj_set_style_border_width(g_card_bottom, 0, 0);
-  lv_obj_set_style_radius(g_card_bottom, 0, 0);
-  lv_obj_set_style_radius(g_card_bottom, 12, LV_PART_MAIN);  // 상단만 둥글게 (전체)
-  lv_obj_set_style_pad_all(g_card_bottom, 12, 0);
-  lv_obj_clear_flag(g_card_bottom, LV_OBJ_FLAG_SCROLLABLE);
-
-  // "TIME LEFT" 라벨 (한글 "남은 시간" — "남/은" 폰트 미포함이라 영문화)
-  lv_obj_t* lbl_rem_cap = lv_label_create(g_card_bottom);
-  lv_label_set_text(lbl_rem_cap, "TIME LEFT");
-  lv_obj_set_style_text_font(lbl_rem_cap, theme::font_14(), 0);
-  lv_obj_set_style_text_color(lbl_rem_cap, theme::color(theme::DEV_TEXT_MUTE), 0);
-  lv_obj_align(lbl_rem_cap, LV_ALIGN_TOP_LEFT, 0, 0);
-
-  // 큰 시간 (0:30 형식)
-  g_lbl_remaining = lv_label_create(g_card_bottom);
+  g_lbl_remaining = lv_label_create(scr);
   lv_label_set_text(g_lbl_remaining, "0:00");
   lv_obj_set_style_text_font(g_lbl_remaining, theme::font_28(), 0);
   lv_obj_set_style_text_color(g_lbl_remaining, theme::color(theme::DEV_TEXT), 0);
-  lv_obj_align(g_lbl_remaining, LV_ALIGN_TOP_LEFT, 0, 14);
-
-  // Set dots (우상)
-  for (int n = 0; n < 3; ++n) {
-    g_set_dots[n] = lv_obj_create(g_card_bottom);
-    lv_obj_set_size(g_set_dots[n], 8, 8);
-    lv_obj_align(g_set_dots[n], LV_ALIGN_TOP_RIGHT, -(2 - n) * 14, 4);
-    lv_obj_set_style_bg_color(g_set_dots[n], theme::color(theme::DEV_DIVIDER), 0);
-    lv_obj_set_style_border_width(g_set_dots[n], 0, 0);
-    lv_obj_set_style_radius(g_set_dots[n], LV_RADIUS_CIRCLE, 0);
-    lv_obj_clear_flag(g_set_dots[n], LV_OBJ_FLAG_SCROLLABLE);
-  }
-
-  // 진행 bar (카드 하단)
-  g_progress_bar = lv_bar_create(g_card_bottom);
-  lv_obj_set_size(g_progress_bar, display::SCREEN_W - 24, 4);
-  lv_obj_align(g_progress_bar, LV_ALIGN_BOTTOM_MID, 0, 0);
-  lv_bar_set_range(g_progress_bar, 0, 100);
-  lv_bar_set_value(g_progress_bar, 0, LV_ANIM_OFF);
-  lv_obj_set_style_bg_color(g_progress_bar, theme::color(theme::DEV_DIVIDER), LV_PART_MAIN);
-  lv_obj_set_style_bg_color(g_progress_bar, theme::color(phase_accent(g_phase)), LV_PART_INDICATOR);
-  lv_obj_set_style_radius(g_progress_bar, 2, LV_PART_MAIN);
-  lv_obj_set_style_radius(g_progress_bar, 2, LV_PART_INDICATOR);
+  lv_obj_align(g_lbl_remaining, LV_ALIGN_BOTTOM_MID, 0, -12);
 }
 
 void training_set_pressure(float cmH2O) {
@@ -278,47 +259,71 @@ void training_set_pressure(float cmH2O) {
   g_pressure = cmH2O;
 
   // 표시 방향은 **현재 phase** 가 결정 — 압력 부호 무시.
-  //   Exhale phase  → bar 위쪽 (zero line 위로 자람)
-  //   Inhale phase  → bar 아래쪽 (zero line 아래로 자람)
-  //   Rest          → bar 안 보임 (높이 0)
-  // 이로써 디바이스 측 호기/흡기 방향이 명확히 분리됨.
+  //   Exhale → bar 위쪽 / Inhale → bar 아래쪽 / Rest → bar 숨김.
   float v = std::fabs(cmH2O);
   if (v > MAX_P_CMH2O) v = MAX_P_CMH2O;
   const int bar_h = (int)(v / MAX_P_CMH2O * BAR_HALF_H);
 
-  int yoff;
-  if (g_phase == TrainingPhase::Exhale) {
-    yoff = -bar_h / 2; // 위쪽
-  } else if (g_phase == TrainingPhase::Inhale) {
-    yoff = bar_h / 2; // 아래쪽
-  } else {
-    // Rest — bar 안 보이게
-    lv_obj_set_size(g_bar_active, BAR_W - 8, 0);
-    return;
-  }
-  lv_obj_set_size(g_bar_active, BAR_W - 8, bar_h);
-  lv_obj_align(g_bar_active, LV_ALIGN_CENTER, 0, yoff);
-
-  // 컬러 — zone 안 = green, 밖 = phase 색.
-  const bool in_zone =
-      (cmH2O >= g_target_low  && cmH2O <= g_target_high) ||
-      (cmH2O <= -g_target_low && cmH2O >= -g_target_high);
-  const uint32_t bar_color = in_zone ? theme::DEV_GREEN : phase_accent(g_phase);
-  lv_obj_set_style_bg_color(g_bar_active, theme::color(bar_color), 0);
-
-  // 값 라벨 (절댓값, 1자리).
+  // 값 라벨 텍스트 (절댓값, 1자리) — 색은 아래에서 상태별로.
   char buf[12];
   std::snprintf(buf, sizeof(buf), "%.1f", std::fabs(cmH2O));
   lv_label_set_text(g_lbl_value, buf);
-  lv_obj_set_style_text_color(g_lbl_value, theme::color(bar_color), 0);
 
-  // target chip 텍스트 + 색 갱신. ("목"/"달" 폰트 미포함 → 영문)
-  if (g_lbl_target) {
-    lv_label_set_text(g_lbl_target, in_zone ? "ON TARGET" : "TARGET 20+");
-    lv_obj_set_style_text_color(g_lbl_target,
-                                theme::color(in_zone ? theme::DEV_GREEN
-                                                     : theme::DEV_TEXT_MUTE), 0);
+  // 보조 텍스트(눈금/캡션/시간) 색은 rest 진입·이탈 시에만 갱신.
+  //   rest → 흰색 (검은 배경), 그 외 → 평소 회색/네이비.
+  const bool is_rest = (g_phase == TrainingPhase::Rest);
+  const int rest_now = is_rest ? 1 : 0;
+  if (rest_now != g_prev_rest) {
+    g_prev_rest = rest_now;
+    const uint32_t cap_c  = is_rest ? 0xFFFFFF : theme::DEV_TEXT_MUTE;
+    const uint32_t time_c = is_rest ? 0xFFFFFF : theme::DEV_TEXT;
+    if (g_lbl_rem_cap)
+      lv_obj_set_style_text_color(g_lbl_rem_cap, theme::color(cap_c), 0);
+    if (g_lbl_remaining)
+      lv_obj_set_style_text_color(g_lbl_remaining, theme::color(time_c), 0);
+    for (int i = 0; i < 3; ++i)
+      if (g_scale[i]) lv_obj_set_style_text_color(g_scale[i], theme::color(cap_c), 0);
   }
+
+  // ---- 휴식: bar 숨김, 배경 검정, 모든 글씨 흰색 ----
+  if (is_rest) {
+    lv_obj_set_size(g_bar_active, BAR_W - 8, 0);
+    apply_bg(BG_BLACK);
+    const lv_color_t w = theme::color(0xFFFFFF);
+    lv_obj_set_style_text_color(g_lbl_value, w, 0);
+    if (g_lbl_unit)      lv_obj_set_style_text_color(g_lbl_unit, w, 0);
+    if (g_arrow)         lv_obj_set_style_text_color(g_arrow, w, 0);
+    if (g_lbl_chip_text) lv_obj_set_style_text_color(g_lbl_chip_text, w, 0);
+    return;
+  }
+
+  // ---- 호기/흡기: bar 채움 (active bar 는 항상 phase 색) ----
+  const int yoff = (g_phase == TrainingPhase::Exhale) ? -bar_h / 2 : bar_h / 2;
+  lv_obj_set_size(g_bar_active, BAR_W - 8, bar_h);
+  lv_obj_align(g_bar_active, LV_ALIGN_CENTER, 0, yoff);
+  lv_obj_set_style_bg_color(g_bar_active, theme::color(phase_accent(g_phase)), 0);
+
+  // zone 판정.
+  const bool in_zone =
+      (cmH2O >= g_target_low  && cmH2O <= g_target_high) ||
+      (cmH2O <= -g_target_low && cmH2O >= -g_target_high);
+
+  // 배경 — 목표 도달 시 호기=파랑 / 흡기=초록, 그 외 흰색.
+  uint32_t bg = BG_WHITE;
+  if (in_zone)
+    bg = (g_phase == TrainingPhase::Exhale) ? BG_EXHALE_IN : BG_INHALE_IN;
+  apply_bg(bg);
+
+  // 전경(값/단위/화살표/phase 텍스트) — 컬러 배경에선 흰색, 흰 배경에선 phase 색.
+  const uint32_t fg = in_zone ? 0xFFFFFF : phase_accent(g_phase);
+  lv_obj_set_style_text_color(g_lbl_value, theme::color(fg), 0);
+  if (g_lbl_unit)
+    lv_obj_set_style_text_color(g_lbl_unit,
+        theme::color(in_zone ? 0xFFFFFF : theme::DEV_TEXT_MUTE), 0);
+  if (g_arrow)
+    lv_obj_set_style_text_color(g_arrow, theme::color(fg), 0);
+  if (g_lbl_chip_text)
+    lv_obj_set_style_text_color(g_lbl_chip_text, theme::color(fg), 0);
 }
 
 void training_set_phase(TrainingPhase phase, uint16_t remaining_sec) {
