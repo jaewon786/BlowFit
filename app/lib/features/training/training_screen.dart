@@ -21,6 +21,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 
 import '../../core/ble/ble_providers.dart';
 import '../../core/storage/storage_providers.dart';
+import '../../core/storage/train_duration_store.dart';
 import '../../core/theme/blowfit_theme.dart';
 
 const double _kFrameW = 402;
@@ -88,7 +89,6 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen>
   double _peakInhale = 0; // 최소 음압 (흡기, 음수)
   // 이번 세션 (= 훈련 화면 진입 후) 정보 — 상단 카드에 표시.
   double _sessionElapsed = 0; // 누적 경과 초
-  int _breathCount = 0; // 완료한 호흡(호기+흡기 1 cycle) 수
   Duration _lastTick = Duration.zero;
 
   @override
@@ -142,7 +142,6 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen>
         if (_phase == _Phase.inhaleRest) {
           _exhaleArc = 0;
           _inhaleArc = 0;
-          _breathCount += 1;
         }
       }
     });
@@ -198,7 +197,6 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen>
             peakExhale: _peakExhale,
             peakInhale: _peakInhale,
             sessionElapsed: _sessionElapsed,
-            breathCount: _breathCount,
           ),
         ],
       ),
@@ -315,7 +313,6 @@ class _TrainingContent extends ConsumerWidget {
     required this.peakExhale,
     required this.peakInhale,
     required this.sessionElapsed,
-    required this.breathCount,
   });
   final _Frame f;
   final _Phase phase;
@@ -325,7 +322,6 @@ class _TrainingContent extends ConsumerWidget {
   final double peakExhale; // 이번 호기 최대 압력 (양수)
   final double peakInhale; // 이번 흡기 최소 압력 (음수)
   final double sessionElapsed; // 이번 세션 경과 초
-  final int breathCount; // 완료한 호흡 수
 
   static const _ink = Color(0xFF101010);
   static const _restColor = Color(0xFF9E9E9E); // 휴식 — 중립 회색
@@ -372,9 +368,13 @@ class _TrainingContent extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // 상단 — 이번 세션 정보 (경과 시간 / 호흡 횟수 / 목표 압력대).
+    // 상단 — 이번 세션 정보 (경과 시간 / 훈련 시간 / 목표 압력대).
     final zone = ref.watch(targetSettingsStoreProvider).valueOrNull?.load();
     final targetText = zone != null ? '${zone.low}~${zone.high}' : '20~30';
+    // 사용자가 설정에서 선택한 훈련 시간(분, 기본 5). 기기 세션 길이와 동일.
+    final trainMinutes =
+        ref.watch(trainDurationStoreProvider).valueOrNull?.loadMinutes() ??
+            TrainDurationStore.defaultMinutes;
     return Stack(
       children: [
         // ─── 브랜드 로고 (81×22 at 17,56) — 홈·추이와 동일 BRELOW wordmark ──
@@ -431,11 +431,11 @@ class _TrainingContent extends ConsumerWidget {
           ),
         ),
 
-        // ─── 상단 — 이번 세션 정보 (경과 시간 / 호흡 / 목표 압력) ────
+        // ─── 상단 — 이번 세션 정보 (경과 시간 / 훈련 시간 / 목표 압력) ────
         // 누적 통계(주/달/누적)는 홈·추이 영역 → 훈련 중엔 세션 진행 정보 표시.
         // divider(137,261) 기준 3컬럼 중앙 정렬 (자릿수 무관 가운데).
         _sessionCol(20, 137, _fmtElapsed(sessionElapsed), '경과 시간'),
-        _sessionCol(137, 261, '$breathCount회', '호흡'),
+        _sessionCol(137, 261, '$trainMinutes분', '훈련 시간'),
         _sessionCol(261, 382, targetText, '목표 압력'),
         f.at(
           x: 137,
