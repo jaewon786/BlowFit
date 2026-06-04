@@ -1025,17 +1025,18 @@ class _ChartLinePainter extends CustomPainter {
     final exhale = <Offset>[];
     final inhale = <Offset>[];
     for (final b in buckets) {
-      if (b.isEmpty || b.avgExhale == null) continue;
+      if (b.isEmpty) continue;
       final cx = (_chartLeft + (b.xPos - 0.5) * spacing) * s;
-      final eY = (_zeroY - b.avgExhale! * _pxPerCmH2O) * s;
-      // 흡기선 — v4.0+ 펌웨어가 보낸 실제 흡기 평균(magnitude) 사용. 레거시/
-      // 구버전 세션(avgInhale=0)은 데이터가 없으므로 호기 평균을 음수로 미러링.
-      final inhaleMag = (b.avgInhale != null && b.avgInhale! > 0)
-          ? b.avgInhale!
-          : b.avgExhale!;
-      final iY = (_zeroY + inhaleMag * _pxPerCmH2O) * s;
-      exhale.add(Offset(cx, eY));
-      inhale.add(Offset(cx, iY));
+      // 호기선 — 실제 평균 양압.
+      if (b.avgExhale != null && b.avgExhale! > 0) {
+        exhale.add(Offset(cx, (_zeroY - b.avgExhale! * _pxPerCmH2O) * s));
+      }
+      // 흡기선 — 실제 측정된 흡기 평균(음압 magnitude) 만 사용.
+      // (이전: 흡기값이 0이면 호기값을 음수로 미러링 → 실데이터 미반영. 제거함.
+      //  실제 흡기 측정이 없는(구버전/0) 버킷은 점을 그리지 않음.)
+      if (b.avgInhale != null && b.avgInhale! > 0) {
+        inhale.add(Offset(cx, (_zeroY + b.avgInhale! * _pxPerCmH2O) * s));
+      }
     }
     _drawSeries(canvas, exhale, DotColors.primary, s);
     _drawSeries(canvas, inhale, DotColors.inhale, s);
