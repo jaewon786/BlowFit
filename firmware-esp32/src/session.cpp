@@ -6,6 +6,9 @@
 
 #include <Arduino.h>
 #include <cmath>
+#if HAS_FLASH
+#include <Preferences.h>
+#endif
 
 namespace session {
 
@@ -35,6 +38,7 @@ namespace {
   Turn     g_prev_turn   = Turn::None;  // 햅틱 cue 용 — phase 전환 감지
   uint32_t g_state_start = 0;
   uint32_t g_session_start = 0;
+  uint32_t g_session_id  = 0;   // 세션 고유 id (NVS 영속, startSession 마다 +1)
   uint8_t  g_set_index   = 0;   // 1-base, 0 = none
   float    g_target_low  = TARGET_LOW_DEFAULT;
   float    g_target_high = TARGET_HIGH_DEFAULT;
@@ -140,6 +144,14 @@ void begin() {
   g_state = State::Boot;
   g_turn  = Turn::None;
   resetStats();
+#if HAS_FLASH
+  // 마지막 세션 id 복원 — 재부팅에도 id 가 단조 증가하도록.
+  Preferences prefs;
+  if (prefs.begin("blowfit", /*readOnly=*/true)) {
+    g_session_id = prefs.getUInt("sess_id", 0);
+    prefs.end();
+  }
+#endif
 }
 
 void startSession() {
@@ -149,11 +161,21 @@ void startSession() {
   }
   const uint32_t now = millis();
   resetStats();
+  // 세션마다 고유 id 부여 (1-base, 0 은 "없음") + NVS 영속.
+  g_session_id += 1;
+#if HAS_FLASH
+  Preferences prefs;
+  if (prefs.begin("blowfit", /*readOnly=*/false)) {
+    prefs.putUInt("sess_id", g_session_id);
+    prefs.end();
+  }
+#endif
   g_session_start = now;
   g_set_index = 1;
   transition(State::Prep, now);
   haptic::play(haptic::SESSION_START);  // 시작 진동 피드백
-  Serial.println("[session] session started");
+  Serial.printf("[session] session started (id=%lu)\n",
+                (unsigned long)g_session_id);
 }
 
 void stopSession() {
@@ -310,6 +332,8 @@ uint8_t progressPercent() {
 }
 
 const Stats& stats() { return g_stats; }
+
+uint32_t sessionId() { return g_session_id; }
 
 void setTarget(float low, float high) {
   g_target_low  = low;

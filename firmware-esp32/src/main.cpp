@@ -288,7 +288,7 @@ void loop() {
         .sampleCount   = (uint16_t)((uint32_t)st.duration_sec * 100u > 65535u ? 65535u
                                     : (uint16_t)((uint32_t)st.duration_sec * 100u)),
         .crc32         = 0,     // TODO M9
-        .sessionId     = 0,     // TODO M9 (NVS counter)
+        .sessionId     = session::sessionId(),  // NVS 영속 고유 id (세션마다 +1)
         .avgInhale     = st.avg_inhale,
         .maxInhale     = st.max_inhale,
       };

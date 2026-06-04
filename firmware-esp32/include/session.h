@@ -83,6 +83,10 @@ namespace session {
   /// Summary 통계 (Summary state 에서만 의미 있음).
   const Stats& stats();
 
+  /// 현재 세션의 고유 id (startSession 마다 증가, NVS 영속 → 재부팅에도 유일).
+  /// BLE Summary 의 sessionId 로 전송 → 앱이 세션별 DB 행 구분에 사용.
+  uint32_t sessionId();
+
   /// 목표 압력 zone 설정 (BLE setTarget opcode 또는 NVS load 후).
   void setTarget(float low, float high);
   float targetLow();
