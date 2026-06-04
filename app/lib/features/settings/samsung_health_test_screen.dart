@@ -109,6 +109,7 @@ class _SamsungHealthTestScreenState
                 _btn('⑩ 효과 화면 열기', () async {
                   if (mounted) context.push('/sleep-effect');
                 }),
+                _btn('⚠️ 전체 데이터 초기화', _resetAll),
                 _btn('로그 지우기', () async {
                   setState(_log.clear);
                 }),
@@ -138,6 +139,33 @@ class _SamsungHealthTestScreenState
         ],
       ),
     );
+  }
+
+  /// 모든 훈련 세션 + 수면 기록 삭제 (확인 다이얼로그). 되돌릴 수 없음.
+  Future<void> _resetAll() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('전체 데이터 초기화'),
+        content: const Text(
+            '모든 훈련 세션과 수면 기록을 삭제합니다.\n되돌릴 수 없습니다.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('취소')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('삭제', style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    );
+    if (ok != true) {
+      _add('초기화 취소');
+      return;
+    }
+    await ref.read(sessionRepositoryProvider).deleteAll();
+    await ref.read(sleepRepositoryProvider).clear();
+    _add('전체 데이터 삭제 완료 (세션 + 수면)');
   }
 
   Widget _btn(String label, Future<void> Function() body) => ElevatedButton(
