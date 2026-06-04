@@ -145,8 +145,8 @@ namespace ble {
   constexpr uint16_t CONN_INTERVAL_MIN_MS = 15;
   constexpr uint16_t CONN_INTERVAL_MAX_MS = 30;
 
-  // 광고 이름. v3.2 와 동일한 prefix 'BlowFit' — 앱이 prefix 매칭으로 스캔.
-  constexpr const char* DEVICE_NAME = "BlowFit";
+  // 광고 이름. prefix 'BRELOW' — 앱이 prefix 매칭으로 스캔.
+  constexpr const char* DEVICE_NAME = "BRELOW";
 
 }  // namespace ble
 

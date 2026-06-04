@@ -177,7 +177,7 @@ class SettingsScreen extends ConsumerWidget {
   void _showAbout(BuildContext context) {
     showAboutDialog(
       context: context,
-      applicationName: 'BlowFit',
+      applicationName: 'BRELOW',
       applicationVersion: 'v$_appVersion',
       applicationIcon: const Icon(Icons.air, size: 32),
       applicationLegalese: '© 2026 한남대학교 디자인팩토리 CPD',

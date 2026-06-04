@@ -19,7 +19,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   static const _steps = <_Step>[
     _Step(
-      title: 'BlowFit에 오신 것을\n환영합니다',
+      title: 'BRELOW에 오신 것을\n환영합니다',
       desc: '매일 5분, 호흡근을 단련하여\n수면의 질을 개선하세요.',
       illust: _IllustKind.welcome,
     ),

@@ -18,7 +18,7 @@ class BlowfitUuids {
   static final batteryService  = Guid('0000180f-0000-1000-8000-00805f9b34fb');
   static final batteryLevel    = Guid('00002a19-0000-1000-8000-00805f9b34fb');
 
-  static const deviceNamePrefix = 'BlowFit';
+  static const deviceNamePrefix = 'BRELOW';
 }
 
 // Session Control opcodes

@@ -58,7 +58,7 @@ class ProfileScreen extends ConsumerWidget {
                   _SettingsRow(
                     icon: Icons.bluetooth,
                     title: '기기 관리',
-                    subtitle: connected ? 'BlowFit 연결됨' : '연결 안 됨',
+                    subtitle: connected ? 'BRELOW 연결됨' : '연결 안 됨',
                     onTap: () => context.push('/connect'),
                   ),
                   const Divider(indent: 60, height: 1),
@@ -101,10 +101,10 @@ class ProfileScreen extends ConsumerWidget {
                   _SettingsRow(
                     icon: Icons.info_outline,
                     title: '앱 정보',
-                    subtitle: 'v0.1 · BlowFit',
+                    subtitle: 'v0.1 · BRELOW',
                     onTap: () => showAboutDialog(
                       context: context,
-                      applicationName: 'BlowFit',
+                      applicationName: 'BRELOW',
                       applicationVersion: 'v0.1',
                       applicationLegalese: '© 2026 한남대학교 CPD',
                     ),

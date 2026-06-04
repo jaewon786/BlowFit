@@ -615,7 +615,7 @@ class _DeviceCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  device.name.isNotEmpty ? device.name : 'BlowFit',
+                  device.name.isNotEmpty ? device.name : 'BRELOW',
                   style: const TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w700,
@@ -675,7 +675,7 @@ class _PermissionsView extends StatelessWidget {
       title: '블루투스 권한이 필요합니다',
       desc: permanent
           ? '시스템 설정에서 블루투스 / 위치 권한을\n허용해주세요.'
-          : 'BlowFit 기기를 검색하려면 블루투스 권한을\n허용해야 합니다.',
+          : 'BRELOW 기기를 검색하려면 블루투스 권한을\n허용해야 합니다.',
       bottom: SizedBox(
         width: double.infinity,
         child: FilledButton.icon(
@@ -797,7 +797,7 @@ class _EmptyView extends StatelessWidget {
             padding: const EdgeInsets.all(14),
             child: Column(
               children: const [
-                _Tip(icon: Icons.power, text: 'BlowFit 기기 전원이 켜져 있는지 확인하세요.'),
+                _Tip(icon: Icons.power, text: 'BRELOW 기기 전원이 켜져 있는지 확인하세요.'),
                 SizedBox(height: 8),
                 _Tip(icon: Icons.bluetooth, text: '폰의 블루투스가 활성화되어 있는지 확인하세요.'),
                 SizedBox(height: 8),

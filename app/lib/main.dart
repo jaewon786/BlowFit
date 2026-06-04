@@ -246,7 +246,7 @@ class _BlowfitAppState extends ConsumerState<BlowfitApp> with WidgetsBindingObse
     // 사용자 토글로 변경되는 light/dark 모드.
     final themeMode = ref.watch(themeModeProvider);
     return MaterialApp.router(
-      title: 'BlowFit',
+      title: 'BRELOW',
       theme: BlowfitTheme.light(),
       darkTheme: BlowfitTheme.dark(),
       themeMode: themeMode,

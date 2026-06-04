@@ -39,7 +39,7 @@ class BleBackgroundTaskHandler extends TaskHandler {
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
     debugPrint('[bg-ble] service started (starter: $starter)');
     FlutterForegroundTask.updateService(
-      notificationTitle: 'BlowFit 백그라운드',
+      notificationTitle: 'BRELOW 백그라운드',
       notificationText: '디바이스 검색 중...',
     );
     // 1. OS 가 이미 잡은 connection 있는지 먼저 확인.
@@ -80,7 +80,7 @@ class BleBackgroundTaskHandler extends TaskHandler {
             _device = d;
             _setupConnectionListener(d);
             FlutterForegroundTask.updateService(
-              notificationText: 'BlowFit 연결됨',
+              notificationText: 'BRELOW 연결됨',
             );
           }
           return;
@@ -102,7 +102,7 @@ class BleBackgroundTaskHandler extends TaskHandler {
       debugPrint('[bg-ble] connection state: $s');
       if (s == BluetoothConnectionState.connected) {
         FlutterForegroundTask.updateService(
-          notificationText: 'BlowFit 연결됨',
+          notificationText: 'BRELOW 연결됨',
         );
       } else if (s == BluetoothConnectionState.disconnected) {
         FlutterForegroundTask.updateService(
@@ -189,7 +189,7 @@ class BleBackgroundTaskHandler extends TaskHandler {
 
       debugPrint('[bg-ble] connected!');
       FlutterForegroundTask.updateService(
-        notificationText: 'BlowFit 연결됨',
+        notificationText: 'BRELOW 연결됨',
       );
 
       // 4. Connection state 변화 listen — disconnect 시 알림 갱신, reconnect 시
@@ -212,7 +212,7 @@ class BleForegroundService {
     FlutterForegroundTask.init(
       androidNotificationOptions: AndroidNotificationOptions(
         channelId: 'blowfit_ble_service',
-        channelName: 'BlowFit 자동 연결',
+        channelName: 'BRELOW 자동 연결',
         channelDescription:
             '디바이스가 켜지면 자동으로 연결을 시도합니다',
         channelImportance: NotificationChannelImportance.LOW,
@@ -244,7 +244,7 @@ class BleForegroundService {
     }
     final result = await FlutterForegroundTask.startService(
       serviceId: 256,
-      notificationTitle: 'BlowFit 백그라운드',
+      notificationTitle: 'BRELOW 백그라운드',
       notificationText: '자동 연결 대기 중',
       callback: startBleBackgroundTask,
     );

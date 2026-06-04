@@ -33,5 +33,5 @@ namespace opcode {
 }
 
 // 광고 이름 + 펌웨어 버전
-constexpr const char* BLE_DEVICE_NAME    = "BlowFit";
+constexpr const char* BLE_DEVICE_NAME    = "BRELOW";
 constexpr const char* BLE_FIRMWARE_VER   = "4.0.0";

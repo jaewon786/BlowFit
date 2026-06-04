@@ -8,7 +8,7 @@ import 'discovered_device.dart';
 import 'seq_gap_detector.dart';
 
 /// In-process BLE stand-in used when `--dart-define=FAKE_BLE=true`. Simulates
-/// the real BlowFit device: one discoverable fake peripheral, realistic
+/// the real BRELOW device: one discoverable fake peripheral, realistic
 /// breathing waveform, and a SessionSummary emitted on stopSession (or after
 /// 30s of an unstopped session).
 class FakeBleManager implements BleManager {
@@ -54,7 +54,7 @@ class FakeBleManager implements BleManager {
   Future<List<DiscoveredDevice>> scan({Duration timeout = const Duration(seconds: 6)}) async {
     await Future<void>.delayed(const Duration(milliseconds: 800));
     return const [
-      DiscoveredDevice(id: _fakeId, name: 'BlowFit-SIM (fake)', rssi: -42),
+      DiscoveredDevice(id: _fakeId, name: 'BRELOW-SIM (fake)', rssi: -42),
     ];
   }
 
