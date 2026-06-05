@@ -3,6 +3,7 @@
 #include "power.h"
 #include "config.h"
 #include "session.h"
+#include "haptic.h"
 
 #include <Arduino.h>
 #include <esp_sleep.h>
@@ -15,11 +16,12 @@ namespace {
   uint32_t g_boot_press_start_ms = 0;  // BOOT 버튼 누름 시작 시점 (0 = not pressed)
   bool     g_boot_long_fired     = false;  // 한 번 fire 후 release 까지 무시
 
-  // PWR_BUTTON (외부, PB61412L) — debounce + falling edge 감지.
-  bool     g_pwr_last_raw     = HIGH;
-  bool     g_pwr_stable       = HIGH;
-  uint32_t g_pwr_last_change  = 0;
-  constexpr uint32_t PWR_DEBOUNCE_MS = 30;
+  // PWR_BUTTON (외부, PB61412L) — long-press(deep sleep) + short-press(훈련 시작).
+  uint32_t g_pwr_press_start_ms = 0;      // 누름 시작 시점 (0 = not pressed)
+  bool     g_pwr_long_fired     = false;  // long-press fire 후 release 까지 무시
+  constexpr uint32_t PWR_DEBOUNCE_MS = 30;  // short-press 최소 유지 (노이즈 무시)
+
+  bool     g_woke_from_button   = false;  // 이번 부팅이 EXT1(버튼) wake 인지
 
   /// Wakeup reason 시리얼 출력.
   void printWakeupReason() {
@@ -41,7 +43,48 @@ namespace {
     }
   }
 
+  /// 전원 버튼만 wake 소스로 EXT1 재등록 후 즉시 deep sleep (wakeGate 중단용).
+  /// 버튼이 떼진(HIGH) 상태에서만 호출해야 즉시 재-wake 안 됨.
+  [[noreturn]] void reSleep() {
+    esp_sleep_enable_ext1_wakeup(1ULL << pins::PWR_BUTTON, ESP_EXT1_WAKEUP_ANY_LOW);
+    Serial.flush();
+    delay(50);
+    esp_deep_sleep_start();
+    while (true) { delay(1000); }
+  }
+
 }  // anonymous namespace
+
+void wakeGate() {
+  // deep sleep 에서 EXT1(전원 버튼)로 깨어난 경우만 게이트 적용.
+  if (esp_sleep_get_wakeup_cause() != ESP_SLEEP_WAKEUP_EXT1) {
+    g_woke_from_button = false;
+    return;  // 정상 부팅 (USB/RST) — 그대로 진행.
+  }
+  g_woke_from_button = true;
+
+  // 전원 버튼을 WAKE_HOLD_MS(3초) 연속으로 눌러야 부팅 진행.
+  pinMode(pins::PWR_BUTTON, INPUT_PULLUP);
+  delay(10);  // 핀 안정화
+  Serial.println("[power] EXT1 wake — hold PWR button 3s to power on...");
+  const uint32_t start = millis();
+  while (millis() - start < WAKE_HOLD_MS) {
+    if (digitalRead(pins::PWR_BUTTON) != LOW) {
+      // 3초 전에 뗌 → 켜지 않고 다시 deep sleep.
+      Serial.println("[power] released < 3s -> back to deep sleep");
+      reSleep();  // [[noreturn]]
+    }
+    delay(10);
+  }
+  Serial.println("[power] hold confirmed (3s) -> powering on");
+
+  // 이후 로직(tick 의 short/long 감지)이 깨끗한 상태에서 시작하도록 release 대기.
+  while (digitalRead(pins::PWR_BUTTON) == LOW) {
+    delay(10);
+  }
+}
+
+bool wokeFromButton() { return g_woke_from_button; }
 
 void begin() {
   printWakeupReason();
@@ -74,20 +117,27 @@ void tick(uint32_t now_ms) {
     g_boot_long_fired = false;
   }
 
-  // ---------- 외부 PWR_BUTTON short-press 감지 (debounced) ----------
-  // PB61412L 외부 tact 버튼. short-press 만으로 deep sleep (켜고 끄기).
-  const bool pwr_raw = (digitalRead(pins::PWR_BUTTON) == LOW);
-  if (pwr_raw != g_pwr_last_raw) {
-    g_pwr_last_raw = pwr_raw;
-    g_pwr_last_change = now_ms;
-  }
-  if ((now_ms - g_pwr_last_change >= PWR_DEBOUNCE_MS) &&
-      g_pwr_stable != pwr_raw) {
-    g_pwr_stable = pwr_raw;
-    if (pwr_raw) {  // falling edge (press)
-      Serial.println("[power] PWR_BUTTON pressed -> deep sleep");
+  // ---------- 외부 PWR_BUTTON (PB61412L) ----------
+  // 짧게 누름(뗄 때) → 훈련 시작. 길게 3초 → deep sleep (끄기).
+  const bool pwr_pressed = (digitalRead(pins::PWR_BUTTON) == LOW);
+  if (pwr_pressed) {
+    if (g_pwr_press_start_ms == 0) {
+      g_pwr_press_start_ms = now_ms;
+    } else if (!g_pwr_long_fired &&
+               (now_ms - g_pwr_press_start_ms >= PWR_LONG_PRESS_MS)) {
+      g_pwr_long_fired = true;
+      Serial.println("[power] PWR_BUTTON long-press (3s) -> deep sleep");
       enterDeepSleep();   // [[noreturn]]
     }
+  } else {
+    // 떼는 순간 — long press 가 아니었고 debounce 이상 눌렸으면 short = 훈련 시작.
+    if (g_pwr_press_start_ms != 0 && !g_pwr_long_fired &&
+        (now_ms - g_pwr_press_start_ms >= PWR_DEBOUNCE_MS)) {
+      Serial.println("[power] PWR_BUTTON short-press -> startSession");
+      session::startSession();  // Standby/Summary 에서만 동작 (내부 가드)
+    }
+    g_pwr_press_start_ms = 0;
+    g_pwr_long_fired = false;
   }
 }
 
@@ -103,20 +153,28 @@ void tick(uint32_t now_ms) {
   // 3. 디스플레이 LDO OFF — 화면 즉시 어두워짐.
   digitalWrite(pins::TFT_POWER_ON, LOW);
 
-  // 4. EXT0 wakeup 등록 — BOOT 버튼 또는 PWR_BUTTON 누름 시 wakeup.
-  // ESP32-S3 의 EXT0 는 단일 GPIO 만 가능. 두 버튼 둘 다 사용하려면 EXT1
-  // (mask) 사용. 우리 케이스 — PWR_BUTTON 우선 (외부 케이스에 노출되는
-  // 메인 버튼). BOOT 도 같이 등록하려면 EXT1.
-  const uint64_t wake_mask = (1ULL << pins::PWR_BUTTON) |
-                             (1ULL << pins::BUTTON_BOOT);
-  esp_sleep_enable_ext1_wakeup(wake_mask, ESP_EXT1_WAKEUP_ALL_LOW);
+  // 3-1. 전원 꺼짐 진동 + 재생 시간 확보 (sleep 전이라 blocking delay OK).
+  haptic::play(haptic::POWER_OFF);
+  delay(1000);
 
-  // 5. 시리얼 flush + 잠시 대기.
+  // 4. 버튼을 누른 채 sleep 하면 EXT1 조건이 이미 충족돼 즉시 다시 깨어남.
+  //    → 전원/BOOT 버튼이 모두 떼질(HIGH) 때까지 대기 후 sleep.
+  while (digitalRead(pins::PWR_BUTTON) == LOW ||
+         digitalRead(pins::BUTTON_BOOT) == LOW) {
+    delay(10);
+  }
+  delay(50);  // debounce
+
+  // 5. EXT1 wakeup 등록 — 전원 버튼만 wake 소스. 실제 wake 여부는 wakeGate()
+  //    에서 3초 hold 로 게이트. (BOOT 는 wake 소스에서 제외.)
+  esp_sleep_enable_ext1_wakeup(1ULL << pins::PWR_BUTTON, ESP_EXT1_WAKEUP_ANY_LOW);
+
+  // 6. 시리얼 flush + 잠시 대기.
   Serial.println("[power] entering deep sleep now (zzz)");
   Serial.flush();
   delay(50);
 
-  // 6. Deep sleep 진입 — 이 함수는 return 안 함.
+  // 7. Deep sleep 진입 — 이 함수는 return 안 함.
   esp_deep_sleep_start();
 
   // unreachable

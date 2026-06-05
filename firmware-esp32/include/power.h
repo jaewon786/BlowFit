@@ -23,6 +23,16 @@
 
 namespace power {
 
+  /// setup() 최초반 (Serial.begin 직후, 디스플레이/센서 init 전) 호출.
+  /// deep sleep 에서 EXT1(전원 버튼)로 깨어난 경우, 전원 버튼을 WAKE_HOLD_MS
+  /// (3초) 동안 연속으로 눌러야 실제 부팅을 진행. 그 전에 떼면 다시 deep sleep
+  /// 으로 복귀 (화면도 안 켜짐). 정상 부팅(USB/RST)이면 즉시 반환.
+  void wakeGate();
+
+  /// 이번 부팅이 deep sleep 에서 전원 버튼(EXT1)으로 깨어난 것인지 여부.
+  /// wakeGate() 호출 후 유효. 켜짐 진동을 버튼 wake 일 때만 울리는 데 사용.
+  bool wokeFromButton();
+
   /// setup() 초기 — wakeup reason 시리얼 출력, PWR_LED 켜기.
   void begin();
 

@@ -69,10 +69,14 @@ namespace pins {
 namespace power {
 
   // Deep sleep 진입 조건.
-  constexpr uint32_t LONG_PRESS_MS    = 2000;   // 전원 버튼 long-press = 2초
+  constexpr uint32_t LONG_PRESS_MS     = 2000;   // BOOT 버튼 long-press = 2초 (deep sleep)
   // BOOT 버튼은 short-press 가 startSession 이라 long-press 로 deep sleep.
-  // 외부 PWR_BUTTON (PB61412L) 은 short-press 만으로 deep sleep (별도 long
-  // press 의미 없음, 그저 켜고 끄기).
+  // 외부 PWR_BUTTON (PB61412L):
+  //   - short-press            → startSession (훈련 시작)
+  //   - long-press 3초          → deep sleep (끄기)
+  //   - deep sleep 에서 3초 hold → wake (켜기, wakeGate 게이트)
+  constexpr uint32_t PWR_LONG_PRESS_MS = 3000;   // 전원 버튼 long-press = 3초 (deep sleep)
+  constexpr uint32_t WAKE_HOLD_MS      = 3000;   // 깨우기 — 전원 버튼 3초 연속 hold 필요
 
   // Standby idle 시 자동 deep sleep (옵션 — 추후 활성화).
   // constexpr uint32_t IDLE_DEEP_SLEEP_MS = 5UL * 60 * 1000;  // 5분
