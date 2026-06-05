@@ -25,4 +25,10 @@ namespace battery {
   /// 마지막 측정 잔량 (0~100). begin 전이면 -1.
   int8_t percent();
 
+  /// 충전 중(외부 USB 전원) 여부 추정. VBAT 가 무부하 만충(4.2V)을 넘으면
+  /// 외부 전원으로 판단 — 구동 중 배터리 단독은 부하 sag 로 ~4.0V 이하라 구분됨.
+  /// hysteresis 로 경계 flicker 방지. ⚠️ 저전압 배터리 충전 초기(4.15V 미만)엔
+  /// 감지 못 할 수 있음(전압 기반 한계). update() 마다 갱신.
+  bool isCharging();
+
 }  // namespace battery

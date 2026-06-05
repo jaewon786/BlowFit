@@ -11,6 +11,12 @@ namespace {
 
   uint16_t g_mv  = 0;
   int8_t   g_pct = -1;
+  bool     g_charging = false;
+
+  // 충전 감지 임계 (hysteresis). 충전 시 측정 ~4.3V, 구동 중 배터리 단독은
+  // 부하 sag 로 ~4.0V 이하라 명확히 갈림.
+  constexpr uint16_t CHARGE_ENTER_MV = 4150;
+  constexpr uint16_t CHARGE_EXIT_MV  = 4050;
 
   // LiPo 단일 셀 전압(mV) → 잔량(%) 근사 테이블.
   // ⚠️ "부하(운영) 상태 기준" 보정 — 디바이스 구동 중엔 화면/BLE 부하로 단자
@@ -63,11 +69,19 @@ void begin() {
 void update() {
   g_mv  = readVbatMv();
   g_pct = mvToPercent(g_mv);
+  // 충전 감지 (hysteresis).
+  if (!g_charging && g_mv >= CHARGE_ENTER_MV) {
+    g_charging = true;
+  } else if (g_charging && g_mv < CHARGE_EXIT_MV) {
+    g_charging = false;
+  }
   // 검증/보정용 — 측정 전압과 환산 % 출력 (USB 연결 시 모니터로 확인).
-  Serial.printf("[battery] VBAT=%umV -> %d%%\n", (unsigned)g_mv, (int)g_pct);
+  Serial.printf("[battery] VBAT=%umV -> %d%% (%s)\n", (unsigned)g_mv,
+                (int)g_pct, g_charging ? "charging" : "battery");
 }
 
 uint16_t milliVolts() { return g_mv; }
 int8_t   percent()    { return g_pct; }
+bool     isCharging() { return g_charging; }
 
 }  // namespace battery

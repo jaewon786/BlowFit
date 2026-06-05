@@ -27,6 +27,7 @@
 #include "display/screens/screen_training.h"
 #include "display/screens/screen_rest.h"
 #include "display/screens/screen_summary.h"
+#include "display/screens/screen_charging.h"
 
 // ----- 시리얼 + 디스플레이 전원 + I²C 부트 -----
 static void bootHardware() {
@@ -73,13 +74,24 @@ namespace btn {
   }
 }  // namespace btn
 
+// 충전 화면이 (Standby 대신) 표시 중인지. standby_set_* 호출이 dangling
+// 위젯을 건드리지 않도록 가드하는 데 사용.
+static bool g_chargingScreen = false;
+
 // ----- 화면 전환 — session state 변화 시 호출 -----
 static void switchScreenFor(session::State s) {
+  g_chargingScreen = false;
   switch (s) {
     case session::State::Standby:
-      screens::standby_show();
-      screens::standby_set_connected(false);
-      screens::standby_set_battery(battery::percent());  // 실측 VBAT 잔량.
+      // 충전 중이면 Standby 대신 충전 화면 (% 없이 "충전 중" 표시).
+      if (battery::isCharging()) {
+        screens::charging_show();
+        g_chargingScreen = true;
+      } else {
+        screens::standby_show();
+        screens::standby_set_connected(false);
+        screens::standby_set_battery(battery::percent());  // 실측 VBAT 잔량.
+      }
       break;
     case session::State::Prep:
     case session::State::Train: {
@@ -317,7 +329,7 @@ void loop() {
   if (last_ble_connected != ble_now) {
     last_ble_connected = ble_now;
     Serial.printf("[ble] connection state -> %s\n", ble_now ? "connected" : "disconnected");
-    if (cur == session::State::Standby) {
+    if (cur == session::State::Standby && !g_chargingScreen) {
       screens::standby_set_connected(ble_now);
     }
   }
@@ -334,14 +346,22 @@ void loop() {
   static uint32_t lastUpdate1HzMs = 0;
   if (now - lastUpdate1HzMs >= 1000) {
     lastUpdate1HzMs = now;
-    // 배터리 — 10초마다 재측정 + Standby 화면 실시간 갱신.
+    // 배터리 — 3초마다 재측정. 충전 연결/해제 시 Standby↔충전 화면 전환.
     static uint32_t lastBattMs = 0;
-    if (now - lastBattMs >= 10000) {
+    static bool wasCharging = false;
+    if (now - lastBattMs >= 3000) {
       lastBattMs = now;
       battery::update();
+      const bool charging = battery::isCharging();
       if (cur == session::State::Standby) {
-        screens::standby_set_battery(battery::percent());
+        if (charging != wasCharging) {
+          switchScreenFor(cur);  // Standby ↔ 충전 화면 교체
+        } else if (!charging) {
+          screens::standby_set_battery(battery::percent());
+        }
+        // 충전 중(전환 아님): 화면이 애니메이션으로 자체 갱신 — 할 일 없음.
       }
+      wasCharging = charging;
     }
     if (cur == session::State::Prep || cur == session::State::Train) {
       const auto turn = session::currentTurn();
