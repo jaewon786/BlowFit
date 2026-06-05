@@ -4,6 +4,7 @@ import 'last_device_store.dart';
 import 'target_settings_store.dart';
 import 'train_duration_store.dart';
 import 'user_profile_store.dart';
+import 'user_role_store.dart';
 
 /// Async because SharedPreferences.getInstance() is async on first call.
 /// UI consumers should `.when(...)` and gate auto-reconnect on the loaded value.
@@ -21,4 +22,8 @@ final trainDurationStoreProvider = FutureProvider<TrainDurationStore>((ref) {
 
 final userProfileStoreProvider = FutureProvider<UserProfileStore>((ref) {
   return UserProfileStore.open();
+});
+
+final userRoleStoreProvider = FutureProvider<UserRoleStore>((ref) {
+  return UserRoleStore.open();
 });

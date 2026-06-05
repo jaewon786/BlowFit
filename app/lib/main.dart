@@ -8,13 +8,16 @@ import 'core/ble/ble_foreground_task.dart';
 import 'core/ble/ble_providers.dart';
 import 'core/db/db_providers.dart';
 import 'core/models/pressure_sample.dart';
+import 'core/storage/user_role_store.dart';
 import 'core/theme/blowfit_theme.dart';
+import 'features/companion/companion_screen.dart';
 import 'features/connect/connect_screen.dart';
 import 'features/guide/guide_screen.dart';
 import 'features/home_pager/home_pager_screen.dart';
 import 'features/history/history_screen.dart';
 import 'features/onboarding/onboarding_screen.dart';
 import 'features/profile/profile_screen.dart';
+import 'features/role/role_select_screen.dart';
 import 'features/profile_setup/profile_setup_screen.dart';
 import 'features/result/result_screen.dart';
 import 'features/session_detail/session_detail_screen.dart';
@@ -31,6 +34,11 @@ import 'features/trend/trend_screen.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await initializeDateFormatting('ko');
+
+  // 사용 역할(디바이스 사용자/동반자) 로드 — 라우터 redirect 가 동기적으로
+  // 참조하도록 메모리(appRoleNotifier)에 올린다. 미선택이면 null → 역할 선택 화면.
+  final roleStore = await UserRoleStore.open();
+  appRoleNotifier.value = roleStore.load();
   // BLE permissions are requested by ConnectScreen with proper UX context;
   // asking on cold start surprises the user before they see why.
 
@@ -57,6 +65,24 @@ final _router = GoRouter(
   // 홈 화면. 자동 재연결은 background 의 autoReconnectProvider 가 처리하고,
   // 디바이스 연결 UI 는 사용자가 명시적으로 '/connect' 로 이동했을 때만 노출.
   initialLocation: '/',
+  // 역할에 따라 진입 화면 분기. appRoleNotifier 값이 바뀌면(역할 선택 시)
+  // refreshListenable 로 redirect 재평가.
+  refreshListenable: appRoleNotifier,
+  redirect: (context, state) {
+    final role = appRoleNotifier.value;
+    final loc = state.matchedLocation;
+    // 1) 역할 미선택 → 역할 선택 화면 강제.
+    if (role == null) {
+      return loc == '/role-select' ? null : '/role-select';
+    }
+    // 2) 동반자 → 동반자 화면(/companion*)만 허용.
+    if (role == AppRole.companion) {
+      return loc.startsWith('/companion') ? null : '/companion';
+    }
+    // 3) 디바이스 사용자 → 역할 선택/동반자 화면 차단.
+    if (loc == '/role-select' || loc.startsWith('/companion')) return '/';
+    return null;
+  },
   routes: [
     StatefulShellRoute.indexedStack(
       builder: (context, state, navigationShell) =>
@@ -159,6 +185,18 @@ final _router = GoRouter(
       parentNavigatorKey: _rootNavKey,
       path: '/sleep-trend',
       builder: (_, __) => const SleepTrendScreen(),
+    ),
+    // 첫 실행 — 역할 선택 (디바이스 사용자 / 동반자). 선택 후 변경 불가.
+    GoRoute(
+      parentNavigatorKey: _rootNavKey,
+      path: '/role-select',
+      builder: (_, __) => const RoleSelectScreen(),
+    ),
+    // 동반자(배우자·애인) 전용 홈.
+    GoRoute(
+      parentNavigatorKey: _rootNavKey,
+      path: '/companion',
+      builder: (_, __) => const CompanionScreen(),
     ),
   ],
 );
