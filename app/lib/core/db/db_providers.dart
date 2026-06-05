@@ -6,7 +6,9 @@ import '../ble/discovered_device.dart';
 import '../coach/milestone_engine.dart';
 import '../health/samsung_health_service.dart';
 import '../health/sleep_sync.dart';
+import '../pairing/user_data_service.dart';
 import '../storage/storage_providers.dart';
+import '../storage/user_role_store.dart';
 import 'app_database.dart';
 import 'session_repository.dart';
 import 'sleep_repository.dart';
@@ -58,8 +60,19 @@ final trainedDatesProvider = StreamProvider<Set<DateTime>>((ref) {
 /// or an early-mounted screen).
 final sessionPersistenceProvider = Provider<void>((ref) {
   final repo = ref.watch(sessionRepositoryProvider);
+  final uploader = ref.watch(userDataServiceProvider);
   ref.listen(sessionSummaryProvider, (_, next) {
-    next.whenData((summary) => repo.insertFromSummary(summary));
+    next.whenData((summary) async {
+      await repo.insertFromSummary(summary);
+      // 디바이스 사용자면 동반자가 볼 수 있게 Firestore 에도 업로드.
+      if (appRoleNotifier.value == AppRole.deviceUser) {
+        try {
+          await uploader.uploadSummary(summary);
+        } catch (e) {
+          debugPrint('[firestore] session upload failed: $e');
+        }
+      }
+    });
   });
 });
 

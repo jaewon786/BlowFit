@@ -52,6 +52,13 @@ class SessionRepository {
 
   Future<void> deleteAll() => _db.delete(_db.sessions).go();
 
+  /// 전체 세션 (오래된 순) — 동반자용 Firestore 백필에 사용.
+  Future<List<Session>> getAll() {
+    final q = _db.select(_db.sessions)
+      ..orderBy([(t) => OrderingTerm.asc(t.receivedAt)]);
+    return q.get();
+  }
+
   /// Distinct-day streak ending today: 오늘부터 거꾸로 빈 날 처음 나올 때까지.
   /// 새 세션이 들어오면 자동 갱신.
   Stream<int> watchConsecutiveDays({DateTime Function() now = _defaultNow}) {

@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/db/db_providers.dart';
 import '../../core/pairing/pairing_service.dart';
+import '../../core/pairing/user_data_service.dart';
 import '../../core/storage/storage_providers.dart';
 import '../../core/theme/blowfit_colors.dart';
 
@@ -31,10 +33,21 @@ class _MyCodeScreenState extends ConsumerState<MyCodeScreen> {
       final name = profileStore.load()?.name ?? '사용자';
       final code = await ref.read(pairingServiceProvider).ensureMyCode(name);
       if (mounted) setState(() => _code = code);
+      // 동반자가 과거 기록도 보도록 기존 세션 백필 (백그라운드, 실패 무시).
+      _backfill();
     } catch (e) {
       if (mounted) {
         setState(() => _error = '연결 코드를 불러오지 못했어요.\n네트워크를 확인해주세요.');
       }
+    }
+  }
+
+  Future<void> _backfill() async {
+    try {
+      final rows = await ref.read(sessionRepositoryProvider).getAll();
+      await ref.read(userDataServiceProvider).uploadSessions(rows);
+    } catch (_) {
+      // 다음 진입/세션에서 재시도. 코드 표시엔 영향 없음.
     }
   }
 
