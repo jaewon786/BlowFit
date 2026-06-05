@@ -14,6 +14,8 @@ android {
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
+        // flutter_local_notifications(17+) 가 core library desugaring 요구.
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
@@ -46,6 +48,8 @@ flutter {
 }
 
 dependencies {
+    // flutter_local_notifications core library desugaring 런타임.
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
     // Samsung Health Data SDK (로컬 AAR — 전이 의존성 수동 명시).
     implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar"))))
     implementation("com.google.code.gson:gson:2.13.1")

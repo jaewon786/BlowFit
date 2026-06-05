@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/db/trend_bucketing.dart';
 import '../../core/pairing/companion_data_service.dart';
 import '../../core/pairing/companion_link_store.dart';
+import '../../core/pairing/nudge_service.dart';
 import '../../core/pairing/pairing_service.dart';
 import '../../core/theme/blowfit_colors.dart';
 
@@ -121,11 +122,21 @@ class _DashboardState extends ConsumerState<_Dashboard> {
     _calMonth = DateTime(now.year, now.month);
   }
 
-  void _nudge() {
-    // Phase E 에서 FCM 푸시로 교체.
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('${widget.link.userName}님께 눈치주기는 다음 단계에서 제공됩니다.')),
-    );
+  Future<void> _nudge() async {
+    try {
+      await ref
+          .read(nudgeServiceProvider)
+          .sendNudge(userId: widget.link.userId);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${widget.link.userName}님께 응원을 보냈어요! 💪')),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('전송에 실패했어요. 네트워크를 확인해주세요.')),
+      );
+    }
   }
 
   @override

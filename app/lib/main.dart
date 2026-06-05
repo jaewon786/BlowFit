@@ -10,6 +10,8 @@ import 'core/ble/ble_foreground_task.dart';
 import 'core/ble/ble_providers.dart';
 import 'core/db/db_providers.dart';
 import 'core/models/pressure_sample.dart';
+import 'core/notifications/local_notifications.dart';
+import 'core/pairing/nudge_service.dart';
 import 'core/storage/user_role_store.dart';
 import 'core/theme/blowfit_theme.dart';
 import 'features/companion/companion_screen.dart';
@@ -49,6 +51,9 @@ void main() async {
   } catch (e) {
     debugPrint('[firebase] init/auth failed: $e');
   }
+
+  // 로컬 알림(동반자 눈치주기 수신 표시) 초기화.
+  await LocalNotifications.init();
 
   // 사용 역할(디바이스 사용자/동반자) 로드 — 라우터 redirect 가 동기적으로
   // 참조하도록 메모리(appRoleNotifier)에 올린다. 미선택이면 null → 역할 선택 화면.
@@ -308,6 +313,8 @@ class _BlowfitAppState extends ConsumerState<BlowfitApp> with WidgetsBindingObse
     ref.watch(targetSyncProvider);
     // 앱 시작 시 마지막 연결한 device 자동 재연결 시도 (silent fallback).
     ref.watch(autoReconnectProvider);
+    // 동반자 '눈치주기' 수신 → 로컬 알림. (앱 생애주기 동안 유지)
+    ref.watch(nudgeListenerProvider);
     // 사용자 토글로 변경되는 light/dark 모드.
     final themeMode = ref.watch(themeModeProvider);
     return MaterialApp.router(
