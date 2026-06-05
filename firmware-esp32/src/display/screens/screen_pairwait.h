@@ -12,4 +12,7 @@ namespace screens {
 
   void pairwait_show();
 
+  /// 페어링 타임아웃(실패) 화면. 잠깐 표시 후 Standby 로 진입.
+  void pairfailed_show();
+
 }  // namespace screens

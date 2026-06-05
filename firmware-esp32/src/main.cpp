@@ -217,7 +217,13 @@ void setup() {
       delay(20);
     }
   } else {
-    Serial.println("[ble] pairing timeout — entering Standby (advertising continues)");
+    Serial.println("[ble] pairing timeout — showing failed screen (2s)");
+    screens::pairfailed_show();
+    const uint32_t until = millis() + 2000;
+    while ((int32_t)(until - millis()) > 0) {
+      lvgl_port::tick();
+      delay(20);
+    }
   }
 #endif
 

@@ -62,4 +62,44 @@ void pairwait_show() {
   lv_obj_set_style_arc_width(spinner, 3, LV_PART_INDICATOR);
 }
 
+void pairfailed_show() {
+  lv_obj_t* scr = lv_screen_active();
+  lv_obj_clean(scr);
+  lv_obj_set_style_bg_color(scr, theme::color(theme::DEV_SURFACE), 0);
+  lv_obj_set_style_pad_all(scr, 0, 0);
+
+  // 상단 status bar (미연결).
+  make_status_bar(scr, /*connected=*/false, /*battery=*/battery::percent());
+
+  // 중앙 빨간 원 + BT 심볼 (페어링 실패 강조, HTML 디자인).
+  lv_obj_t* circle = lv_obj_create(scr);
+  lv_obj_set_size(circle, 80, 80);
+  lv_obj_align(circle, LV_ALIGN_CENTER, 0, -28);
+  lv_obj_set_style_bg_color(circle, theme::color(theme::DEV_RED), 0);
+  lv_obj_set_style_bg_opa(circle, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_width(circle, 0, 0);
+  lv_obj_set_style_radius(circle, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_pad_all(circle, 0, 0);
+  // red glow.
+  lv_obj_set_style_shadow_color(circle, theme::color(theme::DEV_RED), 0);
+  lv_obj_set_style_shadow_opa(circle, LV_OPA_60, 0);
+  lv_obj_set_style_shadow_width(circle, 28, 0);
+  lv_obj_set_style_shadow_spread(circle, 2, 0);
+  lv_obj_clear_flag(circle, LV_OBJ_FLAG_SCROLLABLE);
+
+  lv_obj_t* bt_sym = lv_label_create(circle);
+  lv_label_set_text(bt_sym, LV_SYMBOL_BLUETOOTH);
+  lv_obj_set_style_text_font(bt_sym, &lv_font_montserrat_48, 0);
+  lv_obj_set_style_text_color(bt_sym, theme::color(0xFFFFFF), 0);
+  lv_obj_center(bt_sym);
+
+  // "블루투스를 / 다시 연결하세요" (빨강, 2줄 중앙).
+  lv_obj_t* title = lv_label_create(scr);
+  lv_label_set_text(title, "블루투스를\n다시 연결하세요");
+  lv_obj_set_style_text_font(title, theme::font_20(), 0);
+  lv_obj_set_style_text_color(title, theme::color(theme::DEV_RED), 0);
+  lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_align(title, LV_ALIGN_CENTER, 0, 48);
+}
+
 }  // namespace screens
