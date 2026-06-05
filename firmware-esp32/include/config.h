@@ -52,6 +52,9 @@ namespace pins {
   //   GPIO38 — 백라이트 PWM (TFT_BL, TFT_eSPI 가 직접 제어)
   //   GPIO15 — LDO 전원 enable (배터리 모드 HIGH 필수, firmware setup() 직접 처리)
   constexpr uint8_t TFT_POWER_ON = 15;  // LDO enable — 배터리 모드 필수
+  // 배터리 전압 측정 — T-Display-S3 내장. VBAT 가 2:1 분압되어 GPIO4(ADC1_CH3)
+  // 로 들어옴. Vbat = analogReadMilliVolts(4) × 2. 추가 하드웨어 불필요.
+  constexpr uint8_t BAT_ADC = 4;
 
   // 사용자 입력 버튼 (T-Display S3 내장)
   constexpr uint8_t BUTTON_BOOT = 0;   // 부트 버튼 (short = startSession, long = deep sleep)

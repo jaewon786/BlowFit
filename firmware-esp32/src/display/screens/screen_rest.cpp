@@ -8,6 +8,7 @@
 #include "display/screens/status_bar.h"
 #include "display/theme.h"
 #include "config.h"
+#include "battery.h"
 
 #include <lvgl.h>
 #include <cstdio>
@@ -34,7 +35,7 @@ void rest_show() {
   lv_obj_set_style_pad_all(scr, 0, 0);
 
   // ---------- 1. 상단 status bar (BT 아이콘 + 배터리) ----------
-  make_status_bar(scr, /*connected=*/true, /*battery=*/74);
+  make_status_bar(scr, /*connected=*/true, /*battery=*/battery::percent());
 
   // ---------- 2. 휴식 chip ----------
   lv_obj_t* chip = lv_obj_create(scr);

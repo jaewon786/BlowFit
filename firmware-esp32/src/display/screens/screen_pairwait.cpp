@@ -4,6 +4,7 @@
 #include "display/screens/status_bar.h"
 #include "display/theme.h"
 #include "config.h"
+#include "battery.h"
 
 #include <lvgl.h>
 
@@ -18,7 +19,7 @@ void pairwait_show() {
 
   // ---------- 1. 상단 status bar (BT 아이콘 + 배터리) ----------
   // 페어링 대기 = 미연결 → BT 아이콘 muted. (배터리는 placeholder, 추후 실값)
-  make_status_bar(scr, /*connected=*/false, /*battery=*/76);
+  make_status_bar(scr, /*connected=*/false, /*battery=*/battery::percent());
 
   // ---------- 2. 중앙 80×80 파란 원 + BT 심볼 (glow) ----------
   lv_obj_t* circle = lv_obj_create(scr);

@@ -79,9 +79,9 @@ namespace {
     lv_obj_set_style_pad_all(batt_box, 1, 0);
     lv_obj_clear_flag(batt_box, LV_OBJ_FLAG_SCROLLABLE);
 
-    // 배터리 내부 fill (정상 = green)
+    // 배터리 내부 fill (정상 = green). 초기 폭은 standby_set_battery 가 갱신.
     g_batt_fill = lv_obj_create(batt_box);
-    lv_obj_set_size(g_batt_fill, 14, 7);   // 76% 가정
+    lv_obj_set_size(g_batt_fill, 18, 7);   // 내부 폭 전체(=100%) 기본
     lv_obj_align(g_batt_fill, LV_ALIGN_LEFT_MID, 0, 0);
     lv_obj_set_style_bg_color(g_batt_fill, theme::color(theme::DEV_GREEN), 0);
     lv_obj_set_style_bg_opa(g_batt_fill, LV_OPA_COVER, 0);
@@ -124,9 +124,11 @@ void standby_set_connected(bool connected) {
 
 void standby_set_battery(int8_t percent) {
   if (!g_batt_fill) return;
-  // 배터리 fill 폭 (0~14px) + 색상. 숫자 % 표기는 없음.
+  // 배터리 fill 폭 (0~18px) + 색상. 숫자 % 표기는 없음.
+  // 최대 폭 = 박스 내부 폭 = 22 − 테두리(2) − pad(2) = 18px.
+  // (이전엔 14px 라 100% 여도 ~78% 만 차 보이던 버그.)
   const int p = percent < 0 ? 0 : (percent > 100 ? 100 : percent);
-  int w = (p * 14) / 100;
+  int w = (p * 18) / 100;
   if (w < 1 && p > 0) w = 1;
   lv_obj_set_width(g_batt_fill, w);
   const uint32_t c = (p <= 15) ? theme::DEV_RED

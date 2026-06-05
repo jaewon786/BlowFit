@@ -51,8 +51,11 @@ void make_status_bar(lv_obj_t* parent, bool connected, int battery_pct) {
   lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLLABLE);
 
   // 배터리 내부 fill (잔량 비례, 색상: <=15 red / <=30 amber / else green).
+  // fill 최대 폭 = 박스 내부 폭 = 22 − 테두리(2) − pad(2) = 18px.
+  // (이전엔 14px 라 100% 여도 ~78% 만 차 보이던 버그.)
+  constexpr int FILL_MAX_W = 18;
   lv_obj_t* fill = lv_obj_create(box);
-  int w = (p < 0) ? 0 : (p * 14) / 100;
+  int w = (p < 0) ? 0 : (p * FILL_MAX_W) / 100;
   if (w < 1 && p > 0) w = 1;
   lv_obj_set_size(fill, w, 7);
   lv_obj_align(fill, LV_ALIGN_LEFT_MID, 0, 0);

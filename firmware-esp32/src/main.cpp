@@ -17,6 +17,7 @@
 #include "ble_service.h"
 #include "power.h"
 #include "haptic.h"
+#include "battery.h"
 #include "display/lvgl_port.h"
 #include "display/theme.h"
 #include "display/screens/screen_boot.h"
@@ -78,8 +79,7 @@ static void switchScreenFor(session::State s) {
     case session::State::Standby:
       screens::standby_show();
       screens::standby_set_connected(false);
-      // 실제 VBAT ADC 측정은 미구현 (M9/M11) — 타 화면과 동일하게 placeholder 76%.
-      screens::standby_set_battery(76);
+      screens::standby_set_battery(battery::percent());  // 실측 VBAT 잔량.
       break;
     case session::State::Prep:
     case session::State::Train: {
@@ -140,6 +140,10 @@ void setup() {
   Serial.println("M7: session state machine, M11: power mgmt");
   Serial.println("=========================================");
 
+  // deep sleep 에서 전원 버튼으로 깨어났으면 3초 hold 해야 부팅 진행.
+  // (디스플레이/센서 init 전에 게이트 — spurious wake 시 화면 안 켜짐.)
+  power::wakeGate();
+
   bootHardware();
   power::begin();   // wakeup reason 출력 + PWR_LED ON
 
@@ -159,6 +163,11 @@ void setup() {
   Serial.printf("Zero offset = %.2f cmH2O\n", sensor::zeroOffset());
 
   haptic::begin();  // DRV2605L EN HIGH + I²C 초기화 (ERM open-loop)
+  battery::begin(); // VBAT ADC (GPIO4) 측정 시작 — 화면 배터리 표시용.
+  // 전원 버튼으로 깨어난 경우(=사용자가 켬)에만 켜짐 진동. USB/RST 부팅은 제외.
+  if (power::wokeFromButton()) {
+    haptic::play(haptic::POWER_ON);
+  }
   pinMode(pins::LED_STATUS, OUTPUT);
   pinMode(pins::BUTTON_BOOT, INPUT_PULLUP);
   pinMode(pins::BUTTON_USER, INPUT_PULLUP);
@@ -270,8 +279,10 @@ void loop() {
     switchScreenFor(cur);
 
 #if HAS_BLE
-    // Device State notify (4B). orifice/battery 는 placeholder (M9 NVS 후 실값).
-    ble_service::pushState((uint8_t)cur, /*orifice=*/0, /*battery=*/100, /*charging=*/false);
+    // Device State notify (4B). battery 는 실측 VBAT, orifice/charging 은 placeholder.
+    ble_service::pushState((uint8_t)cur, /*orifice=*/0,
+                           /*battery=*/(uint8_t)(battery::percent() < 0 ? 0 : battery::percent()),
+                           /*charging=*/false);
 
     // Summary 진입 시 Session Summary notify (40B). state machine 의 stats() 활용.
     // maxPressure/avgPressure 는 호기(양압) 통계, avgInhale/maxInhale 은 흡기(음압).
@@ -323,6 +334,15 @@ void loop() {
   static uint32_t lastUpdate1HzMs = 0;
   if (now - lastUpdate1HzMs >= 1000) {
     lastUpdate1HzMs = now;
+    // 배터리 — 10초마다 재측정 + Standby 화면 실시간 갱신.
+    static uint32_t lastBattMs = 0;
+    if (now - lastBattMs >= 10000) {
+      lastBattMs = now;
+      battery::update();
+      if (cur == session::State::Standby) {
+        screens::standby_set_battery(battery::percent());
+      }
+    }
     if (cur == session::State::Prep || cur == session::State::Train) {
       const auto turn = session::currentTurn();
       screens::TrainingPhase ui_phase;

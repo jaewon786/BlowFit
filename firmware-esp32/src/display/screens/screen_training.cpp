@@ -8,6 +8,7 @@
 #include "display/screens/status_bar.h"
 #include "display/theme.h"
 #include "config.h"
+#include "battery.h"
 
 #include <lvgl.h>
 #include <cstdio>
@@ -121,7 +122,7 @@ void training_show() {
   lv_obj_set_style_pad_all(scr, 0, 0);
 
   // ---------- 1. 상단 status bar (BT 아이콘 + 배터리) ----------
-  make_status_bar(scr, /*connected=*/true, /*battery=*/74);
+  make_status_bar(scr, /*connected=*/true, /*battery=*/battery::percent());
 
   // ---------- 2. Phase 행 — 화살표 + 텍스트 (중앙) ----------
   const uint32_t accent = phase_accent(g_phase);

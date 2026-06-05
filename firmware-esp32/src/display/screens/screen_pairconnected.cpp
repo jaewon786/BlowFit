@@ -4,6 +4,7 @@
 #include "display/screens/status_bar.h"
 #include "display/theme.h"
 #include "config.h"
+#include "battery.h"
 
 #include <lvgl.h>
 
@@ -17,7 +18,7 @@ void pairconnected_show() {
   lv_obj_set_style_pad_all(scr, 0, 0);
 
   // ---------- 1. 상단 status bar (BT 아이콘 + 배터리) — 연결됨 ----------
-  make_status_bar(scr, /*connected=*/true, /*battery=*/76);
+  make_status_bar(scr, /*connected=*/true, /*battery=*/battery::percent());
 
   // ---------- 2. 중앙 80×80 초록 원 + 체크 심볼 (glow) ----------
   lv_obj_t* circle = lv_obj_create(scr);

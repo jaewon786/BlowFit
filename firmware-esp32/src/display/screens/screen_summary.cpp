@@ -8,6 +8,7 @@
 #include "display/screens/screen_summary.h"
 #include "display/screens/status_bar.h"
 #include "display/theme.h"
+#include "battery.h"
 
 #include <lvgl.h>
 
@@ -25,7 +26,7 @@ void summary_show(const SummaryData& data) {
   lv_obj_set_style_pad_all(scr, 0, 0);
 
   // ---------- 1. 상단 status bar ----------
-  make_status_bar(scr, /*connected=*/true, /*battery=*/73);
+  make_status_bar(scr, /*connected=*/true, /*battery=*/battery::percent());
 
   // ---------- 2. 완료 ring (270° green, 100%) ----------
   lv_obj_t* arc = lv_arc_create(scr);
