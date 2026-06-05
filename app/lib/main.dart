@@ -1,3 +1,5 @@
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,11 +13,13 @@ import 'core/models/pressure_sample.dart';
 import 'core/storage/user_role_store.dart';
 import 'core/theme/blowfit_theme.dart';
 import 'features/companion/companion_screen.dart';
+import 'features/companion/connection_code_screen.dart';
 import 'features/connect/connect_screen.dart';
 import 'features/guide/guide_screen.dart';
 import 'features/home_pager/home_pager_screen.dart';
 import 'features/history/history_screen.dart';
 import 'features/onboarding/onboarding_screen.dart';
+import 'features/pairing/my_code_screen.dart';
 import 'features/profile/profile_screen.dart';
 import 'features/role/role_select_screen.dart';
 import 'features/profile_setup/profile_setup_screen.dart';
@@ -34,6 +38,17 @@ import 'features/trend/trend_screen.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await initializeDateFormatting('ko');
+
+  // Firebase 초기화 + 익명 로그인 — 동반자 모드(훈련 데이터 공유 + 연결 코드
+  // 페어링)용. 각 설치마다 고유 UID. 오프라인/실패해도 앱은 정상 구동되도록 try.
+  try {
+    await Firebase.initializeApp();
+    if (FirebaseAuth.instance.currentUser == null) {
+      await FirebaseAuth.instance.signInAnonymously();
+    }
+  } catch (e) {
+    debugPrint('[firebase] init/auth failed: $e');
+  }
 
   // 사용 역할(디바이스 사용자/동반자) 로드 — 라우터 redirect 가 동기적으로
   // 참조하도록 메모리(appRoleNotifier)에 올린다. 미선택이면 null → 역할 선택 화면.
@@ -197,6 +212,18 @@ final _router = GoRouter(
       parentNavigatorKey: _rootNavKey,
       path: '/companion',
       builder: (_, __) => const CompanionScreen(),
+    ),
+    // 동반자 — 연결 코드 입력 (반드시 /companion 하위라야 동반자 redirect 통과).
+    GoRoute(
+      parentNavigatorKey: _rootNavKey,
+      path: '/companion/link',
+      builder: (_, __) => const ConnectionCodeScreen(),
+    ),
+    // 디바이스 사용자 — 동반자에게 줄 연결 코드 표시.
+    GoRoute(
+      parentNavigatorKey: _rootNavKey,
+      path: '/my-code',
+      builder: (_, __) => const MyCodeScreen(),
     ),
   ],
 );

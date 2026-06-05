@@ -63,6 +63,12 @@ class SettingsScreen extends ConsumerWidget {
               label: '오리피스 단계 관리',
               onTap: () => _comingSoon(context, '오리피스 단계 관리'),
             ),
+            _SettingsTile(
+              icon: Icons.favorite_border,
+              label: '동반자 연결',
+              trailing: '코드 보기',
+              onTap: () => context.push('/my-code'),
+            ),
             const _SectionGap(),
             _SettingsTile(
               icon: Icons.system_update_alt,

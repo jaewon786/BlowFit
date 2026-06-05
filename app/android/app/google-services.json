@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "373664119816",
+    "project_id": "brelow-14a50",
+    "storage_bucket": "brelow-14a50.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:373664119816:android:4392de2c58e004fe1625bd",
+        "android_client_info": {
+          "package_name": "com.hannam.blowfit.blowfit"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDwlpYIDnW5gXSMhX_wMOikCNXnQMDsXNE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
