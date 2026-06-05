@@ -85,10 +85,18 @@ void begin() {
 
 bool isReady() { return g_ready; }
 
-void play(uint8_t effect) {
+void play(uint8_t effect, uint8_t repeat) {
   if (!g_ready) return;
-  w8(REG_WAVESEQ1, effect);
-  w8(REG_WAVESEQ2, 0);  // 단일 효과 — 시퀀스 종료
+  if (repeat < 1) repeat = 1;
+  if (repeat > 8) repeat = 8;  // WAVESEQ1..8 (0x04..0x0B)
+  // 같은 효과를 시퀀스 슬롯에 repeat 개 채움 → 칩이 연속 재생 (지속시간 ↑).
+  for (uint8_t i = 0; i < repeat; i++) {
+    w8(REG_WAVESEQ1 + i, effect);
+  }
+  // 8개 미만이면 다음 슬롯에 0 으로 시퀀스 종료.
+  if (repeat < 8) {
+    w8(REG_WAVESEQ1 + repeat, 0);
+  }
   w8(REG_GO, 1);
 }
 

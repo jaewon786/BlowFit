@@ -258,9 +258,10 @@ void tick(uint32_t now_ms, float p) {
       if (elapsed >= g_train_duration_ms) {
         if (g_set_index >= DEMO_TOTAL_SETS) {
           finalizeStats(now_ms);
-          haptic::play(haptic::SESSION_DONE);  // 완료 진동
+          haptic::play(haptic::SESSION_DONE, 3);  // 완료 진동 (길게 3회)
           transition(State::Summary, now_ms);
         } else {
+          haptic::play(haptic::REST_CUE);  // 휴식 전환 진동
           transition(State::Rest, now_ms);
         }
       }
