@@ -76,10 +76,13 @@ final sessionPersistenceProvider = Provider<void>((ref) {
   });
 });
 
-/// 연결될 때마다 SharedPreferences 의 목표 압력대를 펌웨어로 재전송.
-/// 펌웨어가 reboot 되면 RAM 의 g_targetLow/High 가 default (20-30) 으로
-/// 리셋되므로, 사용자가 설정한 zone (예: 10-20) 이 디바이스 LCD 와 endurance
-/// 계산에 일관되게 반영되도록 매 connect 시 sync.
+/// 연결될 때마다 SharedPreferences 의 강도/PImax/MEP/훈련시간을 펌웨어로 재전송.
+/// 펌웨어 reboot 시 RAM 의 target 변수들이 default (Normal · PImax 80 / MEP 60)
+/// 으로 리셋되므로, 사용자가 설정한 값이 디바이스 LCD 와 hit-rate 계산에
+/// 일관되게 반영되도록 매 connect 시 sync.
+///
+/// v4.1: 절대값 zone (setTarget) 이 아닌 %PImax 기반 (setIntensityTarget) 으로
+/// 전송. 펌웨어가 흡기/호기 4개 target 을 자동 계산.
 final targetSyncProvider = Provider<void>((ref) {
   ref.listen(connectionProvider, (_, next) {
     next.whenData((connected) async {
@@ -88,10 +91,13 @@ final targetSyncProvider = Provider<void>((ref) {
       // 너무 짧으면 _control characteristic 가 아직 null 이라 write 가 no-op.
       await Future.delayed(const Duration(milliseconds: 1500));
       try {
-        final store = await ref.read(targetSettingsStoreProvider.future);
-        final zone = store.load();
-        await ref.read(bleManagerProvider).setTarget(zone.low, zone.high);
-        // 훈련 시간도 함께 sync — 펌웨어 reboot 시 default(10분) 로 리셋되므로
+        final pmStore = await ref.read(pimaxMepStoreProvider.future);
+        await ref.read(bleManagerProvider).setIntensityTarget(
+              level: pmStore.loadLevel().value,
+              pimax: pmStore.loadPimax(),
+              mep: pmStore.loadMep(),
+            );
+        // 훈련 시간도 함께 sync — 펌웨어 reboot 시 default 로 리셋되므로
         // 사용자가 설정한 값을 매 connect 마다 재전송.
         final durStore = await ref.read(trainDurationStoreProvider.future);
         await ref
@@ -168,6 +174,15 @@ final weekHitsProvider = StreamProvider<int>((ref) {
 /// Total training time today. Drives the "오늘의 목표" progress bar.
 final todayDurationProvider = StreamProvider<Duration>((ref) {
   return ref.watch(sessionRepositoryProvider).watchTodayDuration();
+});
+
+/// 캐릭터(진화 단계 + happy) 트리거용 누적 통계.
+///   trainingDays : 누적 distinct 훈련일 (7일→Baby, 30일→Oxygen).
+///   sessionCount : 누적 세션 수 (증가 시 happy 1회).
+typedef CharacterStats = ({int trainingDays, int sessionCount});
+
+final characterStatsProvider = StreamProvider<CharacterStats>((ref) {
+  return ref.watch(sessionRepositoryProvider).watchCharacterStats();
 });
 
 /// Earliest session date — null for new users. Used by the guide screen to

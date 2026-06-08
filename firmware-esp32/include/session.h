@@ -15,6 +15,8 @@
 
 #include <stdint.h>
 
+#include "config.h"  // session::IntensityLevel, 임상 상수.
+
 namespace session {
 
   enum class State : uint8_t {
@@ -37,6 +39,13 @@ namespace session {
     None       = 4,   // Train 이외 state 에서.
   };
 
+  /// startSession 의 시작 phase — 기본은 호기부터. PImax 측정 시 흡기로
+  /// 시작하면 LCD 가 처음부터 "들이쉬기" 화면을 표시한다.
+  enum class StartPhase : uint8_t {
+    Exhale = 0,   // 기본 — 호기부터 cycle 시작
+    Inhale = 1,   // 흡기 측정 모드
+  };
+
   struct Stats {
     float    avg_pressure;  // 세션 평균 |p| (cmH2O) — 기기 자체 Summary 화면용
     float    max_pressure;  // 세션 max |p|
@@ -56,7 +65,9 @@ namespace session {
   void begin();
 
   /// 사용자 트리거 — Standby 또는 Summary 에서만 동작.
-  void startSession();
+  /// phase: cycle 시작 위치. 기본 Exhale. 흡기 측정 등 특정 phase 부터
+  /// 시작하려면 Inhale 전달 (cycle offset 으로 적용 → 첫 phase 부터 Inhale).
+  void startSession(StartPhase phase = StartPhase::Exhale);
 
   /// 사용자 트리거 — 어디서든 호출하면 Standby 로 복귀 (Summary 생략).
   void stopSession();
@@ -87,12 +98,41 @@ namespace session {
   /// BLE Summary 의 sessionId 로 전송 → 앱이 세션별 DB 행 구분에 사용.
   uint32_t sessionId();
 
-  /// 목표 압력 zone 설정 (BLE setTarget opcode 또는 NVS load 후).
+  /// (Legacy) 절대값 target zone — 양/음 대칭으로 적용. v4.0 호환용.
+  /// 새 코드는 setPimaxMep + setIntensity 로 흡기/호기 분리 target 을 쓸 것.
   void setTarget(float low, float high);
   float targetLow();
   float targetHigh();
 
-  /// Train 세션 길이 설정 (BLE SET_DURATION opcode). 1~60분으로 clamp.
+  // ── %PImax / %MEP 기반 target (clinical, v4.1+) ──────────────────────────
+  // setPimaxMep / setIntensity 가 호출되면 4 개 target 을 자동으로 재계산.
+  // 안전 상한 (INHALE_SAFETY_LIMIT_CMH2O / EXHALE_SAFETY_LIMIT_CMH2O) 를 넘으면
+  // 자동 clamp 되고 Serial 경고가 찍힌다.
+
+  /// 사용자별 PImax (최대 흡기압) / MEP (최대 호기압) 주입. cmH₂O magnitude.
+  /// 0 이하 값은 무시. 호출 시 target 즉시 재계산.
+  void setPimaxMep(float pimax_cmH2O, float mep_cmH2O);
+
+  /// 강도 단계 변경 — Beginner/Normal/Advanced. 한 변수만 바꾸면 4 개 target
+  /// 이 한꺼번에 갱신된다.
+  void setIntensity(IntensityLevel level);
+
+  IntensityLevel intensity();
+  float pimax();
+  float mep();
+
+  /// 흡기 target — magnitude (양수). 측정 압력 |p| 가 [low, high] 안이면
+  /// "흡기 zone hit". session.cpp 내부에서 음수 부호 처리.
+  float inhaleTargetLow();
+  float inhaleTargetHigh();
+
+  /// 호기 target — magnitude (양수). 측정 압력 p (양수) 가 [low, high] 안이면
+  /// "호기 zone hit".
+  float exhaleTargetLow();
+  float exhaleTargetHigh();
+
+  /// Train 세션 길이 설정 (BLE SET_DURATION opcode).
+  /// config.h::session::TRAIN_DURATION_MIN_MS ~ MAX_MS 로 clamp.
   void setTrainDuration(uint32_t ms);
   uint32_t trainDurationMs();
 

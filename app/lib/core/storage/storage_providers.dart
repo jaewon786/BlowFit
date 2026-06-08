@@ -1,6 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'character_stage_store.dart';
 import 'last_device_store.dart';
+import 'pimax_mep_store.dart';
 import 'target_settings_store.dart';
 import 'train_duration_store.dart';
 import 'user_profile_store.dart';
@@ -26,4 +28,12 @@ final userProfileStoreProvider = FutureProvider<UserProfileStore>((ref) {
 
 final userRoleStoreProvider = FutureProvider<UserRoleStore>((ref) {
   return UserRoleStore.open();
+});
+
+final characterStageStoreProvider = FutureProvider<CharacterStageStore>((ref) {
+  return CharacterStageStore.open();
+});
+
+final pimaxMepStoreProvider = FutureProvider<PimaxMepStore>((ref) {
+  return PimaxMepStore.open();
 });

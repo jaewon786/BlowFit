@@ -15,23 +15,24 @@ namespace session {
 namespace {
 
   // ============================================================
-  // 데모용 짧은 시간 (테스트 편의). 실 사용 시 config.h::session 의
-  // TRAIN_MS=240000, REST_MS=30000 으로 조정.
+  // Timing — 모두 config.h::session 의 임상 상수에서 derive. 한 곳 관리.
+  //
+  //   1 호흡 cycle (Exhale → ExhaleRest=0 → Inhale → InhaleRest)
+  //     = 5s + 0s + 5s + 5s = 15 s
+  //   10 cycles                  = 150 s = 1 set
+  //   2 sets + 세트 사이 30 s   ≈ 5.5 분 = 1 session
+  //
+  // 4-phase Turn enum 은 v4.0 호환을 위해 유지. ExhaleRest=0 이라 사실상
+  // 3-phase (Exhale → Inhale → InhaleRest) 동작. UI/햅틱 분기 코드는
+  // ExhaleRest 가 즉시 skip 되는 식으로 무변경.
   // ============================================================
-  constexpr uint32_t PREP_DURATION_MS    = 0;        // PREP 스킵 — 즉시 TRAIN
-  constexpr uint32_t TRAIN_DURATION_DEFAULT_MS = 300000;  // 기본 5분 (앱이 변경 가능)
-  constexpr uint32_t REST_DURATION_MS    = 5000;     // set 사이 휴식 5초
-  constexpr uint32_t SUMMARY_DURATION_MS = 8000;     // 8초 자동 복귀
-  constexpr uint8_t  DEMO_TOTAL_SETS     = 1;        // sets 단순화 — 1 set
-  // Train 내부 4-phase turn cycle (앱 spec 일치):
-  //   Exhale 10s → ExhaleRest 5s → Inhale 10s → InhaleRest 5s = 30s/cycle
-  constexpr uint32_t TURN_EXHALE_MS      = 10000;
-  constexpr uint32_t TURN_EXHALE_REST_MS = 5000;
-  constexpr uint32_t TURN_INHALE_MS      = 10000;
-  constexpr uint32_t TURN_INHALE_REST_MS = 5000;
+  constexpr uint32_t TURN_EXHALE_MS      = BREATH_EXHALE_MS;  // 5000
+  constexpr uint32_t TURN_EXHALE_REST_MS = 0;                 // skip
+  constexpr uint32_t TURN_INHALE_MS      = BREATH_INHALE_MS;  // 5000
+  constexpr uint32_t TURN_INHALE_REST_MS = BREATH_REST_MS;    // 5000 (한 호흡 끝)
   constexpr uint32_t TURN_CYCLE_MS =
       TURN_EXHALE_MS + TURN_EXHALE_REST_MS +
-      TURN_INHALE_MS + TURN_INHALE_REST_MS;
+      TURN_INHALE_MS + TURN_INHALE_REST_MS;  // 15000
 
   State    g_state       = State::Boot;
   Turn     g_turn        = Turn::None;
@@ -40,10 +41,34 @@ namespace {
   uint32_t g_session_start = 0;
   uint32_t g_session_id  = 0;   // 세션 고유 id (NVS 영속, startSession 마다 +1)
   uint8_t  g_set_index   = 0;   // 1-base, 0 = none
-  float    g_target_low  = TARGET_LOW_DEFAULT;
-  float    g_target_high = TARGET_HIGH_DEFAULT;
-  // Train 세션 길이 — 앱이 SET_DURATION (opcode 0x06) 으로 변경. 기본 5분.
-  uint32_t g_train_duration_ms = TRAIN_DURATION_DEFAULT_MS;
+
+  // PImax/MEP/Intensity — sets/getters 가 변경 시 recomputeTargets() 호출.
+  float           g_pimax     = PIMAX_DEFAULT_CMH2O;
+  float           g_mep       = MEP_DEFAULT_CMH2O;
+  IntensityLevel  g_intensity = INTENSITY_DEFAULT;
+
+  // 계산된 target — magnitude (양수). recomputeTargets() 결과물.
+  float g_inhale_target_low  = 0.0f;
+  float g_inhale_target_high = 0.0f;
+  float g_exhale_target_low  = 0.0f;
+  float g_exhale_target_high = 0.0f;
+
+  // Legacy 대칭 target — setTarget(low, high) 가 들어오면 갱신.
+  // 새 코드는 setPimaxMep + setIntensity 를 쓰지만, BLE v4.0 클라이언트가
+  // legacy 2B payload 를 보낼 수 있으므로 backing field 유지.
+  float g_target_low  = 0.0f;   // recomputeTargets() 에서 초기화
+  float g_target_high = 0.0f;
+  bool  g_legacy_target_active = false;   // setTarget() 가 호출되면 true
+
+  // Train 세션 길이 (1 set 기준) — 앱이 SET_DURATION 으로 변경 가능.
+  // 기본 = SET_TRAIN_MS (150 s = 1 set). 앱이 5분 보내면 세션 전체가 5분.
+  uint32_t g_train_duration_ms = SET_TRAIN_MS;
+
+  // turnAt() 호출 시 elapsed 에 더하는 cycle 내 시작 offset.
+  // 0       → Exhale 부터 시작 (기본)
+  // TURN_EXHALE_MS (=5000) → Inhale 부터 시작 (PImax 측정 모드)
+  // startSession(phase) 가 설정.
+  uint32_t g_cycle_offset_ms = 0;
 
   // 통계 누적.
   double   g_sum_abs_p   = 0.0;
@@ -67,6 +92,55 @@ namespace {
     g_state = next;
     g_state_start = now;
     Serial.printf("[session] -> %u\n", (unsigned)next);
+  }
+
+  /// PImax/MEP/Intensity 변경 시 흡기/호기 target 4개 자동 재계산.
+  /// 안전 상한 초과 시 clamp + Serial 경고.
+  /// setTarget(low, high) 가 별도 호출되어 있던 상태 (legacy 대칭) 라면
+  /// 그 값을 흡기/호기 양쪽에 그대로 적용해서 v4.0 호환을 유지한다.
+  void recomputeTargets() {
+    if (g_legacy_target_active) {
+      // Legacy 절대값 — 흡기/호기 동일 magnitude.
+      g_inhale_target_low  = g_target_low;
+      g_inhale_target_high = g_target_high;
+      g_exhale_target_low  = g_target_low;
+      g_exhale_target_high = g_target_high;
+      return;
+    }
+    const uint8_t i = static_cast<uint8_t>(g_intensity);
+    const float low_pct  = INTENSITY_LOW_PCT[i];
+    const float high_pct = INTENSITY_HIGH_PCT[i];
+
+    // 흡기 target — PImax × %.
+    float inh_lo = g_pimax * low_pct;
+    float inh_hi = g_pimax * high_pct;
+    if (inh_hi > INHALE_SAFETY_LIMIT_CMH2O) {
+      Serial.printf("[session] WARN: inhale target %.1f > safety %.1f cmH2O — clamped\n",
+                    inh_hi, INHALE_SAFETY_LIMIT_CMH2O);
+      inh_hi = INHALE_SAFETY_LIMIT_CMH2O;
+      if (inh_lo > inh_hi) inh_lo = inh_hi;
+    }
+    g_inhale_target_low  = inh_lo;
+    g_inhale_target_high = inh_hi;
+
+    // 호기 target — MEP × %.
+    float exh_lo = g_mep * low_pct;
+    float exh_hi = g_mep * high_pct;
+    if (exh_hi > EXHALE_SAFETY_LIMIT_CMH2O) {
+      Serial.printf("[session] WARN: exhale target %.1f > safety %.1f cmH2O — clamped\n",
+                    exh_hi, EXHALE_SAFETY_LIMIT_CMH2O);
+      exh_hi = EXHALE_SAFETY_LIMIT_CMH2O;
+      if (exh_lo > exh_hi) exh_lo = exh_hi;
+    }
+    g_exhale_target_low  = exh_lo;
+    g_exhale_target_high = exh_hi;
+
+    Serial.printf(
+        "[session] targets: level=%u inhale -%.1f~-%.1f exhale +%.1f~+%.1f (PImax=%.1f MEP=%.1f)\n",
+        (unsigned)g_intensity,
+        g_inhale_target_low, g_inhale_target_high,
+        g_exhale_target_low, g_exhale_target_high,
+        g_pimax, g_mep);
   }
 
   void resetStats() {
@@ -108,7 +182,7 @@ namespace {
         ? (now - g_session_start) / 1000
         : 0;
     g_stats.completed_sets = g_set_index;
-    g_stats.total_sets     = DEMO_TOTAL_SETS;
+    g_stats.total_sets     = TOTAL_SETS;
   }
 
   /// Train state 의 turn cycle (4-phase: Exhale/ExhaleRest/Inhale/InhaleRest).
@@ -144,6 +218,7 @@ void begin() {
   g_state = State::Boot;
   g_turn  = Turn::None;
   resetStats();
+  recomputeTargets();  // 기본 (Normal · PImax80 / MEP60) 으로 4개 target 초기화
 #if HAS_FLASH
   // 마지막 세션 id 복원 — 재부팅에도 id 가 단조 증가하도록.
   Preferences prefs;
@@ -154,13 +229,17 @@ void begin() {
 #endif
 }
 
-void startSession() {
+void startSession(StartPhase phase) {
   if (g_state != State::Standby && g_state != State::Summary) {
     Serial.println("[session] startSession ignored — not in Standby/Summary");
     return;
   }
   const uint32_t now = millis();
   resetStats();
+  // cycle 시작 phase 적용. Inhale 로 시작하려면 첫 phase (Exhale) 길이만큼
+  // offset 을 줘서 turnAt 결과가 즉시 Inhale 이 되도록 한다. Train 의 elapsed
+  // (= 진행률) 자체는 0 부터 시작 → progress bar 영향 없음.
+  g_cycle_offset_ms = (phase == StartPhase::Inhale) ? TURN_EXHALE_MS : 0;
   // 세션마다 고유 id 부여 (1-base, 0 은 "없음") + NVS 영속.
   g_session_id += 1;
 #if HAS_FLASH
@@ -208,7 +287,7 @@ void tick(uint32_t now_ms, float p) {
 
     case State::Prep:
       g_turn = Turn::None;
-      if (elapsed >= PREP_DURATION_MS) {
+      if (elapsed >= PREP_MS) {
         transition(State::Train, now_ms);
       }
       break;
@@ -232,14 +311,21 @@ void tick(uint32_t now_ms, float p) {
       }
       g_train_ms += dt;
 
-      // zone 안 (양압 OR 음압) 시간 누적.
-      const bool in_zone =
-          (p >= g_target_low  && p <= g_target_high) ||
-          (p <= -g_target_low && p >= -g_target_high);
+      // zone hit — phase 별로 비대칭 적용:
+      //   호기 turn  → 양압 p 가 [exhale_low, exhale_high]
+      //   흡기 turn  → 음압 |p| 가 [inhale_low, inhale_high]
+      // 휴식 (ExhaleRest/InhaleRest) 은 hit 평가 제외.
+      bool in_zone = false;
+      if (g_turn == Turn::Exhale) {
+        in_zone = (p >= g_exhale_target_low && p <= g_exhale_target_high);
+      } else if (g_turn == Turn::Inhale) {
+        const float mag = -p;  // 음압 magnitude
+        in_zone = (mag >= g_inhale_target_low && mag <= g_inhale_target_high);
+      }
       if (in_zone) g_hit_ms += dt;
 
-      // turn 갱신.
-      g_turn = turnAt(elapsed);
+      // turn 갱신. cycle offset 으로 시작 phase 조정 (PImax 측정 모드 등).
+      g_turn = turnAt(elapsed + g_cycle_offset_ms);
 
       // 호흡 phase 전환 시 햅틱 cue — 눈 안 보고도 호기/흡기 시점 인지.
       // 첫 진입(None→Exhale)은 세션 시작 click 으로 대체하므로 생략.
@@ -256,7 +342,7 @@ void tick(uint32_t now_ms, float p) {
 
       // Train 끝 → Rest 또는 Summary
       if (elapsed >= g_train_duration_ms) {
-        if (g_set_index >= DEMO_TOTAL_SETS) {
+        if (g_set_index >= TOTAL_SETS) {
           finalizeStats(now_ms);
           haptic::play(haptic::SESSION_DONE, 3);  // 완료 진동 (길게 3회)
           transition(State::Summary, now_ms);
@@ -270,7 +356,7 @@ void tick(uint32_t now_ms, float p) {
 
     case State::Rest:
       g_turn = Turn::None;
-      if (elapsed >= REST_DURATION_MS) {
+      if (elapsed >= SET_REST_MS) {
         g_set_index += 1;
         transition(State::Train, now_ms);
       }
@@ -278,7 +364,7 @@ void tick(uint32_t now_ms, float p) {
 
     case State::Summary:
       g_turn = Turn::None;
-      if (elapsed >= SUMMARY_DURATION_MS) {
+      if (elapsed >= SUMMARY_MS) {
         transition(State::Standby, now_ms);
       }
       break;
@@ -298,16 +384,17 @@ uint16_t remainingSec() {
   const uint32_t elapsed = millis() - g_state_start;
   uint32_t total = 0;
   switch (g_state) {
-    case State::Prep:    total = PREP_DURATION_MS;    break;
+    case State::Prep:    total = PREP_MS;             break;
     case State::Train:   total = g_train_duration_ms; break;
-    case State::Rest:    total = REST_DURATION_MS;    break;
-    case State::Summary: total = SUMMARY_DURATION_MS; break;
+    case State::Rest:    total = SET_REST_MS;         break;
+    case State::Summary: total = SUMMARY_MS;          break;
     default:             return 0;
   }
   // Train 내부에서는 현재 turn (4-phase) 의 남은 시간을 반환.
   if (g_state == State::Train) {
     // ceil 로 변환 — 표시 시 1초 단위로 자연스럽게 카운트다운.
-    const uint32_t ms = turnRemainingMs(elapsed);
+    // 시작 phase offset 반영 — Inhale 시작 모드에서도 phase 잔여 시간 정확.
+    const uint32_t ms = turnRemainingMs(elapsed + g_cycle_offset_ms);
     return (uint16_t)((ms + 999) / 1000);
   }
   if (elapsed >= total) return 0;
@@ -317,8 +404,8 @@ uint16_t remainingSec() {
 uint8_t progressPercent() {
   if (g_state == State::Standby || g_state == State::Boot) return 0;
   if (g_state == State::Summary) return 100;
-  // 전체 세션 진행률 = (현재 set - 1 + 현재 set 내 progress) / DEMO_TOTAL_SETS.
-  const float per_set = 1.0f / DEMO_TOTAL_SETS;
+  // 전체 세션 진행률 = (현재 set - 1 + 현재 set 내 progress) / TOTAL_SETS.
+  const float per_set = 1.0f / TOTAL_SETS;
   float p = (g_set_index - 1) * per_set;
   if (g_state == State::Train) {
     const uint32_t e = millis() - g_state_start;
@@ -336,17 +423,44 @@ const Stats& stats() { return g_stats; }
 
 uint32_t sessionId() { return g_session_id; }
 
+// ─── Legacy 절대값 target (v4.0 BLE 호환) ────────────────────────────────────
+// 호출되는 순간 g_legacy_target_active=true 로 잠그고 흡기/호기 동일 magnitude
+// 로 적용. 새 setPimaxMep/setIntensity 가 호출되면 다시 false 로 풀린다.
 void setTarget(float low, float high) {
   g_target_low  = low;
   g_target_high = high;
+  g_legacy_target_active = true;
+  recomputeTargets();
+  Serial.printf("[session] setTarget (legacy) low=%.1f high=%.1f\n", low, high);
 }
 float targetLow()  { return g_target_low; }
 float targetHigh() { return g_target_high; }
 
+// ─── %PImax / %MEP 기반 target (clinical, v4.1+) ─────────────────────────────
+void setPimaxMep(float pimax_cmH2O, float mep_cmH2O) {
+  if (pimax_cmH2O > 0.0f) g_pimax = pimax_cmH2O;
+  if (mep_cmH2O   > 0.0f) g_mep   = mep_cmH2O;
+  g_legacy_target_active = false;  // clinical 모드 활성
+  recomputeTargets();
+}
+void setIntensity(IntensityLevel level) {
+  if (level > INTENSITY_ADVANCED) level = INTENSITY_ADVANCED;
+  g_intensity = level;
+  g_legacy_target_active = false;
+  recomputeTargets();
+}
+IntensityLevel intensity() { return g_intensity; }
+float pimax()              { return g_pimax; }
+float mep()                { return g_mep; }
+float inhaleTargetLow()    { return g_inhale_target_low; }
+float inhaleTargetHigh()   { return g_inhale_target_high; }
+float exhaleTargetLow()    { return g_exhale_target_low; }
+float exhaleTargetHigh()   { return g_exhale_target_high; }
+
 void setTrainDuration(uint32_t ms) {
-  // 안전 범위 1~60분으로 clamp.
-  if (ms < 60000)   ms = 60000;
-  if (ms > 3600000) ms = 3600000;
+  // config.h::session 의 TRAIN_DURATION_MIN/MAX_MS 로 clamp.
+  if (ms < TRAIN_DURATION_MIN_MS) ms = TRAIN_DURATION_MIN_MS;
+  if (ms > TRAIN_DURATION_MAX_MS) ms = TRAIN_DURATION_MAX_MS;
   g_train_duration_ms = ms;
   Serial.printf("[session] train duration = %u ms\n", (unsigned)g_train_duration_ms);
 }

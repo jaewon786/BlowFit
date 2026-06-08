@@ -18,6 +18,7 @@
 
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
@@ -31,8 +32,115 @@ import '../../core/storage/storage_providers.dart';
 import '../../core/theme/blowfit_colors.dart';
 import '../../core/theme/blowfit_theme.dart';
 import '../settings/settings_screen.dart';
+import 'widgets/brelow_character_panel.dart';
 
 const double _kFrameW = 402;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 단계별 캐릭터 레이아웃 — Figma DoT frame 97:2(Egg) / 97:57(Baby) / 97:105(Oxygen).
+// 모든 좌표는 402×874 Figma frame 기준. _Frame.scale 로 화면 해상도에 맞게 변환.
+// ─────────────────────────────────────────────────────────────────────────────
+class _StageLayout {
+  const _StageLayout({
+    required this.bubbleX,
+    required this.bubbleY,
+    required this.bubbleW,
+    required this.tailX,
+    required this.tailY,
+    required this.charX,
+    required this.charY,
+    required this.charW,
+    required this.charH,
+    required this.speechText,
+    required this.shadowX,
+    required this.shadowY,
+    required this.shadowW,
+    required this.shadowH,
+    required this.charFeetY,
+    this.charScale = 1.0,
+  });
+
+  /// 말풍선 Rectangle 77.
+  final double bubbleX, bubbleY, bubbleW;
+
+  /// 말풍선 꼬리 Vector 6117.
+  final double tailX, tailY;
+
+  /// 캐릭터 Rive 영역 (Mask group / image XXXX). Figma 의 visible 바운딩.
+  final double charX, charY, charW, charH;
+
+  /// 말풍선 안 텍스트.
+  final String speechText;
+
+  /// 지면 그림자 (Figma Ellipse 54) — 캐릭터 발밑의 블러 타원.
+  final double shadowX, shadowY, shadowW, shadowH;
+
+  /// 캐릭터 "발끝" 이 닿아야 할 Figma Y (= 그림자 중심 Y 기준).
+  /// 캐릭터 슬롯을 bottomCenter 정렬하고 이 Y 를 슬롯 하단으로 삼아 캐릭터가
+  /// 그림자 위에 안착하도록 한다. .riv 아트보드 하단 여백 때문에 발끝이 살짝
+  /// 뜨면 이 값만 단계별로 몇 px 내려 미세조정한다(한 곳에서 관리).
+  final double charFeetY;
+
+  /// Rive 아트보드 padding 보정 배율. .riv 의 아트보드는 alive/happy/bloom 의
+  /// 모션 extent 를 담기 위해 visible 캐릭터보다 큰 경우가 많다. `Fit.contain`
+  /// 으로 렌더 시 슬롯의 visible 영역이 Figma 보다 작아 보이므로 슬롯 자체를
+  /// 비례 확대해 보정한다(가로 폭 기준). 세로는 bottomCenter 정렬 + charFeetY 로
+  /// 발끝 위치를 고정한다.
+  final double charScale;
+
+  /// 모든 단계 공통 고정값.
+  static const double bubbleH = 50;
+  // 꼬리 Vector 6117 의 Figma 원본 크기(17×14). SVG 에셋을 원본 비율로 렌더하므로
+  // 절대 늘리지 말 것(가로로 늘리면 곡선이 왜곡됨).
+  static const double tailW = 17;
+  static const double tailH = 14;
+}
+
+const _kStageLayouts = <int, _StageLayout>{
+  // Egg (97:2): Mask group 119,342 165.74×177 / shadow 108,494 188×49
+  //             bubble 72,264 258×50 / tail 106,311
+  1: _StageLayout(
+    bubbleX: 72, bubbleY: 264, bubbleW: 258,
+    tailX: 106, tailY: 311,
+    charX: 119, charY: 342, charW: 165.74, charH: 177,
+    speechText: '훈련을 통해 저를 산소로 만들어주세요!',
+    shadowX: 108, shadowY: 494, shadowW: 188, shadowH: 49,
+    // 실기기 측정: scale 1.55 에서 알이 Figma 의 78.4% (129.9 vs 165.74)로
+    // 작게 렌더됨(.riv 아트보드 여백). scale = 1.55/0.784 ≈ 1.98 로 보정.
+    // scale 키우면 하단여백×scale 도 ×1.277 커져 발끝이 떠오르므로 charFeetY
+    // 도 575→586 으로 올려 그림자(중심 y≈518) 위에 발끝 유지.
+    charFeetY: 586,
+    charScale: 1.98,
+  ),
+  // Baby (97:57): image 2002 135,361 133×117 / shadow 132,448 140×49
+  //               bubble 103,287 196×50 / tail 132,334
+  2: _StageLayout(
+    bubbleX: 103, bubbleY: 287, bubbleW: 196,
+    tailX: 132, tailY: 334,
+    charX: 135, charY: 361, charW: 133, charH: 117,
+    speechText: '저는 쪼꼬미 아가입니다!',
+    shadowX: 132, shadowY: 448, shadowW: 140, shadowH: 49,
+    // 실기기 측정: scale 1.55 에서 Baby 가 Figma 의 71.4% (94.9 vs 133).
+    // scale = 1.55/0.714 ≈ 2.17. 발끝도 그림자(472.5)보다 떠 있어 charFeetY 도
+    // 478→526 으로 보정(scale 키운 만큼 하단여백×scale 증가분 반영).
+    charFeetY: 526,
+    charScale: 2.17,
+  ),
+  // Oxygen (97:105): image 2003 83,328 236×207 / shadow 94,507 216×49
+  //                  bubble 107,254 188×50 / tail 132,301
+  3: _StageLayout(
+    bubbleX: 107, bubbleY: 254, bubbleW: 188,
+    tailX: 132, tailY: 301,
+    charX: 83, charY: 328, charW: 236, charH: 207,
+    speechText: '저 이제 어른입니다.',
+    shadowX: 94, shadowY: 507, shadowW: 216, shadowH: 49,
+    // 실기기 측정: scale 1.35 에서 Oxygen 이 Figma 의 92% (217 vs 236).
+    // scale = 1.35×236/217 ≈ 1.47. 발끝도 그림자(531.5)보다 떠 있어 charFeetY
+    // 도 535→602 으로 보정(scale 키운 만큼 하단여백×scale 증가분 반영).
+    charFeetY: 602,
+    charScale: 1.47,
+  ),
+};
 
 class _Frame {
   _Frame(this.screenW) : scale = screenW / _kFrameW;
@@ -194,12 +302,22 @@ class _BgPainter extends CustomPainter {
       canvas.drawRect(rect, paint);
       // 48 먼저 (뒤) → 47 그 위에.
       _drawEllipse(
-        canvas, scale, _e48Transform, _e48Width, _e48Height,
-        _e48DarkColors, _e48DarkStops,
+        canvas,
+        scale,
+        _e48Transform,
+        _e48Width,
+        _e48Height,
+        _e48DarkColors,
+        _e48DarkStops,
       );
       _drawEllipse(
-        canvas, scale, _e47DarkTransform, _e47Width, _e47Height,
-        _e47DarkColors, _e47DarkStops,
+        canvas,
+        scale,
+        _e47DarkTransform,
+        _e47Width,
+        _e47Height,
+        _e47DarkColors,
+        _e47DarkStops,
       );
       return;
     }
@@ -217,7 +335,7 @@ class _BgPainter extends CustomPainter {
       begin: Alignment(0.0, -1.0),
       end: Alignment(0.955, 0.024),
       colors: [
-        DotColors.lightBgTop,    // #99EBFC
+        DotColors.lightBgTop, // #99EBFC
         DotColors.lightBgBottom, // #DBF9FF
       ],
     ).createShader(rect);
@@ -226,12 +344,22 @@ class _BgPainter extends CustomPainter {
 
     // 48 먼저 (뒤) → 47 그 위에 그려서 47 이 시각적으로 앞쪽에 보이게.
     _drawEllipse(
-      canvas, scale, _e48Transform, _e48Width, _e48Height,
-      _e48Colors, _e48Stops,
+      canvas,
+      scale,
+      _e48Transform,
+      _e48Width,
+      _e48Height,
+      _e48Colors,
+      _e48Stops,
     );
     _drawEllipse(
-      canvas, scale, _e47Transform, _e47Width, _e47Height,
-      _e47Colors, _e47Stops,
+      canvas,
+      scale,
+      _e47Transform,
+      _e47Width,
+      _e47Height,
+      _e47Colors,
+      _e47Stops,
     );
   }
 
@@ -292,6 +420,11 @@ class _HomeContent extends StatelessWidget {
     final textPrimary =
         isDark ? DotColors.darkTextPrimary : DotColors.lightTextPrimary;
 
+    // (단계별 말풍선·캐릭터 위치는 아래 "무대" Consumer 에서만
+    //  characterShownLevelProvider 를 watch 한다 — 여기서 watch 하면 진화(레벨
+    //  변경) 한 프레임에 통계 카드·차트까지 통째로 리빌드되어 렉이 생기므로,
+    //  무대 위젯(말풍선/꼬리/그림자/캐릭터)만 별도 Consumer 로 분리한다.)
+
     // (이전 raster PNG 용 invertFilter / buildIcon 은 SVG 전환 후 제거됨.
     //  SVG 는 SvgPicture.asset 의 colorFilter 파라미터로 다크 모드 처리.)
 
@@ -335,8 +468,7 @@ class _HomeContent extends StatelessWidget {
                   'assets/dot/icon_settings.svg',
                   width: f.sx(22),
                   height: f.sx(21),
-                  colorFilter:
-                      ColorFilter.mode(textPrimary, BlendMode.srcIn),
+                  colorFilter: ColorFilter.mode(textPrimary, BlendMode.srcIn),
                 ),
               ),
             ),
@@ -371,8 +503,7 @@ class _HomeContent extends StatelessWidget {
                   'assets/dot/icon_bell.svg',
                   width: f.sx(18),
                   height: f.sx(20),
-                  colorFilter:
-                      ColorFilter.mode(textPrimary, BlendMode.srcIn),
+                  colorFilter: ColorFilter.mode(textPrimary, BlendMode.srcIn),
                 ),
               ),
             ),
@@ -388,8 +519,7 @@ class _HomeContent extends StatelessWidget {
             children: [
               Consumer(
                 builder: (_, ref, __) {
-                  final store =
-                      ref.watch(userProfileStoreProvider).valueOrNull;
+                  final store = ref.watch(userProfileStoreProvider).valueOrNull;
                   final name = store?.load()?.name ?? '사용자';
                   return Text(
                     '안녕하세요. $name님',
@@ -474,8 +604,7 @@ class _HomeContent extends StatelessWidget {
               },
               child: Container(
                 decoration: BoxDecoration(
-                  color:
-                      isDark ? DotColors.darkCardSoft : DotColors.lightCtaBg,
+                  color: isDark ? DotColors.darkCardSoft : DotColors.lightCtaBg,
                   borderRadius: BorderRadius.circular(f.sx(10)),
                 ),
                 alignment: Alignment.center,
@@ -508,9 +637,7 @@ class _HomeContent extends StatelessWidget {
               color: Colors.transparent,
               alignment: Alignment.center,
               child: Icon(
-                isDark
-                    ? Icons.light_mode_outlined
-                    : Icons.dark_mode_outlined,
+                isDark ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
                 size: f.sx(22),
                 color: textPrimary,
               ),
@@ -518,58 +645,118 @@ class _HomeContent extends StatelessWidget {
           ),
         ),
 
-        // ─── 말풍선 박스 (Rectangle 77 at 115,264, 176×50) ────────
-        // 가운데 정렬 흰색 둥근 사각형. 안에 "저와 함께 훈련해요~!" 텍스트.
-        f.at(
-          x: 115,
-          y: 264,
-          w: 176,
-          h: 50,
-          child: Container(
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(f.sx(10)),
-            ),
-            alignment: Alignment.center,
-            child: Text(
-              '저와 함께 훈련해요~!',
-              style: TextStyle(
-                fontSize: f.sx(15),
-                fontWeight: FontWeight.w700,
-                color: Colors.black,
-                fontFamily: BlowfitTheme.fontFamily,
-              ),
-            ),
+        // ─── 무대(말풍선·꼬리·그림자·캐릭터) — 단계별 위치/크기 ──────────
+        // characterShownLevelProvider 는 여기서만 watch → 진화 시 이 4개만
+        // 리빌드(통계 카드·차트는 그대로 유지되어 진화 프레임이 가벼워짐).
+        Positioned.fill(
+          child: Consumer(
+            builder: (context, ref, _) {
+              final shownLevel = ref.watch(characterShownLevelProvider);
+              final layout = _kStageLayouts[shownLevel] ?? _kStageLayouts[1]!;
+              return Stack(
+                children: [
+                  // ─── 말풍선 박스 (단계별 위치/크기 — Figma 97:2/57/105) ───────
+                  // Egg 258×50 at (72,264) / Baby 196×50 at (103,287) / Oxygen 188×50 at (107,254).
+                  f.at(
+                    x: layout.bubbleX,
+                    y: layout.bubbleY,
+                    w: layout.bubbleW,
+                    h: _StageLayout.bubbleH,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(f.sx(10)),
+                      ),
+                      alignment: Alignment.center,
+                      child: Padding(
+                        padding: EdgeInsets.symmetric(horizontal: f.sx(10)),
+                        // FittedBox(scaleDown): Figma 폰트(15px)로 들어가면 그대로, 기기
+                        // 폰트 메트릭 차이로 살짝 넘치면 자동으로 아주 조금만 축소 →
+                        // "요!" 가 ellipsis 로 잘리던 문제 방지(절대 안 잘림).
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(
+                            layout.speechText,
+                            maxLines: 1,
+                            softWrap: false,
+                            style: TextStyle(
+                              fontSize: f.sx(15),
+                              fontWeight: FontWeight.w700,
+                              color: Colors.black,
+                              fontFamily: BlowfitTheme.fontFamily,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  // ─── 말풍선 꼬리 (단계별 위치 — Vector 6117 17×14) ───────────
+                  // Egg (106,311) / Baby (132,334) / Oxygen (132,301).
+                  // Figma 원본 벡터를 SVG 에셋으로 그대로 렌더 → 모양 100% 일치(손으로
+                  // 베지어를 맞추지 않음). BoxFit.fill 로 17×14 슬롯을 꽉 채우되, 슬롯
+                  // 비율(17:14)이 viewBox 와 같으므로 왜곡 없음.
+                  f.at(
+                    x: layout.tailX,
+                    y: layout.tailY,
+                    w: _StageLayout.tailW,
+                    h: _StageLayout.tailH,
+                    child: SvgPicture.asset(
+                      'assets/dot/speech_tail.svg',
+                      fit: BoxFit.fill,
+                    ),
+                  ),
+
+                  // ─── 지면 그림자 (Figma Ellipse 54) — 캐릭터보다 먼저(뒤) 그림 ────
+                  // 가우시안 블러된 회색 타원. 캐릭터 발밑에 깔려 입체감을 줌.
+                  f.at(
+                    x: layout.shadowX,
+                    y: layout.shadowY,
+                    w: layout.shadowW,
+                    h: layout.shadowH,
+                    child: CustomPaint(
+                      painter: _GroundShadowPainter(blurSigma: f.sx(8)),
+                    ),
+                  ),
+
+                  // ─── 캐릭터 (단계별 위치/크기 — Figma 97:2/57/105) ────────────
+                  // Figma visible 바운딩의 가로 폭에 charScale 을 곱해 Rive 아트보드
+                  // padding 을 보정(크기). 세로는 bottomCenter 정렬 + charFeetY 로 발끝을
+                  // 그림자 위에 안착시킨다. 슬롯 height 는 발끝(charFeetY) 위로 충분히
+                  // 크게 잡아 캐릭터 전체가 들어가도록 함(말풍선과 겹쳐도 투명 padding).
+                  () {
+                    final slotW = layout.charW * layout.charScale;
+                    // 슬롯 높이: 발끝 기준 위로 캐릭터가 다 들어갈 만큼. charH*scale 의
+                    // 1.2배 여유 (모션 extent 포함). bottomCenter 라 위쪽 여백은 무해.
+                    final slotH = layout.charH * layout.charScale * 1.2;
+                    final left = 201.0 - slotW / 2; // frame 가로 중앙(201)에 정렬
+                    final top = layout.charFeetY - slotH; // 슬롯 하단 = 발끝
+                    return f.at(
+                      x: left,
+                      y: top,
+                      w: slotW,
+                      h: slotH,
+                      child: const BrelowCharacterPanel(
+                        alignment: Alignment.bottomCenter,
+                      ),
+                    );
+                  }(),
+                ],
+              );
+            },
           ),
         ),
 
-        // ─── 말풍선 꼬리 (Vector 6117 at 133,311, 17×14) ──────────
-        // 작은 삼각형이 캐릭터 쪽으로 내려옴. CustomPaint 로 그림.
-        f.at(
-          x: 133,
-          y: 311,
-          w: 17,
-          h: 14,
-          child: CustomPaint(
-            painter: _SpeechBubbleTailPainter(color: Colors.white),
+        // ─── (디버그 전용) 캐릭터 진화 테스트 버튼 ───────────────────
+        // 누적 훈련일을 기다리지 않고 진화/happy/리셋을 즉시 트리거. 릴리즈
+        // 빌드에는 포함되지 않음.
+        if (kDebugMode)
+          Positioned(
+            top: MediaQuery.of(context).padding.top + 8,
+            left: 0,
+            right: 0,
+            child: const Center(child: BrelowCharacterDebugBar()),
           ),
-        ),
-
-        // ─── 캐릭터 마스코트 (232.4×225.2 at 85.8,340) — 새 디자인 ─
-        // 그라데이션 라운드 body + 팔/다리/그림자(blur 포함) + 표정(도트 브러시).
-        // 캔버스를 그림자 blur 까지 포함하도록 확장 (body 는 frame 119.33,340
-        // 그대로 유지되도록 bbox 원점 85.8 로 잡음).
-        f.at(
-          x: 85.8,
-          y: 340,
-          w: 232.4,
-          h: 225.2,
-          child: Image.asset(
-            'assets/dot/mascot.png',
-            fit: BoxFit.contain,
-            filterQuality: FilterQuality.high,
-          ),
-        ),
 
         // ─── 통계 카드 (362×194) — 화면 bottom 기준 ──────────────
         // dots 영역 (16 gap + 6 dot + 16 gap) 위에 카드를 둠 — 화면 어떤
@@ -613,7 +800,6 @@ class _HomeContent extends StatelessWidget {
             ],
           ),
         ),
-
       ],
     );
   }
@@ -637,8 +823,7 @@ class _StatsCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final cardBg = isDark ? DotColors.darkCard : DotColors.lightCard;
-    final subCardBg =
-        isDark ? DotColors.darkCardSoft : DotColors.lightCardSoft;
+    final subCardBg = isDark ? DotColors.darkCardSoft : DotColors.lightCardSoft;
     final textPrimary =
         isDark ? DotColors.darkTextPrimary : DotColors.lightTextPrimary;
     final trackBg = isDark ? DotColors.darkTrack : DotColors.lightTrack;
@@ -647,8 +832,7 @@ class _StatsCard extends ConsumerWidget {
     // ─── 오늘 통계 계산 ───
     // todayDurationProvider 는 StreamProvider<Duration>. AsyncValue 의
     // valueOrNull 이 null 이면 (로딩) duration=0 으로 placeholder 표시.
-    final today =
-        ref.watch(todayDurationProvider).valueOrNull ?? Duration.zero;
+    final today = ref.watch(todayDurationProvider).valueOrNull ?? Duration.zero;
     final cycleCount = today.inSeconds ~/ _cycleSeconds;
     // 호기/흡기 각 phase 의 실제 누적 분 — cycle 당 10s × cycleCount.
     final phaseMinutes = (cycleCount * _phaseSeconds) ~/ 60;
@@ -842,30 +1026,41 @@ class _BreathSubCard extends StatelessWidget {
   }
 }
 
+// (말풍선 꼬리는 더 이상 CustomPainter 로 손수 그리지 않는다 — Figma 원본 벡터를
+//  그대로 export 한 assets/dot/speech_tail.svg 를 SvgPicture 로 렌더한다.)
+
 // ─────────────────────────────────────────────────────────────────────────────
-// 말풍선 꼬리 — 작은 삼각형 모양으로 캐릭터 쪽 (아래) 을 가리킴.
-// Figma Vector 6117 (17×14) 의 단순 근사 — 정확한 path 가 필요해지면
-// flutter_svg + SVG asset 으로 교체 가능.
+// 지면 그림자 — Figma Ellipse 54 (layer-blur 타원).
+//
+// Figma 픽셀 분석:
+//   - 중심 다크니스 ~37~40% (흰 배경 위 RGB 156,164,160 → 살짝 초록빛 어두운 회색)
+//   - layer-blur 로 node box 대비 렌더가 가로 ~1.22×, 세로 ~1.90× 확장
+//     (egg 233/188·94/49, oxy 260/216·93/49 → 가로 1.20~1.24, 세로 ~1.90 평균)
+//   - 중심만 진하고 가장자리로 부드럽게 사라지는 가우시안형
+//
+// 재현: 슬롯(=node box) 중심에 RadialGradient(중심 0.40 → 가장자리 투명) 타원을
+// box 대비 가로 1.22×·세로 1.90× 로 확대해 그린다. RadialGradient 가 비정방
+// rect 에 매핑되며 타원형으로 늘어나 Figma 의 부드러운 falloff 를 그대로 재현.
+// CustomPaint 는 clip 하지 않으므로 슬롯 밖으로 번져도 안전.
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _SpeechBubbleTailPainter extends CustomPainter {
-  _SpeechBubbleTailPainter({required this.color});
-  final Color color;
+class _GroundShadowPainter extends CustomPainter {
+  const _GroundShadowPainter({required this.blurSigma});
+
+  /// 가우시안 블러 강도 (화면 scale 반영). Figma layer-blur(~22px spread) 대응.
+  final double blurSigma;
 
   @override
   void paint(Canvas canvas, Size size) {
+    // node box 를 꽉 채운 평평한 타원 + 가우시안 블러 = Figma layer-blur 그림자
+    // (평평한 타원이 darkest core, 블러가 사방 ~22px 로 부드럽게 퍼짐).
+    // alpha 0.33 — 실기기 측정으로 Figma 다크니스(잔디 위 drop ~45)에 맞춤.
     final paint = Paint()
-      ..color = color
-      ..style = PaintingStyle.fill;
-    // 위쪽 가로 변 ─ 말풍선 박스 하단과 매칭. 아래로 좁아지는 삼각형.
-    final path = Path()
-      ..moveTo(0, 0)
-      ..lineTo(size.width, 0)
-      ..lineTo(size.width * 0.35, size.height)
-      ..close();
-    canvas.drawPath(path, paint);
+      ..color = const Color.fromRGBO(18, 38, 26, 0.33)
+      ..maskFilter = MaskFilter.blur(BlurStyle.normal, blurSigma);
+    canvas.drawOval(Offset.zero & size, paint);
   }
 
   @override
-  bool shouldRepaint(_SpeechBubbleTailPainter old) => old.color != color;
+  bool shouldRepaint(_GroundShadowPainter old) => old.blurSigma != blurSigma;
 }

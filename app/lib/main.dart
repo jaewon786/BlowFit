@@ -24,6 +24,7 @@ import 'features/onboarding/onboarding_screen.dart';
 import 'features/pairing/my_code_screen.dart';
 import 'features/profile/profile_screen.dart';
 import 'features/role/role_select_screen.dart';
+import 'features/profile_setup/pimax_measure_screen.dart';
 import 'features/profile_setup/profile_setup_screen.dart';
 import 'features/result/result_screen.dart';
 import 'features/session_detail/session_detail_screen.dart';
@@ -182,11 +183,17 @@ final _router = GoRouter(
       path: '/onboarding',
       builder: (_, __) => const OnboardingScreen(),
     ),
-    // 디자인 v2 — 온보딩 끝 → 프로필 설정 → 페어링.
+    // 디자인 v2 — 온보딩 끝 → 프로필 설정 → PImax/MEP 측정 → 페어링.
     GoRoute(
       parentNavigatorKey: _rootNavKey,
       path: '/profile-setup',
       builder: (_, __) => const ProfileSetupScreen(),
+    ),
+    // PImax(최대 흡기압)/MEP(최대 호기압) 측정 — v4.1 %PImax 적응형 target 입력값.
+    GoRoute(
+      parentNavigatorKey: _rootNavKey,
+      path: '/pimax-measure',
+      builder: (_, __) => const PimaxMeasureScreen(),
     ),
     // 개발용 — Samsung Health Data SDK 연동 검증 화면.
     GoRoute(

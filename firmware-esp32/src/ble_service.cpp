@@ -63,9 +63,17 @@ namespace {
 
       switch (op) {
         case opcode::START_SESSION: {
-          const uint8_t lvl = (plen >= 1) ? payload[0] : 1;
-          Serial.printf("[ble] START_SESSION (orifice=%u)\n", (unsigned)lvl);
-          session::startSession();
+          // payload (forward-compat):
+          //   [orifice_level: 1B]
+          //   [orifice_level: 1B, start_phase: 1B]   ← v4.1, PImax 측정 모드
+          //   start_phase: 0=Exhale (기본), 1=Inhale (PImax 측정 시)
+          const uint8_t lvl   = (plen >= 1) ? payload[0] : 1;
+          const uint8_t phase = (plen >= 2) ? payload[1] : 0;
+          Serial.printf("[ble] START_SESSION orifice=%u phase=%u\n",
+                        (unsigned)lvl, (unsigned)phase);
+          session::startSession(
+              phase == 1 ? session::StartPhase::Inhale
+                         : session::StartPhase::Exhale);
           // TODO: orifice level 적용 (M9: NVS 저장 + 화면 표시)
           break;
         }
@@ -86,11 +94,30 @@ namespace {
                         sensor::zeroOffset());
           break;
         case opcode::SET_TARGET:
-          if (plen >= 2) {
+          // payload 길이로 v4.0 legacy / v4.1 clinical 구분:
+          //   2 B → legacy : (low: u8, high: u8) — 대칭 절대값 cmH₂O
+          //   5 B → v4.1   : (level: u8, pimax×10: u16 LE, mep×10: u16 LE)
+          //                  level = IntensityLevel (0/1/2). PImax/MEP 는
+          //                  decimal 1자리 보존을 위해 ×10 정수로 전송.
+          if (plen == 2) {
             const float lo = static_cast<float>(payload[0]);
             const float hi = static_cast<float>(payload[1]);
-            Serial.printf("[ble] SET_TARGET low=%.1f high=%.1f\n", lo, hi);
+            Serial.printf("[ble] SET_TARGET legacy low=%.1f high=%.1f\n", lo, hi);
             session::setTarget(lo, hi);
+          } else if (plen >= 5) {
+            const uint8_t level = payload[0];
+            uint16_t pimax_x10 = 0;
+            uint16_t mep_x10   = 0;
+            std::memcpy(&pimax_x10, payload + 1, 2);
+            std::memcpy(&mep_x10,   payload + 3, 2);
+            const float pimax = pimax_x10 / 10.0f;
+            const float mep   = mep_x10   / 10.0f;
+            Serial.printf("[ble] SET_TARGET v4.1 level=%u PImax=%.1f MEP=%.1f\n",
+                          (unsigned)level, pimax, mep);
+            session::setPimaxMep(pimax, mep);
+            session::setIntensity(static_cast<session::IntensityLevel>(level));
+          } else {
+            Serial.printf("[ble] SET_TARGET ignored — plen=%u\n", (unsigned)plen);
           }
           break;
         case opcode::SET_DURATION:

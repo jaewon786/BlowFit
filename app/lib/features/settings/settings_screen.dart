@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/ble/ble_providers.dart';
 import '../../core/storage/last_device_store.dart';
+import '../../core/storage/pimax_mep_store.dart';
 import '../../core/storage/storage_providers.dart';
 import '../../core/storage/train_duration_store.dart';
 
@@ -18,7 +19,8 @@ class SettingsScreen extends ConsumerWidget {
     final connected = ref.watch(connectionProvider).valueOrNull ?? false;
     final state = ref.watch(deviceStateProvider).valueOrNull;
     final lastDevice = ref.watch(lastDeviceStoreProvider).valueOrNull?.load();
-    final targetZone = ref.watch(targetSettingsStoreProvider).valueOrNull?.load();
+    // v4.1: 단일 zone 대신 강도(label) + 흡기/호기 % 미리보기.
+    final pmStore = ref.watch(pimaxMepStoreProvider).valueOrNull;
     final trainMinutes = ref.watch(trainDurationStoreProvider).valueOrNull?.loadMinutes() ??
         TrainDurationStore.defaultMinutes;
     // 펌웨어 버전은 BLE Device Information characteristic 으로 보고되지만 현재
@@ -41,9 +43,9 @@ class SettingsScreen extends ConsumerWidget {
             _SettingsTile(
               icon: Icons.tune,
               label: '목표 압력 설정',
-              trailing: targetZone == null
-                  ? '— cmH₂O'
-                  : '${targetZone.low}-${targetZone.high} cmH₂O',
+              trailing: pmStore == null
+                  ? '—'
+                  : '${pmStore.loadLevel().label} · ${pmStore.loadLevel().midPct}%',
               onTap: () => context.push('/settings/target'),
             ),
             _SettingsTile(

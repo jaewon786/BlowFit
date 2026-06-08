@@ -39,11 +39,27 @@ abstract class BleManager {
   /// 안전.
   Future<bool> tryAdoptExistingConnection();
 
-  Future<void> startSession(OrificeLevel level);
+  /// startPhase: 펌웨어 cycle 시작 위치.
+  ///   0 = Exhale (기본, 호기부터)
+  ///   1 = Inhale (흡기 측정 모드 — LCD 가 처음부터 "들이쉬기" 표시)
+  Future<void> startSession(OrificeLevel level, {int startPhase = 0});
   Future<void> stopSession();
   Future<void> syncTime();
   Future<void> zeroCalibrate();
+  /// (Legacy v4.0) 절대값 zone — 흡기/호기 대칭. 새 코드는 setIntensityTarget 사용.
   Future<void> setTarget(int lowCmH2O, int highCmH2O);
+
+  /// (v4.1 clinical) %PImax 기반 적응형 target — 강도 level + PImax + MEP 전송.
+  ///   level   : 0=Beginner, 1=Normal, 2=Advanced (펌웨어 IntensityLevel 1:1)
+  ///   pimax   : 사용자 최대 흡기압 (cmH₂O). 0 이상.
+  ///   mep     : 사용자 최대 호기압 (cmH₂O). 0 이상.
+  /// BLE wire: opcode 0x05 + level(1B) + pimax×10(u16 LE) + mep×10(u16 LE) = 5B.
+  /// 펌웨어가 흡기/호기 4개 target 을 자동 계산 + 안전 상한 clamp.
+  Future<void> setIntensityTarget({
+    required int level,
+    required double pimax,
+    required double mep,
+  });
 
   /// Train 세션 길이 (초) 를 기기로 전송 (SET_DURATION opcode).
   Future<void> setTrainDuration(int seconds);

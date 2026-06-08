@@ -97,7 +97,7 @@ class FakeBleManager implements BleManager {
   }
 
   @override
-  Future<void> startSession(OrificeLevel level) async {
+  Future<void> startSession(OrificeLevel level, {int startPhase = 0}) async {
     if (!_connected) throw StateError('not connected');
     _orifice = level;
     _sessionId++;
@@ -168,6 +168,13 @@ class FakeBleManager implements BleManager {
   Future<void> zeroCalibrate() async {}
   @override
   Future<void> setTarget(int lowCmH2O, int highCmH2O) async {}
+
+  @override
+  Future<void> setIntensityTarget({
+    required int level,
+    required double pimax,
+    required double mep,
+  }) async {}
 
   @override
   Future<void> setTrainDuration(int seconds) async {}

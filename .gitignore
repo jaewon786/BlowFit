@@ -45,3 +45,7 @@ app/**/*.freezed.dart
 *.log
 *.sqlite
 *.db
+
+# 임시 작업 폴더 (figma export/screenshot 등)
+tmp/
+.figtmp*/

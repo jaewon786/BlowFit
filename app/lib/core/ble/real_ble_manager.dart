@@ -327,7 +327,7 @@ class RealBleManager implements BleManager {
   }
 
   @override
-  Future<void> startSession(OrificeLevel level) async {
+  Future<void> startSession(OrificeLevel level, {int startPhase = 0}) async {
     // App background → foreground 흐름에서 _control 이 stale 일 수 있음.
     // 1차: 빠른 경로 (cached state 신뢰). 실패 시 forceRebind 로 재시도.
     var ready = await ensureConnected();
@@ -343,7 +343,7 @@ class RealBleManager implements BleManager {
         '${level.value}] to ${_control!.uuid}');
     try {
       await _control!.write(
-        [Opcode.startSession, level.value],
+        [Opcode.startSession, level.value, startPhase & 0xFF],
         withoutResponse: false,
       );
       debugPrint('[ble] startSession write completed');
@@ -355,7 +355,7 @@ class RealBleManager implements BleManager {
       if (retry && _control != null) {
         try {
           await _control!.write(
-            [Opcode.startSession, level.value],
+            [Opcode.startSession, level.value, startPhase & 0xFF],
             withoutResponse: false,
           );
           debugPrint('[ble] startSession write completed on retry');
@@ -392,6 +392,27 @@ class RealBleManager implements BleManager {
   Future<void> setTarget(int lowCmH2O, int highCmH2O) async {
     await _control?.write(
       [Opcode.setTarget, lowCmH2O, highCmH2O],
+      withoutResponse: false,
+    );
+  }
+
+  @override
+  Future<void> setIntensityTarget({
+    required int level,
+    required double pimax,
+    required double mep,
+  }) async {
+    // payload: opcode + level(1B) + pimax×10(u16 LE) + mep×10(u16 LE) = 6B 총
+    // 펌웨어 ble_service.cpp 는 opcode 제외한 plen==5 분기.
+    final pimaxX10 = (pimax * 10).round().clamp(0, 65535);
+    final mepX10   = (mep   * 10).round().clamp(0, 65535);
+    await _control?.write(
+      [
+        Opcode.setTarget,
+        level & 0xFF,
+        pimaxX10 & 0xFF, (pimaxX10 >> 8) & 0xFF,
+        mepX10   & 0xFF, (mepX10   >> 8) & 0xFF,
+      ],
       withoutResponse: false,
     );
   }

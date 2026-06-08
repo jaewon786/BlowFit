@@ -83,6 +83,18 @@ class SessionRepository {
         ));
   }
 
+  /// 캐릭터(진화/표정) 트리거용 누적 통계 — 전체 세션 스트림에서 한 번에.
+  ///   trainingDays : 누적(전체 기간) distinct 훈련일 수 (진화 단계 판정).
+  ///   sessionCount : 누적 세션 수 (세션 완료 → happy 판정).
+  Stream<({int trainingDays, int sessionCount})> watchCharacterStats() {
+    return _db.select(_db.sessions).watch().map(
+          (sessions) => (
+            trainingDays: sessionsToDistinctDates(sessions).length,
+            sessionCount: sessions.length,
+          ),
+        );
+  }
+
   /// 가장 오래된 세션 날짜 — 오리피스 단계 추천에 사용.
   Future<DateTime?> firstSessionDate() async {
     final q = _db.select(_db.sessions)

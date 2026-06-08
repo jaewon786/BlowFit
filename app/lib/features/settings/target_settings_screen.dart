@@ -1,9 +1,27 @@
+// 목표 압력 설정 화면 — v4.1 %PImax 기반 적응형.
+//
+// 구성:
+//   1. 강도 단계 카드 — 초보/일반/숙련 RadioListTile (한 변수로 비율 전환)
+//   2. 내 PImax/MEP 카드 — TextField. 안전 상한 초과 시 ⚠ 경고
+//   3. 현재 목표 미리보기 카드 — 흡기/호기 절대값 + (X% PImax/MEP)
+//   4. 영점 보정 카드 — 기존 유지 (압력 측정 hw 보정)
+//
+// 근거 (배경 설명용):
+//   - 50~60% PImax  POWERbreathe 임상 표준 (sustainable zone, 기본)
+//   - 70~75% PImax  Vranish & Bailey 2016 IMT 프로토콜 (강도 ↑)
+//   - 30~40% PImax  호흡 재활 초보 (Bissett 2019)
+//   - 안전 상한 흡기 90 / 호기 100 cmH₂O — consumer device ceiling
+//
+// 펌웨어 전송 (저장 버튼): BLE SET_TARGET v4.1 payload
+//   opcode 0x05 + level(1B) + pimax×10(u16 LE) + mep×10(u16 LE) = 6B
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/ble/ble_providers.dart';
+import '../../core/storage/pimax_mep_store.dart';
 import '../../core/storage/storage_providers.dart';
-import '../../core/storage/target_settings_store.dart';
 
 class TargetSettingsScreen extends ConsumerStatefulWidget {
   const TargetSettingsScreen({super.key});
@@ -13,51 +31,102 @@ class TargetSettingsScreen extends ConsumerStatefulWidget {
 }
 
 class _TargetSettingsScreenState extends ConsumerState<TargetSettingsScreen> {
-  double _low = TargetSettingsStore.defaultLow.toDouble();
-  double _high = TargetSettingsStore.defaultHigh.toDouble();
+  IntensityLevel _level = PimaxMepStore.defaultLevel;
+  late final TextEditingController _pimaxCtrl;
+  late final TextEditingController _mepCtrl;
   bool _loaded = false;
   bool _saving = false;
   bool _calibrating = false;
 
-  static const _absoluteMin = 5.0;
-  static const _absoluteMax = 50.0;
-  static const _minWidth = 5.0;
-
   @override
   void initState() {
     super.initState();
+    _pimaxCtrl = TextEditingController();
+    _mepCtrl = TextEditingController();
     WidgetsBinding.instance.addPostFrameCallback((_) => _hydrate());
   }
 
+  @override
+  void dispose() {
+    _pimaxCtrl.dispose();
+    _mepCtrl.dispose();
+    super.dispose();
+  }
+
   Future<void> _hydrate() async {
-    final store = await ref.read(targetSettingsStoreProvider.future);
-    final zone = store.load();
+    final store = await ref.read(pimaxMepStoreProvider.future);
     if (!mounted) return;
     setState(() {
-      _low = zone.low.toDouble();
-      _high = zone.high.toDouble();
+      _level = store.loadLevel();
+      _pimaxCtrl.text = store.loadPimax().toStringAsFixed(0);
+      _mepCtrl.text = store.loadMep().toStringAsFixed(0);
       _loaded = true;
     });
   }
 
-  Future<void> _saveTarget() async {
-    setState(() => _saving = true);
-    final zone = TargetZone(low: _low.round(), high: _high.round());
+  /// 현재 입력값 기반 흡기/호기 target 계산 (저장 전 미리보기).
+  ({double low, double high}) _previewInhale() {
+    final pimax = double.tryParse(_pimaxCtrl.text) ?? PimaxMepStore.defaultPimax;
+    var low = pimax * _level.lowPct;
+    var high = pimax * _level.highPct;
+    if (high > PimaxMepStore.inhaleSafetyLimitCmH2O) {
+      high = PimaxMepStore.inhaleSafetyLimitCmH2O;
+      if (low > high) low = high;
+    }
+    return (low: low, high: high);
+  }
 
-    // 1) 로컬 SharedPreferences 먼저 저장 — BLE 실패해도 캐시 유지.
+  ({double low, double high}) _previewExhale() {
+    final mep = double.tryParse(_mepCtrl.text) ?? PimaxMepStore.defaultMep;
+    var low = mep * _level.lowPct;
+    var high = mep * _level.highPct;
+    if (high > PimaxMepStore.exhaleSafetyLimitCmH2O) {
+      high = PimaxMepStore.exhaleSafetyLimitCmH2O;
+      if (low > high) low = high;
+    }
+    return (low: low, high: high);
+  }
+
+  /// 사용자가 PImax 를 너무 크게 적어 흡기 target 이 안전 상한 초과 → ⚠.
+  bool get _inhaleExceeds {
+    final pimax = double.tryParse(_pimaxCtrl.text) ?? PimaxMepStore.defaultPimax;
+    return pimax * _level.highPct > PimaxMepStore.inhaleSafetyLimitCmH2O;
+  }
+
+  bool get _exhaleExceeds {
+    final mep = double.tryParse(_mepCtrl.text) ?? PimaxMepStore.defaultMep;
+    return mep * _level.highPct > PimaxMepStore.exhaleSafetyLimitCmH2O;
+  }
+
+  Future<void> _save() async {
+    final pimax = double.tryParse(_pimaxCtrl.text);
+    final mep = double.tryParse(_mepCtrl.text);
+    if (pimax == null || pimax <= 0 || mep == null || mep <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('PImax / MEP 는 0 보다 큰 수로 입력하세요.')),
+      );
+      return;
+    }
+    setState(() => _saving = true);
+
     String? saveError;
     try {
-      final store = await ref.read(targetSettingsStoreProvider.future);
-      await store.save(zone);
-      ref.invalidate(targetSettingsStoreProvider); // watcher 들에게 갱신 알림
+      final store = await ref.read(pimaxMepStoreProvider.future);
+      await store.saveLevel(_level);
+      await store.savePimax(pimax);
+      await store.saveMep(mep);
+      ref.invalidate(pimaxMepStoreProvider);
     } catch (e) {
       saveError = e.toString();
     }
 
-    // 2) BLE 로 펌웨어에 전송 (실패해도 로컬 저장은 남음)
     String? bleError;
     try {
-      await ref.read(bleManagerProvider).setTarget(zone.low, zone.high);
+      await ref.read(bleManagerProvider).setIntensityTarget(
+            level: _level.value,
+            pimax: pimax,
+            mep: mep,
+          );
     } catch (e) {
       bleError = e.toString();
     }
@@ -68,7 +137,7 @@ class _TargetSettingsScreenState extends ConsumerState<TargetSettingsScreen> {
         ? '로컬 저장 실패: $saveError'
         : (bleError != null
             ? '로컬 저장 OK · 기기 전송 실패: $bleError'
-            : '목표 압력 저장: ${zone.low} - ${zone.high} cmH₂O');
+            : '저장 완료 (${_level.label} · PImax ${pimax.toStringAsFixed(0)} / MEP ${mep.toStringAsFixed(0)})');
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
@@ -109,7 +178,8 @@ class _TargetSettingsScreenState extends ConsumerState<TargetSettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final connected = ref.watch(connectionProvider).valueOrNull ?? false;
-    final isValid = _high >= _low + _minWidth;
+    final inhalePreview = _loaded ? _previewInhale() : null;
+    final exhalePreview = _loaded ? _previewExhale() : null;
 
     return Scaffold(
       appBar: AppBar(title: const Text('목표 압력 설정')),
@@ -119,7 +189,7 @@ class _TargetSettingsScreenState extends ConsumerState<TargetSettingsScreen> {
             : ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
-                  if (!connected)
+                  if (!connected) ...[
                     Card(
                       color: Colors.orange.shade50,
                       child: const Padding(
@@ -130,7 +200,7 @@ class _TargetSettingsScreenState extends ConsumerState<TargetSettingsScreen> {
                             SizedBox(width: 8),
                             Expanded(
                               child: Text(
-                                '기기에 연결되어 있지 않습니다. 변경 사항은 다음 연결 시 적용되지 않습니다.',
+                                '기기에 연결되어 있지 않습니다. 저장한 값은 다음 연결 시 자동 전송됩니다.',
                                 style: TextStyle(color: Colors.orange),
                               ),
                             ),
@@ -138,7 +208,10 @@ class _TargetSettingsScreenState extends ConsumerState<TargetSettingsScreen> {
                         ),
                       ),
                     ),
-                  if (!connected) const SizedBox(height: 16),
+                    const SizedBox(height: 16),
+                  ],
+
+                  // ── 강도 단계 ──
                   Card(
                     child: Padding(
                       padding: const EdgeInsets.all(16),
@@ -146,59 +219,149 @@ class _TargetSettingsScreenState extends ConsumerState<TargetSettingsScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           const Text(
-                            '목표 압력대',
+                            '강도 단계',
                             style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                           ),
                           const SizedBox(height: 4),
                           const Text(
-                            '훈련 시 그래프에서 녹색으로 표시되는 영역입니다.',
+                            'PImax / MEP 에 곱할 % 범위. 한 변수로 흡기·호기 4개 목표가 한꺼번에 갱신됩니다.',
                             style: TextStyle(fontSize: 12, color: Colors.black54),
                           ),
-                          const SizedBox(height: 16),
-                          // 두 슬라이더 모두 absolute min/max — 한쪽 움직여도 다른쪽
-                          // thumb 시각 위치가 안 변함. 최소 폭 검사는 isValid 로.
-                          _LabeledSlider(
-                            label: '최소',
-                            value: _low,
-                            min: _absoluteMin,
-                            max: _absoluteMax,
-                            onChanged: (v) => setState(() => _low = v),
-                          ),
                           const SizedBox(height: 8),
-                          _LabeledSlider(
-                            label: '최대',
-                            value: _high,
-                            min: _absoluteMin,
-                            max: _absoluteMax,
-                            onChanged: (v) => setState(() => _high = v),
-                          ),
-                          if (!isValid)
-                            const Padding(
-                              padding: EdgeInsets.only(top: 6),
-                              child: Text(
-                                '최대값은 최소값 + 5 이상이어야 합니다.',
-                                style: TextStyle(fontSize: 12, color: Colors.redAccent),
+                          for (final lv in IntensityLevel.values)
+                            RadioListTile<IntensityLevel>(
+                              dense: true,
+                              contentPadding: EdgeInsets.zero,
+                              value: lv,
+                              groupValue: _level,
+                              onChanged: (v) {
+                                if (v != null) setState(() => _level = v);
+                              },
+                              title: Text(lv.label),
+                              subtitle: Text(
+                                '${(lv.lowPct * 100).round()} ~ ${(lv.highPct * 100).round()}%'
+                                '${lv == PimaxMepStore.defaultLevel ? "  · 기본 (POWERbreathe sustainable zone)" : ""}',
                               ),
                             ),
-                          const SizedBox(height: 16),
-                          SizedBox(
-                            width: double.infinity,
-                            child: FilledButton.icon(
-                              onPressed: connected && isValid && !_saving ? _saveTarget : null,
-                              icon: _saving
-                                  ? const SizedBox(
-                                      width: 16, height: 16,
-                                      child: CircularProgressIndicator(strokeWidth: 2),
-                                    )
-                                  : const Icon(Icons.save),
-                              label: const Text('기기에 저장'),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // ── 내 PImax / MEP ──
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            '내 PImax / MEP',
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(height: 4),
+                          const Text(
+                            'PImax = 최대 흡기압, MEP = 최대 호기압 (cmH₂O). 측정 기능이 없으면 일반 성인 평균(80 / 60) 사용.',
+                            style: TextStyle(fontSize: 12, color: Colors.black54),
+                          ),
+                          const SizedBox(height: 12),
+                          TextField(
+                            controller: _pimaxCtrl,
+                            keyboardType: TextInputType.number,
+                            inputFormatters: [
+                              FilteringTextInputFormatter.digitsOnly,
+                              LengthLimitingTextInputFormatter(3),
+                            ],
+                            decoration: InputDecoration(
+                              labelText: 'PImax (cmH₂O)',
+                              suffixText: 'cmH₂O',
+                              border: const OutlineInputBorder(),
+                              helperText: _inhaleExceeds
+                                  ? '⚠ 흡기 목표가 안전 상한 ${PimaxMepStore.inhaleSafetyLimitCmH2O.toInt()} cmH₂O를 초과해 자동 제한됩니다.'
+                                  : null,
+                              helperStyle: const TextStyle(color: Colors.redAccent),
                             ),
+                            onChanged: (_) => setState(() {}),
+                          ),
+                          const SizedBox(height: 12),
+                          TextField(
+                            controller: _mepCtrl,
+                            keyboardType: TextInputType.number,
+                            inputFormatters: [
+                              FilteringTextInputFormatter.digitsOnly,
+                              LengthLimitingTextInputFormatter(3),
+                            ],
+                            decoration: InputDecoration(
+                              labelText: 'MEP (cmH₂O)',
+                              suffixText: 'cmH₂O',
+                              border: const OutlineInputBorder(),
+                              helperText: _exhaleExceeds
+                                  ? '⚠ 호기 목표가 안전 상한 ${PimaxMepStore.exhaleSafetyLimitCmH2O.toInt()} cmH₂O를 초과해 자동 제한됩니다.'
+                                  : null,
+                              helperStyle: const TextStyle(color: Colors.redAccent),
+                            ),
+                            onChanged: (_) => setState(() {}),
                           ),
                         ],
                       ),
                     ),
                   ),
                   const SizedBox(height: 16),
+
+                  // ── 현재 목표 미리보기 ──
+                  Card(
+                    color: Colors.blue.shade50,
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            '계산된 목표 압력',
+                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(height: 8),
+                          if (inhalePreview != null)
+                            _TargetRow(
+                              label: '흡기',
+                              valueText:
+                                  '-${inhalePreview.low.toStringAsFixed(0)} ~ -${inhalePreview.high.toStringAsFixed(0)} cmH₂O',
+                              pctText: '${_level.midPct}% PImax',
+                              warning: _inhaleExceeds,
+                            ),
+                          if (exhalePreview != null) ...[
+                            const SizedBox(height: 4),
+                            _TargetRow(
+                              label: '호기',
+                              valueText:
+                                  '+${exhalePreview.low.toStringAsFixed(0)} ~ +${exhalePreview.high.toStringAsFixed(0)} cmH₂O',
+                              pctText: '${_level.midPct}% MEP',
+                              warning: _exhaleExceeds,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: _saving ? null : _save,
+                      icon: _saving
+                          ? const SizedBox(
+                              width: 16, height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.save),
+                      label: const Text('저장하고 기기로 전송'),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // ── 영점 보정 (기존 유지) ──
                   Card(
                     child: Padding(
                       padding: const EdgeInsets.all(16),
@@ -240,44 +403,43 @@ class _TargetSettingsScreenState extends ConsumerState<TargetSettingsScreen> {
   }
 }
 
-class _LabeledSlider extends StatelessWidget {
-  const _LabeledSlider({
+class _TargetRow extends StatelessWidget {
+  const _TargetRow({
     required this.label,
-    required this.value,
-    required this.min,
-    required this.max,
-    required this.onChanged,
+    required this.valueText,
+    required this.pctText,
+    required this.warning,
   });
-
   final String label;
-  final double value;
-  final double min;
-  final double max;
-  final ValueChanged<double> onChanged;
+  final String valueText;
+  final String pctText;
+  final bool warning;
 
   @override
   Widget build(BuildContext context) {
     return Row(
       children: [
-        SizedBox(width: 40, child: Text(label)),
-        Expanded(
-          child: Slider(
-            value: value.clamp(min, max),
-            min: min,
-            max: max,
-            divisions: (max - min).round(),
-            label: '${value.round()} cmH₂O',
-            onChanged: onChanged,
-          ),
-        ),
         SizedBox(
-          width: 56,
+          width: 36,
+          child: Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
+        ),
+        Expanded(
           child: Text(
-            '${value.round()}',
-            textAlign: TextAlign.end,
-            style: const TextStyle(fontWeight: FontWeight.w600),
+            valueText,
+            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
           ),
         ),
+        Text(
+          pctText,
+          style: TextStyle(
+            fontSize: 13,
+            color: warning ? Colors.redAccent : Colors.black54,
+          ),
+        ),
+        if (warning) ...[
+          const SizedBox(width: 4),
+          const Icon(Icons.warning_amber, size: 16, color: Colors.redAccent),
+        ],
       ],
     );
   }

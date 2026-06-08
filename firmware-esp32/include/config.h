@@ -125,20 +125,86 @@ namespace sensor {
 
 }  // namespace sensor
 
-// ----- Training session timing -----
+// ----- Training session timing & target pressure (clinical-evidence-based) ---
+//
+// 한 곳에서 관리되는 임상 상수. session.cpp / ble_service.cpp / app 이 모두
+// 이 값을 참조한다. 단계(Beginner/Normal/Advanced) 전환은 setIntensity() 한
+// 호출로 끝나도록 비율 표 (INTENSITY_*_PCT) 만 갈아치우면 된다.
+//
+// ## 훈련 시간
+//   1 호흡 cycle = 흡기 5s + 호기 5s + 휴식 5s   = 15 s   (BREATH_*_MS)
+//   1 set       = 10 breaths × 15 s              = 150 s  (BREATHS_PER_SET)
+//   1 session   = 2 sets + 세트 사이 30 s 휴식   ≈ 5.5 분
+//   권장          하루 1~2회 (5분 또는 5분 × 2)
+//
+// 근거:
+//   - Vranish & Bailey 2016 (Sleep 39(7):1453-9) — 5분/일 IMT (30 breaths
+//     × 75% PImax × 5 days/week × 6 weeks) 로 혈압·수면 개선.
+//   - The Breather (PN Medical) 공식 프로토콜 — 10 breaths × 2 sets,
+//     주 6회. IMT/EMT 양방향 동시.
+//
+// ## 목표 압력 (%PImax / %MEP 적응형)
+//   목표압력은 사용자 PImax (최대 흡기압) / MEP (최대 호기압) 의 비율로 계산.
+//   PImax/MEP 실측 기능은 별도 마일스톤 — 그 전에는 일반 성인 평균 (Black &
+//   Hyatt 1969) 기본값을 사용. 측정 기능이 붙는 즉시 setPimaxMep() 로 주입.
+//
+//   강도 level → (low_pct ~ high_pct):
+//     Beginner    30 ~ 40 %    호흡 재활 초보·노인 시작 강도 (Bissett 2019)
+//     Normal      50 ~ 60 %    POWERbreathe sustainable zone   ← 기본
+//     Advanced    70 ~ 75 %    Vranish & Bailey 2016 IMT 프로토콜
+//
+//   예: Normal · PImax 80 → 흡기 -40 ~ -48 cmH₂O
+//                · MEP 60  → 호기 +30 ~ +36 cmH₂O
+//
+// ## 안전 상한 (consumer device ceiling)
+//   사용자가 PImax/MEP 를 과대 입력해 계산된 target 이 ceiling 을 넘으면
+//   target 을 ceiling 으로 clamp + 경고 로그. 측정값 자체는 sensor 단에서
+//   ±71 cmH₂O 로 saturate 되므로 별도 처리 불필요.
 namespace session {
 
-  constexpr uint32_t PREP_MS    = 0;        // 준비 단계 — 0 (디버그 결정)
-  constexpr uint32_t TRAIN_MS   = 240000;   // 4분
-  constexpr uint32_t REST_MS    = 30000;    // 30초
-  constexpr uint8_t  TOTAL_SETS = 3;
-  constexpr uint16_t SAMPLE_HZ  = 100;
+  // ── Timing ───────────────────────────────────────────────────────────────
+  constexpr uint32_t BREATH_INHALE_MS = 5000;   // 한 호흡 내 흡기
+  constexpr uint32_t BREATH_EXHALE_MS = 5000;   // 한 호흡 내 호기
+  constexpr uint32_t BREATH_REST_MS   = 5000;   // 한 호흡 끝 휴식
+  constexpr uint8_t  BREATHS_PER_SET  = 10;
+  constexpr uint8_t  TOTAL_SETS       = 2;
+  constexpr uint32_t SET_REST_MS      = 30000;  // 세트 사이 휴식 (30 s)
+  constexpr uint32_t PREP_MS          = 0;      // 준비 단계 — 0 (즉시 시작)
+  constexpr uint32_t SUMMARY_MS       = 8000;   // Summary 자동 복귀 (8 s)
+  constexpr uint16_t SAMPLE_HZ        = 100;
 
-  // 목표 압력 기본 — 사용자가 SET_TARGET opcode 로 변경 가능.
-  // 양방향이라 흡기/호기 각각 별도. v3.2 는 호기만 있었음.
-  constexpr float TARGET_LOW_DEFAULT  = 20.0f;   // cmH2O
-  constexpr float TARGET_HIGH_DEFAULT = 30.0f;
-  constexpr uint16_t TARGET_HOLD_MS   = 15000;   // 15초
+  // 파생 — 1 set 의 train 시간 (호흡 × cycle).
+  constexpr uint32_t SET_TRAIN_MS =
+      BREATHS_PER_SET *
+      (BREATH_INHALE_MS + BREATH_EXHALE_MS + BREATH_REST_MS);  // 150000 ms
+
+  // BLE SET_DURATION 으로 받은 train 시간의 안전 범위 (1 set 기준).
+  // session.cpp::setTrainDuration() 가 이 범위로 clamp.
+  constexpr uint32_t TRAIN_DURATION_MIN_MS =  60000;   // 1 분
+  constexpr uint32_t TRAIN_DURATION_MAX_MS = 600000;   // 10 분
+
+  // ── %PImax/%MEP target ──────────────────────────────────────────────────
+  // PImax / MEP 기본 — 사용자별 측정 전 일반 성인 평균값.
+  constexpr float PIMAX_DEFAULT_CMH2O = 80.0f;
+  constexpr float MEP_DEFAULT_CMH2O   = 60.0f;
+
+  // 강도 level. enum class 가 아닌 plain enum — BLE payload (1 byte) 와
+  // 직접 매핑되어 0/1/2 값이 그대로 의미를 가짐.
+  enum IntensityLevel : uint8_t {
+    INTENSITY_BEGINNER = 0,  // 30 ~ 40 %
+    INTENSITY_NORMAL   = 1,  // 50 ~ 60 %  ← 기본
+    INTENSITY_ADVANCED = 2,  // 70 ~ 75 %
+  };
+  constexpr IntensityLevel INTENSITY_DEFAULT = INTENSITY_NORMAL;
+
+  // 비율표 — 인덱스 = IntensityLevel 값.
+  constexpr float INTENSITY_LOW_PCT[3]  = {0.30f, 0.50f, 0.70f};
+  constexpr float INTENSITY_HIGH_PCT[3] = {0.40f, 0.60f, 0.75f};
+
+  // ── Safety ceiling ──────────────────────────────────────────────────────
+  // target (계산값) 이 이를 넘으면 clamp + 경고. magnitude 단위 (양수).
+  constexpr float INHALE_SAFETY_LIMIT_CMH2O = 90.0f;   // |음압| 한계
+  constexpr float EXHALE_SAFETY_LIMIT_CMH2O = 100.0f;  // 양압 한계
 
 }  // namespace session
 

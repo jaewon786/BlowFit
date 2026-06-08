@@ -56,11 +56,16 @@ class _Frame {
 
 enum _Phase { exhale, exhaleRest, inhale, inhaleRest }
 
+// 펌웨어 session.cpp 의 TURN_*_MS 와 1:1 동기화.
+// 1 호흡 cycle = exhale 5s + (exhaleRest 0s skip) + inhale 5s + inhaleRest 5s = 15s.
+// 10 호흡 × 2 set = 1 session (≈ 5분).
+//
+// 근거: Vranish & Bailey 2016 (5분/일 IMT) + The Breather 10×2 sets 프로토콜.
 const _phaseDuration = <_Phase, double>{
-  _Phase.exhale: 10.0,
-  _Phase.exhaleRest: 5.0, // 쉬는 시간 5초 (펌웨어 session.cpp 와 동일)
-  _Phase.inhale: 10.0,
-  _Phase.inhaleRest: 5.0,
+  _Phase.exhale: 5.0,
+  _Phase.exhaleRest: 0.0,  // skip — 펌웨어와 동일 (3-phase 사실상 동작)
+  _Phase.inhale: 5.0,
+  _Phase.inhaleRest: 5.0,  // 한 호흡 끝 휴식
 };
 
 // 색상 — 추이 차트와 동일 스킴.
@@ -369,8 +374,30 @@ class _TrainingContent extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     // 상단 — 이번 세션 정보 (경과 시간 / 훈련 시간 / 목표 압력대).
-    final zone = ref.watch(targetSettingsStoreProvider).valueOrNull?.load();
-    final targetText = zone != null ? '${zone.low}~${zone.high}' : '20~30';
+    //
+    // v4.1: 단일 zone (legacy) 대신 %PImax 기반 적응형. 현재 phase 가 흡기일
+    // 때는 흡기 target (- 음압) + "55% PImax", 호기일 때는 호기 target
+    // (+ 양압) + "55% MEP" 를 표시. Rest phase 는 직전 phase 의 표시 유지.
+    final pmStore = ref.watch(pimaxMepStoreProvider).valueOrNull;
+    final isInhaleSide = phase == _Phase.inhale || phase == _Phase.inhaleRest;
+    final String targetText;
+    final String targetLabel;
+    if (pmStore != null) {
+      final lv = pmStore.loadLevel();
+      if (isInhaleSide) {
+        final t = pmStore.inhaleTarget();
+        targetText  = '-${t.low.round()}~-${t.high.round()}';
+        targetLabel = '목표 ${lv.midPct}% PImax';
+      } else {
+        final t = pmStore.exhaleTarget();
+        targetText  = '+${t.low.round()}~+${t.high.round()}';
+        targetLabel = '목표 ${lv.midPct}% MEP';
+      }
+    } else {
+      // 로딩 중 fallback — Normal · 기본값 기준.
+      targetText  = isInhaleSide ? '-40~-48' : '+30~+36';
+      targetLabel = isInhaleSide ? '목표 55% PImax' : '목표 55% MEP';
+    }
     // 사용자가 설정에서 선택한 훈련 시간(분, 기본 5). 기기 세션 길이와 동일.
     final trainMinutes =
         ref.watch(trainDurationStoreProvider).valueOrNull?.loadMinutes() ??
@@ -436,7 +463,7 @@ class _TrainingContent extends ConsumerWidget {
         // divider(137,261) 기준 3컬럼 중앙 정렬 (자릿수 무관 가운데).
         _sessionCol(20, 137, _fmtElapsed(sessionElapsed), '경과 시간'),
         _sessionCol(137, 261, '$trainMinutes분', '훈련 시간'),
-        _sessionCol(261, 382, targetText, '목표 압력'),
+        _sessionCol(261, 382, targetText, targetLabel),
         f.at(
           x: 137,
           y: 174,

@@ -77,7 +77,8 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
         ),
       );
       if (!mounted) return;
-      context.go('/connect');
+      // v4.1: 프로필 저장 후 PImax/MEP 측정 → 페어링 흐름.
+      context.go('/pimax-measure');
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
