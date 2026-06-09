@@ -648,102 +648,109 @@ class _HomeContent extends StatelessWidget {
         // ─── 무대(말풍선·꼬리·그림자·캐릭터) — 단계별 위치/크기 ──────────
         // characterShownLevelProvider 는 여기서만 watch → 진화 시 이 4개만
         // 리빌드(통계 카드·차트는 그대로 유지되어 진화 프레임이 가벼워짐).
+        //
+        // IgnorePointer: 무대는 순수 장식이라 탭을 가로채면 안 된다. 특히 캐릭터
+        // Rive 슬롯은 투명 padding 영역까지 hit 영역이라, 큰 슬롯(egg/oxygen)이
+        // 우측 하단 "훈련하기" 버튼 위를 덮어 탭이 안 먹던 문제가 있었음 → 무대
+        // 전체를 hit-test 에서 제외해 탭이 아래(버튼 등)로 통과하게 한다.
         Positioned.fill(
-          child: Consumer(
-            builder: (context, ref, _) {
-              final shownLevel = ref.watch(characterShownLevelProvider);
-              final layout = _kStageLayouts[shownLevel] ?? _kStageLayouts[1]!;
-              return Stack(
-                children: [
-                  // ─── 말풍선 박스 (단계별 위치/크기 — Figma 97:2/57/105) ───────
-                  // Egg 258×50 at (72,264) / Baby 196×50 at (103,287) / Oxygen 188×50 at (107,254).
-                  f.at(
-                    x: layout.bubbleX,
-                    y: layout.bubbleY,
-                    w: layout.bubbleW,
-                    h: _StageLayout.bubbleH,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(f.sx(10)),
-                      ),
-                      alignment: Alignment.center,
-                      child: Padding(
-                        padding: EdgeInsets.symmetric(horizontal: f.sx(10)),
-                        // FittedBox(scaleDown): Figma 폰트(15px)로 들어가면 그대로, 기기
-                        // 폰트 메트릭 차이로 살짝 넘치면 자동으로 아주 조금만 축소 →
-                        // "요!" 가 ellipsis 로 잘리던 문제 방지(절대 안 잘림).
-                        child: FittedBox(
-                          fit: BoxFit.scaleDown,
-                          child: Text(
-                            layout.speechText,
-                            maxLines: 1,
-                            softWrap: false,
-                            style: TextStyle(
-                              fontSize: f.sx(15),
-                              fontWeight: FontWeight.w700,
-                              color: Colors.black,
-                              fontFamily: BlowfitTheme.fontFamily,
+          child: IgnorePointer(
+            child: Consumer(
+              builder: (context, ref, _) {
+                final shownLevel = ref.watch(characterShownLevelProvider);
+                final layout = _kStageLayouts[shownLevel] ?? _kStageLayouts[1]!;
+                return Stack(
+                  children: [
+                    // ─── 말풍선 박스 (단계별 위치/크기 — Figma 97:2/57/105) ───────
+                    // Egg 258×50 at (72,264) / Baby 196×50 at (103,287) / Oxygen 188×50 at (107,254).
+                    f.at(
+                      x: layout.bubbleX,
+                      y: layout.bubbleY,
+                      w: layout.bubbleW,
+                      h: _StageLayout.bubbleH,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(f.sx(10)),
+                        ),
+                        alignment: Alignment.center,
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(horizontal: f.sx(10)),
+                          // FittedBox(scaleDown): Figma 폰트(15px)로 들어가면 그대로, 기기
+                          // 폰트 메트릭 차이로 살짝 넘치면 자동으로 아주 조금만 축소 →
+                          // "요!" 가 ellipsis 로 잘리던 문제 방지(절대 안 잘림).
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              layout.speechText,
+                              maxLines: 1,
+                              softWrap: false,
+                              style: TextStyle(
+                                fontSize: f.sx(15),
+                                fontWeight: FontWeight.w700,
+                                color: Colors.black,
+                                fontFamily: BlowfitTheme.fontFamily,
+                              ),
                             ),
                           ),
                         ),
                       ),
                     ),
-                  ),
 
-                  // ─── 말풍선 꼬리 (단계별 위치 — Vector 6117 17×14) ───────────
-                  // Egg (106,311) / Baby (132,334) / Oxygen (132,301).
-                  // Figma 원본 벡터를 SVG 에셋으로 그대로 렌더 → 모양 100% 일치(손으로
-                  // 베지어를 맞추지 않음). BoxFit.fill 로 17×14 슬롯을 꽉 채우되, 슬롯
-                  // 비율(17:14)이 viewBox 와 같으므로 왜곡 없음.
-                  f.at(
-                    x: layout.tailX,
-                    y: layout.tailY,
-                    w: _StageLayout.tailW,
-                    h: _StageLayout.tailH,
-                    child: SvgPicture.asset(
-                      'assets/dot/speech_tail.svg',
-                      fit: BoxFit.fill,
-                    ),
-                  ),
-
-                  // ─── 지면 그림자 (Figma Ellipse 54) — 캐릭터보다 먼저(뒤) 그림 ────
-                  // 가우시안 블러된 회색 타원. 캐릭터 발밑에 깔려 입체감을 줌.
-                  f.at(
-                    x: layout.shadowX,
-                    y: layout.shadowY,
-                    w: layout.shadowW,
-                    h: layout.shadowH,
-                    child: CustomPaint(
-                      painter: _GroundShadowPainter(blurSigma: f.sx(8)),
-                    ),
-                  ),
-
-                  // ─── 캐릭터 (단계별 위치/크기 — Figma 97:2/57/105) ────────────
-                  // Figma visible 바운딩의 가로 폭에 charScale 을 곱해 Rive 아트보드
-                  // padding 을 보정(크기). 세로는 bottomCenter 정렬 + charFeetY 로 발끝을
-                  // 그림자 위에 안착시킨다. 슬롯 height 는 발끝(charFeetY) 위로 충분히
-                  // 크게 잡아 캐릭터 전체가 들어가도록 함(말풍선과 겹쳐도 투명 padding).
-                  () {
-                    final slotW = layout.charW * layout.charScale;
-                    // 슬롯 높이: 발끝 기준 위로 캐릭터가 다 들어갈 만큼. charH*scale 의
-                    // 1.2배 여유 (모션 extent 포함). bottomCenter 라 위쪽 여백은 무해.
-                    final slotH = layout.charH * layout.charScale * 1.2;
-                    final left = 201.0 - slotW / 2; // frame 가로 중앙(201)에 정렬
-                    final top = layout.charFeetY - slotH; // 슬롯 하단 = 발끝
-                    return f.at(
-                      x: left,
-                      y: top,
-                      w: slotW,
-                      h: slotH,
-                      child: const BrelowCharacterPanel(
-                        alignment: Alignment.bottomCenter,
+                    // ─── 말풍선 꼬리 (단계별 위치 — Vector 6117 17×14) ───────────
+                    // Egg (106,311) / Baby (132,334) / Oxygen (132,301).
+                    // Figma 원본 벡터를 SVG 에셋으로 그대로 렌더 → 모양 100% 일치(손으로
+                    // 베지어를 맞추지 않음). BoxFit.fill 로 17×14 슬롯을 꽉 채우되, 슬롯
+                    // 비율(17:14)이 viewBox 와 같으므로 왜곡 없음.
+                    f.at(
+                      x: layout.tailX,
+                      y: layout.tailY,
+                      w: _StageLayout.tailW,
+                      h: _StageLayout.tailH,
+                      child: SvgPicture.asset(
+                        'assets/dot/speech_tail.svg',
+                        fit: BoxFit.fill,
                       ),
-                    );
-                  }(),
-                ],
-              );
-            },
+                    ),
+
+                    // ─── 지면 그림자 (Figma Ellipse 54) — 캐릭터보다 먼저(뒤) 그림 ────
+                    // 가우시안 블러된 회색 타원. 캐릭터 발밑에 깔려 입체감을 줌.
+                    f.at(
+                      x: layout.shadowX,
+                      y: layout.shadowY,
+                      w: layout.shadowW,
+                      h: layout.shadowH,
+                      child: CustomPaint(
+                        painter: _GroundShadowPainter(blurSigma: f.sx(8)),
+                      ),
+                    ),
+
+                    // ─── 캐릭터 (단계별 위치/크기 — Figma 97:2/57/105) ────────────
+                    // Figma visible 바운딩의 가로 폭에 charScale 을 곱해 Rive 아트보드
+                    // padding 을 보정(크기). 세로는 bottomCenter 정렬 + charFeetY 로 발끝을
+                    // 그림자 위에 안착시킨다. 슬롯 height 는 발끝(charFeetY) 위로 충분히
+                    // 크게 잡아 캐릭터 전체가 들어가도록 함(말풍선과 겹쳐도 투명 padding).
+                    () {
+                      final slotW = layout.charW * layout.charScale;
+                      // 슬롯 높이: 발끝 기준 위로 캐릭터가 다 들어갈 만큼. charH*scale 의
+                      // 1.2배 여유 (모션 extent 포함). bottomCenter 라 위쪽 여백은 무해.
+                      final slotH = layout.charH * layout.charScale * 1.2;
+                      final left = 201.0 - slotW / 2; // frame 가로 중앙(201)에 정렬
+                      final top = layout.charFeetY - slotH; // 슬롯 하단 = 발끝
+                      return f.at(
+                        x: left,
+                        y: top,
+                        w: slotW,
+                        h: slotH,
+                        child: const BrelowCharacterPanel(
+                          alignment: Alignment.bottomCenter,
+                        ),
+                      );
+                    }(),
+                  ],
+                );
+              },
+            ),
           ),
         ),
 

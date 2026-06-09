@@ -17,15 +17,11 @@ class SettingsScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final connected = ref.watch(connectionProvider).valueOrNull ?? false;
-    final state = ref.watch(deviceStateProvider).valueOrNull;
     final lastDevice = ref.watch(lastDeviceStoreProvider).valueOrNull?.load();
     // v4.1: 단일 zone 대신 강도(label) + 흡기/호기 % 미리보기.
     final pmStore = ref.watch(pimaxMepStoreProvider).valueOrNull;
     final trainMinutes = ref.watch(trainDurationStoreProvider).valueOrNull?.loadMinutes() ??
         TrainDurationStore.defaultMinutes;
-    // 펌웨어 버전은 BLE Device Information characteristic 으로 보고되지만 현재
-    // 미파싱 상태. 연결됐을 때만 placeholder 를 보여주고, 미연결이면 공란.
-    final fwVersion = connected && state != null ? '확인 중' : '—';
 
     return Scaffold(
       appBar: AppBar(title: const Text('설정')),
@@ -61,23 +57,12 @@ class SettingsScreen extends ConsumerWidget {
               onTap: () => _comingSoon(context, '훈련 알림'),
             ),
             _SettingsTile(
-              icon: Icons.swap_horiz,
-              label: '오리피스 단계 관리',
-              onTap: () => _comingSoon(context, '오리피스 단계 관리'),
-            ),
-            _SettingsTile(
               icon: Icons.favorite_border,
               label: '동반자 연결',
               trailing: '코드 보기',
               onTap: () => context.push('/my-code'),
             ),
             const _SectionGap(),
-            _SettingsTile(
-              icon: Icons.system_update_alt,
-              label: '펌웨어 업데이트',
-              trailing: fwVersion,
-              onTap: () => _comingSoon(context, '펌웨어 업데이트'),
-            ),
             _SettingsTile(
               icon: Icons.replay_outlined,
               label: '제품 소개 다시 보기',

@@ -3,11 +3,13 @@
 // 디자인 출처: 1:2236 훈련화면 - 라이트모드 (402×874).
 //
 // Ring 동작:
-//   4-phase cycle 반복 (exhale 10s → exhaleRest 3s → inhale 10s → inhaleRest 3s)
-//   - exhale phase  : 파란 호가 12시(-π/2) → 시계방향 → 6시(+π/2). |pressure|/30 * 180°
+//   4-phase cycle 반복 (exhale → exhaleRest → inhale → inhaleRest)
+//   - exhale phase  : 파란 호가 12시(-π/2) → 시계방향 → 6시(+π/2). |pressure|/목표mid * 180°
 //   - exhaleRest    : 파란 호 그대로 유지
-//   - inhale phase  : 초록 호가 12시 → 시계반대 → 6시 (좌측 절반)
+//   - inhale phase  : 초록 호가 6시 → 좌측(9시) → 12시. |pressure|/목표mid * 180°
 //   - inhaleRest    : 진입 시 두 arc 모두 0 으로 reset (다음 cycle 준비)
+//   풀스케일(180°, 호 끝=호기 6시·흡기 12시) = 목표 압력 중간값(mid). 목표 구간
+//   (low~high)은 그 끝점을 가운데 두고 amber 밴드로 표시 → 중간값이 6시/12시.
 // 가운데 텍스트: phase 카운트다운 (10초→0초 또는 3초→0초), 색 검정 고정.
 // 압력 source: BLE `pressureSampleProvider` 의 PressureSample.cmH2O 실시간.
 
@@ -63,15 +65,14 @@ enum _Phase { exhale, exhaleRest, inhale, inhaleRest }
 // 근거: Vranish & Bailey 2016 (5분/일 IMT) + The Breather 10×2 sets 프로토콜.
 const _phaseDuration = <_Phase, double>{
   _Phase.exhale: 5.0,
-  _Phase.exhaleRest: 0.0,  // skip — 펌웨어와 동일 (3-phase 사실상 동작)
+  _Phase.exhaleRest: 0.0, // skip — 펌웨어와 동일 (3-phase 사실상 동작)
   _Phase.inhale: 5.0,
-  _Phase.inhaleRest: 5.0,  // 한 호흡 끝 휴식
+  _Phase.inhaleRest: 5.0, // 한 호흡 끝 휴식
 };
 
 // 색상 — 추이 차트와 동일 스킴.
 const _exhaleColor = Color(0xFF0A89FC); // 파란 (호기)
 const _inhaleColor = Color(0xFF32B65E); // 초록 (흡기)
-const _maxPressureCmH2O = 30.0; // 목표 압력 — 30 = 180° (절반)
 
 class TrainingScreen extends ConsumerStatefulWidget {
   const TrainingScreen({super.key});
@@ -95,6 +96,13 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen>
   // 이번 세션 (= 훈련 화면 진입 후) 정보 — 상단 카드에 표시.
   double _sessionElapsed = 0; // 누적 경과 초
   Duration _lastTick = Duration.zero;
+
+  // 호 풀스케일(180° = 호 끝) = "목표 압력 중간값(mid)". 즉 목표 중앙 도달 시 호가
+  // 끝점(호기 6시 / 흡기 12시)에 닿고, 목표 밴드(low~high)는 그 끝점을 가운데 두고
+  // 양옆으로 걸친다. build 에서 store 의 target mid 로 갱신, _onTick 이 매 프레임 사용.
+  // store 로드 전엔 Normal 기본값(MEP60·PImax80 × mid 55%).
+  double _exhaleScale = 33; // (30+36)/2 — MEP60 × Normal mid 55%
+  double _inhaleScale = 44; // (40+48)/2 — PImax80 × Normal mid 55%
 
   @override
   void initState() {
@@ -128,11 +136,13 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen>
       // arc 는 실시간(instantaneous), peak 는 최댓값 hold.
       if (_phase == _Phase.exhale) {
         final p = _currentPressure > 0 ? _currentPressure : 0.0;
-        _exhaleArc = (p / _maxPressureCmH2O * 180).clamp(0.0, 180.0);
+        final scale = _exhaleScale > 0 ? _exhaleScale : 33.0;
+        _exhaleArc = (p / scale * 180).clamp(0.0, 180.0);
         if (p > _peakExhale) _peakExhale = p;
       } else if (_phase == _Phase.inhale) {
         final p = _currentPressure < 0 ? _currentPressure : 0.0; // ≤ 0
-        _inhaleArc = (-p / _maxPressureCmH2O * 180).clamp(0.0, 180.0);
+        final scale = _inhaleScale > 0 ? _inhaleScale : 44.0;
+        _inhaleArc = (-p / scale * 180).clamp(0.0, 180.0);
         if (p < _peakInhale) _peakInhale = p; // 더 깊은 음압
       }
 
@@ -173,6 +183,16 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen>
         _currentPressure = sample.cmH2O;
       });
     });
+
+    // 호 풀스케일 = 목표 압력 중간값(mid = (low+high)/2) → mid 가 호 끝(6시/12시)에
+    // 온다. _onTick 이 다음 프레임부터 사용.
+    final pm = ref.watch(pimaxMepStoreProvider).valueOrNull;
+    if (pm != null) {
+      final et = pm.exhaleTarget();
+      final it = pm.inhaleTarget();
+      _exhaleScale = (et.low + et.high) / 2;
+      _inhaleScale = (it.low + it.high) / 2;
+    }
 
     final media = MediaQuery.of(context);
     final f = _Frame(media.size.width);
@@ -261,12 +281,22 @@ class _TrainBgPainter extends CustomPainter {
     canvas.drawRect(rect, skyPaint);
 
     _drawEllipse(
-      canvas, scale, _e48Transform, _e48Width, _e48Height,
-      _e48Colors, _e48Stops,
+      canvas,
+      scale,
+      _e48Transform,
+      _e48Width,
+      _e48Height,
+      _e48Colors,
+      _e48Stops,
     );
     _drawEllipse(
-      canvas, scale, _e47Transform, _e47Width, _e47Height,
-      _e47Colors, _e47Stops,
+      canvas,
+      scale,
+      _e47Transform,
+      _e47Width,
+      _e47Height,
+      _e47Colors,
+      _e47Stops,
     );
   }
 
@@ -283,10 +313,22 @@ class _TrainBgPainter extends CustomPainter {
     canvas.scale(scale, scale);
     canvas.transform(
       Float64List.fromList(<double>[
-        m[0][0], m[1][0], 0, 0,
-        m[0][1], m[1][1], 0, 0,
-        0, 0, 1, 0,
-        m[0][2], m[1][2], 0, 1,
+        m[0][0],
+        m[1][0],
+        0,
+        0,
+        m[0][1],
+        m[1][1],
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        m[0][2],
+        m[1][2],
+        0,
+        1,
       ]),
     );
     final rect = Rect.fromLTWH(0, 0, w, h);
@@ -376,27 +418,35 @@ class _TrainingContent extends ConsumerWidget {
     // 상단 — 이번 세션 정보 (경과 시간 / 훈련 시간 / 목표 압력대).
     //
     // v4.1: 단일 zone (legacy) 대신 %PImax 기반 적응형. 현재 phase 가 흡기일
-    // 때는 흡기 target (- 음압) + "55% PImax", 호기일 때는 호기 target
-    // (+ 양압) + "55% MEP" 를 표시. Rest phase 는 직전 phase 의 표시 유지.
+    // 때는 흡기 target (- 음압), 호기일 때는 호기 target (+ 양압) 의 압력 범위를
+    // 표시. 라벨은 "목표 압력" 으로 통일. Rest phase 는 직전 phase 의 표시 유지.
     final pmStore = ref.watch(pimaxMepStoreProvider).valueOrNull;
     final isInhaleSide = phase == _Phase.inhale || phase == _Phase.inhaleRest;
     final String targetText;
-    final String targetLabel;
+    const String targetLabel = '목표 압력';
     if (pmStore != null) {
-      final lv = pmStore.loadLevel();
       if (isInhaleSide) {
         final t = pmStore.inhaleTarget();
-        targetText  = '-${t.low.round()}~-${t.high.round()}';
-        targetLabel = '목표 ${lv.midPct}% PImax';
+        targetText = '-${t.low.round()}~-${t.high.round()}';
       } else {
         final t = pmStore.exhaleTarget();
-        targetText  = '+${t.low.round()}~+${t.high.round()}';
-        targetLabel = '목표 ${lv.midPct}% MEP';
+        targetText = '+${t.low.round()}~+${t.high.round()}';
       }
     } else {
       // 로딩 중 fallback — Normal · 기본값 기준.
-      targetText  = isInhaleSide ? '-40~-48' : '+30~+36';
-      targetLabel = isInhaleSide ? '목표 55% PImax' : '목표 55% MEP';
+      targetText = isInhaleSide ? '-40~-48' : '+30~+36';
+    }
+    // 목표 구간 밴드 각도. 풀스케일 = target mid 이므로 mid → 180°(호 끝 = 호기
+    // 6시 / 흡기 12시). 밴드는 그 끝점을 가운데 두고 low(<180°)~high(>180°)로 양옆에
+    // 걸친다 → "목표 중간값" 이 6시/12시에 온다. (로딩 전엔 Normal 50/55·60/55 기준.)
+    double targetLowDeg = 163.6, targetHighDeg = 196.4;
+    if (pmStore != null) {
+      final t = isInhaleSide ? pmStore.inhaleTarget() : pmStore.exhaleTarget();
+      final mid = (t.low + t.high) / 2;
+      if (mid > 0) {
+        targetLowDeg = (t.low / mid * 180).clamp(0.0, 360.0);
+        targetHighDeg = (t.high / mid * 180).clamp(0.0, 360.0);
+      }
     }
     // 사용자가 설정에서 선택한 훈련 시간(분, 기본 5). 기기 세션 길이와 동일.
     final trainMinutes =
@@ -491,6 +541,8 @@ class _TrainingContent extends ConsumerWidget {
               phase: phase,
               exhaleArc: exhaleArc,
               inhaleArc: inhaleArc,
+              targetLowDeg: targetLowDeg,
+              targetHighDeg: targetHighDeg,
             ),
           ),
         ),
@@ -639,11 +691,15 @@ class _RingPainter extends CustomPainter {
     required this.phase,
     required this.exhaleArc,
     required this.inhaleArc,
+    required this.targetLowDeg,
+    required this.targetHighDeg,
   });
   final _Frame f;
   final _Phase phase;
   final double exhaleArc; // 0~180 degrees
   final double inhaleArc; // 0~180 degrees
+  final double targetLowDeg; // 목표 구간 시작 (현재 phase 쪽, 호 시작점 기준 °)
+  final double targetHighDeg; // 목표 구간 끝 (>180° 가능 — 끝점 6시/12시 를 넘어 걸침)
 
   // phase 별 안쪽 원 배경색 — 호기 연파랑 / 흡기 연초록 / 휴식 연회색.
   static Color _innerColor(_Phase p) {
@@ -679,6 +735,27 @@ class _RingPainter extends CustomPainter {
       ..strokeWidth = strokeW
       ..strokeCap = StrokeCap.butt;
     canvas.drawCircle(center, radius, basePaint);
+
+    // 1.5 목표 구간 밴드 (amber) — 현재 phase 쪽 반원에 target low~high 를 표시.
+    //     트랙(흰 도넛) 위·fill 호 아래 → fill 이 밴드를 덮으며 진행 = "도달".
+    final bandSweepDeg = targetHighDeg - targetLowDeg;
+    if (bandSweepDeg > 0) {
+      final isInhaleSide = phase == _Phase.inhale || phase == _Phase.inhaleRest;
+      // 호기: 12시(-π/2)에서 시계방향. 흡기: 6시(+π/2)에서 시계방향(6→9→12).
+      final base = isInhaleSide ? math.pi / 2 : -math.pi / 2;
+      final bandPaint = Paint()
+        ..color = const Color(0xFFFFB300) // amber — 목표 zone
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = strokeW
+        ..strokeCap = StrokeCap.butt;
+      canvas.drawArc(
+        ringRect,
+        base + targetLowDeg * math.pi / 180,
+        bandSweepDeg * math.pi / 180,
+        false,
+        bandPaint,
+      );
+    }
 
     // 2. 파란 호기 호 (시계방향) — 12시 시작 → exhaleArc 만큼.
     if (exhaleArc > 0) {
@@ -743,5 +820,7 @@ class _RingPainter extends CustomPainter {
   bool shouldRepaint(_RingPainter old) =>
       old.phase != phase ||
       old.exhaleArc != exhaleArc ||
-      old.inhaleArc != inhaleArc;
+      old.inhaleArc != inhaleArc ||
+      old.targetLowDeg != targetLowDeg ||
+      old.targetHighDeg != targetHighDeg;
 }
