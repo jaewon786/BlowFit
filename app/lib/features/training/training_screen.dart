@@ -510,19 +510,21 @@ class _TrainingContent extends ConsumerWidget {
 
         // ─── 상단 — 이번 세션 정보 (경과 시간 / 훈련 시간 / 목표 압력) ────
         // 누적 통계(주/달/누적)는 홈·추이 영역 → 훈련 중엔 세션 진행 정보 표시.
-        // divider(137,261) 기준 3컬럼 중앙 정렬 (자릿수 무관 가운데).
-        _sessionCol(20, 137, _fmtElapsed(sessionElapsed), '경과 시간'),
-        _sessionCol(137, 261, '$trainMinutes분', '훈련 시간'),
-        _sessionCol(261, 382, targetText, targetLabel),
+        // divider(150,248) 기준 3컬럼 중앙 정렬 (자릿수 무관 가운데). 가운데
+        // "훈련 시간" 컬럼을 좁히고(양쪽 divider 안쪽으로) 좌·우 컬럼을 넓혀
+        // "+30~+36" 같은 목표 압력이 줄바꿈되지 않도록 함.
+        _sessionCol(20, 150, _fmtElapsed(sessionElapsed), '경과 시간'),
+        _sessionCol(150, 248, '$trainMinutes분', '훈련 시간'),
+        _sessionCol(248, 382, targetText, targetLabel),
         f.at(
-          x: 137,
+          x: 150,
           y: 174,
           w: 1,
           h: 58,
           child: Container(color: Colors.black.withValues(alpha: 0.15)),
         ),
         f.at(
-          x: 261,
+          x: 248,
           y: 174,
           w: 1,
           h: 58,
@@ -656,13 +658,20 @@ class _TrainingContent extends ConsumerWidget {
       top: f.sy(171),
       child: Column(
         children: [
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: f.sx(30),
-              fontWeight: FontWeight.w700,
-              color: _ink,
-              fontFamily: BlowfitTheme.fontFamily,
+          // FittedBox(scaleDown): 컬럼 폭을 넘으면 줄바꿈 대신 아주 살짝만 축소
+          // → "+30~+36" 같은 값이 절대 줄바꿈/잘리지 않고 한 줄 유지.
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              value,
+              maxLines: 1,
+              softWrap: false,
+              style: TextStyle(
+                fontSize: f.sx(30),
+                fontWeight: FontWeight.w700,
+                color: _ink,
+                fontFamily: BlowfitTheme.fontFamily,
+              ),
             ),
           ),
           SizedBox(height: f.sy(4)),

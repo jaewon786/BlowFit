@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -37,6 +39,27 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       title: '입으로 양방향\n호흡하세요',
       desc: '들이쉴 때도, 내쉴 때도 모두 입으로.\n천천히 깊게 호흡하는 것이 핵심입니다.',
       illust: _IllustKind.breath,
+    ),
+    // ─── 앱 소개 (기기 사용법 다음, 프로필 설정 직전) ──────────────────
+    _Step(
+      title: '화면이 호흡을\n안내해요',
+      desc: '게이지를 보며 들숨·날숨을 맞추고,\n목표 압력까지 부드럽게 채워보세요.',
+      illust: _IllustKind.introGuide,
+    ),
+    _Step(
+      title: '나에게 맞는\n목표 압력',
+      desc: '최대 호흡력을 측정해\n내 수준에 맞는 강도로 안전하게 훈련해요.',
+      illust: _IllustKind.introTarget,
+    ),
+    _Step(
+      title: '꾸준히 하면\n캐릭터가 자라요',
+      desc: '훈련을 쌓을수록 알에서 산소로\n한 단계씩 진화합니다.',
+      illust: _IllustKind.introGrow,
+    ),
+    _Step(
+      title: '기록하고\n함께해요',
+      desc: '훈련 기록과 추이를 확인하고,\n소중한 사람이 곁에서 응원해 줘요.',
+      illust: _IllustKind.introCompanion,
     ),
   ];
 
@@ -157,7 +180,16 @@ class _Step {
   final _IllustKind illust;
 }
 
-enum _IllustKind { welcome, mouthpiece, dial, breath }
+enum _IllustKind {
+  welcome,
+  mouthpiece,
+  dial,
+  breath,
+  introGuide,
+  introTarget,
+  introGrow,
+  introCompanion,
+}
 
 // ---------------------------------------------------------------------------
 // Top bar — back · pip dots · skip
@@ -186,7 +218,7 @@ class _TopBar extends StatelessWidget {
           IconButton(
             onPressed: onBack,
             icon: const Icon(Icons.chevron_left,
-                size: 26, color: BlowfitColors.ink),
+                size: 26, color: BlowfitColors.ink,),
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
           ),
@@ -254,6 +286,14 @@ class _Illustration extends StatelessWidget {
         return const _DialIllust();
       case _IllustKind.breath:
         return const _BreathIllust();
+      case _IllustKind.introGuide:
+        return const _MiniGaugeIllust(showPercent: false);
+      case _IllustKind.introTarget:
+        return const _MiniGaugeIllust(showPercent: true);
+      case _IllustKind.introGrow:
+        return const _GrowIllust();
+      case _IllustKind.introCompanion:
+        return const _CompanionIllust();
     }
   }
 }
@@ -474,13 +514,12 @@ class _BreathIllust extends StatelessWidget {
             ),
           ),
           // Inhale arrow (cyan, top)
-          Positioned(
+          const Positioned(
             right: 14,
             top: 52,
             child: Row(
-              children: const [
-                Icon(Icons.arrow_back,
-                    size: 20, color: Color(0xFF0099CC)),
+              children: [
+                Icon(Icons.arrow_back, size: 20, color: Color(0xFF0099CC)),
                 SizedBox(width: 4),
                 Text(
                   '흡기',
@@ -494,13 +533,13 @@ class _BreathIllust extends StatelessWidget {
             ),
           ),
           // Exhale arrow (blue, bottom)
-          Positioned(
+          const Positioned(
             right: 14,
             top: 108,
             child: Row(
-              children: const [
+              children: [
                 Icon(Icons.arrow_forward,
-                    size: 20, color: BlowfitColors.blue500),
+                    size: 20, color: BlowfitColors.blue500,),
                 SizedBox(width: 4),
                 Text(
                   '호기',
@@ -514,6 +553,296 @@ class _BreathIllust extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// App intro illustrations (앱 소개 — 실시간 가이드 / 맞춤 목표 / 성장 / 기록·동반자)
+// ---------------------------------------------------------------------------
+
+/// 미니 링 게이지 — 훈련 화면 원형 게이지의 축소판.
+///  - showPercent=false : 목표 밴드(amber) + 진행 dot → "실시간 가이드"
+///  - showPercent=true  : 55% 채움 + 중앙 "55%" → "맞춤 목표"
+class _MiniGaugeIllust extends StatelessWidget {
+  const _MiniGaugeIllust({required this.showPercent});
+  final bool showPercent;
+
+  @override
+  Widget build(BuildContext context) {
+    final gauge = CustomPaint(
+      size: const Size(200, 200),
+      painter: _MiniGaugePainter(showPercent: showPercent),
+    );
+    if (!showPercent) {
+      return SizedBox(width: 200, height: 200, child: gauge);
+    }
+    return SizedBox(
+      width: 200,
+      height: 200,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          gauge,
+          const Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '55%',
+                style: TextStyle(
+                  fontSize: 40,
+                  fontWeight: FontWeight.w800,
+                  height: 1.0,
+                  color: BlowfitColors.blue500,
+                ),
+              ),
+              SizedBox(height: 4),
+              Text(
+                '맞춤 강도',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: BlowfitColors.ink3,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MiniGaugePainter extends CustomPainter {
+  _MiniGaugePainter({required this.showPercent});
+  final bool showPercent;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    const stroke = 34.0;
+    final radius = (size.shortestSide - stroke) / 2;
+    final rect = Rect.fromCircle(center: center, radius: radius);
+
+    // 안쪽 배경 + 흰 도넛 트랙
+    canvas.drawCircle(
+      center,
+      radius - stroke / 2,
+      Paint()..color = const Color(0xFFEAF3FF),
+    );
+    canvas.drawCircle(
+      center,
+      radius,
+      Paint()
+        ..color = Colors.white
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = stroke,
+    );
+
+    final fill = Paint()
+      ..color = BlowfitColors.blue500
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = stroke
+      ..strokeCap = StrokeCap.round;
+
+    if (showPercent) {
+      // 55% 채움 (12시부터 시계방향)
+      canvas.drawArc(rect, -math.pi / 2, 2 * math.pi * 0.55, false, fill);
+      return;
+    }
+
+    // 실시간 가이드: 부분 채움(파랑) + 목표 밴드(amber, 6시 부근) + 진행 dot
+    const sweep = math.pi * 0.78;
+    canvas.drawArc(rect, -math.pi / 2, sweep, false, fill);
+    canvas.drawArc(
+      rect,
+      math.pi / 2 - 0.45,
+      0.9,
+      false,
+      Paint()
+        ..color = const Color(0xFFFFB300)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = stroke,
+    );
+    const ang = -math.pi / 2 + sweep;
+    canvas.drawCircle(
+      Offset(
+        center.dx + radius * math.cos(ang),
+        center.dy + radius * math.sin(ang),
+      ),
+      stroke / 2,
+      Paint()..color = BlowfitColors.blue500,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_MiniGaugePainter old) => old.showPercent != showPercent;
+}
+
+/// 진화 3단계 — 알 → 아기 → 산소 (점점 커지는 원 + 라벨).
+class _GrowIllust extends StatelessWidget {
+  const _GrowIllust();
+
+  @override
+  Widget build(BuildContext context) {
+    return const SizedBox(
+      width: 220,
+      height: 200,
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _StageDot(size: 52, color: Color(0xFFFFE4C4), label: '알'),
+            _GrowArrow(),
+            _StageDot(size: 66, color: BlowfitColors.blue50, label: '아기'),
+            _GrowArrow(),
+            _StageDot(
+              size: 82,
+              color: BlowfitColors.blue500,
+              label: '산소',
+              glow: true,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _StageDot extends StatelessWidget {
+  const _StageDot({
+    required this.size,
+    required this.color,
+    required this.label,
+    this.glow = false,
+  });
+  final double size;
+  final Color color;
+  final String label;
+  final bool glow;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: size,
+          height: size,
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+            boxShadow: glow
+                ? const [
+                    BoxShadow(
+                      color: Color.fromRGBO(0, 102, 255, 0.28),
+                      blurRadius: 22,
+                      offset: Offset(0, 8),
+                    ),
+                  ]
+                : null,
+          ),
+        ),
+        const SizedBox(height: 10),
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: BlowfitColors.ink2,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _GrowArrow extends StatelessWidget {
+  const _GrowArrow();
+  @override
+  Widget build(BuildContext context) {
+    return const Padding(
+      padding: EdgeInsets.only(left: 10, right: 10, bottom: 28),
+      child: Icon(Icons.chevron_right, size: 26, color: BlowfitColors.gray400),
+    );
+  }
+}
+
+/// 기록 & 동반자 — 막대 차트(기록·추이) + 하트 배지(동반자 응원).
+class _CompanionIllust extends StatelessWidget {
+  const _CompanionIllust();
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 220,
+      height: 200,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Container(
+            width: 172,
+            height: 128,
+            padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(22),
+              boxShadow: BlowfitColors.shadowLevel1,
+            ),
+            child: const Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                _Bar(34),
+                _Bar(52),
+                _Bar(70),
+                _Bar(88),
+              ],
+            ),
+          ),
+          Positioned(
+            top: 26,
+            right: 20,
+            child: Container(
+              width: 54,
+              height: 54,
+              decoration: const BoxDecoration(
+                color: Color(0xFFFB7185),
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: Color.fromRGBO(251, 113, 133, 0.4),
+                    blurRadius: 18,
+                    offset: Offset(0, 6),
+                  ),
+                ],
+              ),
+              child: const Icon(Icons.favorite, color: Colors.white, size: 28),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Bar extends StatelessWidget {
+  const _Bar(this.height);
+  final double height;
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 18,
+      height: height,
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          colors: [BlowfitColors.blue400, BlowfitColors.blue500],
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+        ),
+        borderRadius: BorderRadius.all(Radius.circular(6)),
       ),
     );
   }
