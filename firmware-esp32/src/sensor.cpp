@@ -66,7 +66,8 @@ float adcToCmH2O(int adc, float zeroOffsetCmH2O) {
 
   const float ratio = adc / static_cast<float>(ADC_MAX);
   const float kPa = (ratio - ZERO_RATIO) / K_FACTOR_RATIO;
-  const float cm = kPa * KPA_TO_CMH2O;
+  // PRESSURE_SIGN: 센서 포트 방향 보정 (반대로 연결 시 -1.0 으로 극성 반전).
+  const float cm = kPa * KPA_TO_CMH2O * PRESSURE_SIGN;
 
   // saturation guard
   float clamped = cm - zeroOffsetCmH2O;

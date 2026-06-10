@@ -105,6 +105,13 @@ namespace sensor {
   constexpr float K_FACTOR_RATIO = 0.057f;   // ratio per kPa
   constexpr float KPA_TO_CMH2O   = 10.197f;
 
+  // 차압 센서 포트(구멍/호스) 방향 보정용 극성.
+  //   정상: 호기(불기)=양압(+), 흡기(마시기)=음압(-).
+  // 압력 구멍/호스를 반대로 연결하면 부호가 뒤집혀 그래프가 거꾸로 움직인다
+  // (호기에 빨아야 올라감). 이 경우 -1.0 으로 전체 극성을 반전해 보정한다.
+  // (정상 배선이면 +1.0)
+  constexpr float PRESSURE_SIGN  = -1.0f;
+
   // MCP3221 I²C 주소 — 0x48~0x4F 중 하나. MikroE Click 기본 0x4D 추정.
   // MS2 (tools/i2c_scan) 로 실측 확인 후 필요 시 갱신.
   constexpr uint8_t MCP3221_ADDR = 0x4D;
