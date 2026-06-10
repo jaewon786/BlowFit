@@ -15,12 +15,14 @@ namespace haptic {
   /// 미리 정의한 효과 ID (ROM library 1, TS2200 Library A).
   /// 강하고 긴(=잘 느껴지는) 효과 위주로 선택. 더 길게 하려면 play() 의
   /// repeat 인자로 시퀀스 반복.
-  ///   14 = Strong Buzz 100%, 15 = 750ms Alert 100%, 16 = 1000ms Alert 100%
+  ///   1 = Strong Click 100% (짧은 tick), 14 = Strong Buzz 100%,
+  ///   15 = 750ms Alert 100%, 16 = 1000ms Alert 100%
   enum Effect : uint8_t {
     SESSION_START = 16,  // 1000ms Alert 100% — 세션 시작 (길고 강하게)
     EXHALE_CUE    = 15,  // 750ms Alert 100%  — 호기(불기) 시작 cue
     INHALE_CUE    = 15,  // 750ms Alert 100%  — 흡기(마시기) 시작 cue
-    REST_CUE      = 16,  // 1000ms Alert 100% — 휴식 전환 cue
+    REST_TICK     = 1,   // Strong Click      — 호흡 내 휴식(5s) 시작 짧은 cue
+    REST_CUE      = 16,  // 1000ms Alert 100% — 세트 사이 휴식(30s) 전환 cue
     SESSION_DONE  = 16,  // 1000ms Alert 100% — 세션 완료 (repeat 로 길게)
     POWER_ON      = 16,  // 1000ms Alert 100% — 전원 켜짐 알림 (버튼 wake 시)
     POWER_OFF     = 16,  // 1000ms Alert 100% — 전원 꺼짐 알림 (sleep 직전)

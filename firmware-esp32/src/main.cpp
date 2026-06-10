@@ -36,11 +36,7 @@ static void bootHardware() {
   digitalWrite(pins::TFT_POWER_ON, HIGH);
   delay(50);
 #endif
-  // I²C bus init — sensor.cpp 의 MCP3221 read 가 Wire 사용.
-  Wire.begin(pins::I2C_SDA, pins::I2C_SCL, sensor::I2C_FREQ_HZ);
-  Serial.printf("[i2c] init SDA=GPIO%u SCL=GPIO%u @ %lu Hz\n",
-                (unsigned)pins::I2C_SDA, (unsigned)pins::I2C_SCL,
-                (unsigned long)sensor::I2C_FREQ_HZ);
+  // I²C(Wire) 는 setup() 초입에서 이미 init (haptic 을 화면 전에 쓰기 위해).
 }
 
 // ----- 버튼 처리 (debounce + edge detect) -----
@@ -152,7 +148,16 @@ void setup() {
   Serial.println("M7: session state machine, M11: power mgmt");
   Serial.println("=========================================");
 
-  // deep sleep 에서 전원 버튼으로 깨어났으면 3초 hold 해야 부팅 진행.
+  // I²C + 햅틱을 가장 먼저 초기화 — 전원 버튼 3초 hold 가 확인되는 순간(=화면을
+  // 켜기 전)에 wakeGate 가 POWER_ON 진동을 울리려면 haptic 이 준비돼 있어야 함.
+  Wire.begin(pins::I2C_SDA, pins::I2C_SCL, sensor::I2C_FREQ_HZ);
+  Serial.printf("[i2c] init SDA=GPIO%u SCL=GPIO%u @ %lu Hz\n",
+                (unsigned)pins::I2C_SDA, (unsigned)pins::I2C_SCL,
+                (unsigned long)sensor::I2C_FREQ_HZ);
+  haptic::begin();  // DRV2605L EN HIGH + I²C 초기화 (ERM open-loop)
+
+  // deep sleep 에서 전원 버튼으로 깨어났으면 3초 hold 해야 부팅 진행. 3초가
+  // 확인되는 순간 POWER_ON 진동(화면보다 먼저). 3초 전 release 면 다시 sleep.
   // (디스플레이/센서 init 전에 게이트 — spurious wake 시 화면 안 켜짐.)
   power::wakeGate();
 
@@ -174,12 +179,9 @@ void setup() {
   sensor::calibrateZero();
   Serial.printf("Zero offset = %.2f cmH2O\n", sensor::zeroOffset());
 
-  haptic::begin();  // DRV2605L EN HIGH + I²C 초기화 (ERM open-loop)
   battery::begin(); // VBAT ADC (GPIO4) 측정 시작 — 화면 배터리 표시용.
-  // 전원 버튼으로 깨어난 경우(=사용자가 켬)에만 켜짐 진동. USB/RST 부팅은 제외.
-  if (power::wokeFromButton()) {
-    haptic::play(haptic::POWER_ON);
-  }
+  // (haptic::begin + POWER_ON 진동은 setup() 초입 + wakeGate 로 이동 — 전원
+  //  버튼 3초 hold 가 확인되는 순간 화면보다 먼저 진동이 울리도록.)
   pinMode(pins::LED_STATUS, OUTPUT);
   pinMode(pins::BUTTON_BOOT, INPUT_PULLUP);
   pinMode(pins::BUTTON_USER, INPUT_PULLUP);

@@ -327,7 +327,7 @@ void tick(uint32_t now_ms, float p) {
       // turn 갱신. cycle offset 으로 시작 phase 조정 (PImax 측정 모드 등).
       g_turn = turnAt(elapsed + g_cycle_offset_ms);
 
-      // 호흡 phase 전환 시 햅틱 cue — 눈 안 보고도 호기/흡기 시점 인지.
+      // 호흡 phase 전환 시 햅틱 cue — 눈 안 보고도 호기/흡기/휴식 시점 인지.
       // 첫 진입(None→Exhale)은 세션 시작 click 으로 대체하므로 생략.
       if (g_turn != g_prev_turn) {
         if (g_prev_turn != Turn::None) {
@@ -335,6 +335,8 @@ void tick(uint32_t now_ms, float p) {
             haptic::play(haptic::EXHALE_CUE);
           } else if (g_turn == Turn::Inhale) {
             haptic::play(haptic::INHALE_CUE);
+          } else if (g_turn == Turn::InhaleRest) {
+            haptic::play(haptic::REST_TICK);  // 휴식 시작 — 짧은 진동
           }
         }
         g_prev_turn = g_turn;

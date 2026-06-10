@@ -78,6 +78,10 @@ void wakeGate() {
   }
   Serial.println("[power] hold confirmed (3s) -> powering on");
 
+  // 3초 hold 확인 즉시 — 화면(부트 로고) 켜기 전에 먼저 "켜짐" 진동 피드백.
+  // (haptic 은 setup() 초입에서 이미 begin 됨.)
+  haptic::play(haptic::POWER_ON);
+
   // 이후 로직(tick 의 short/long 감지)이 깨끗한 상태에서 시작하도록 release 대기.
   while (digitalRead(pins::PWR_BUTTON) == LOW) {
     delay(10);
