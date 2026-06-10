@@ -439,7 +439,8 @@ class _HomeContent extends StatelessWidget {
           w: 81,
           h: 22,
           child: Image.asset(
-            'assets/dot/logo.png',
+            // 다크 모드: 글자만 흰색으로 바꾼 변형(파란 O 유지). 라이트: 원본.
+            isDark ? 'assets/dot/logo_dark.png' : 'assets/dot/logo.png',
             fit: BoxFit.contain,
             filterQuality: FilterQuality.high,
           ),
@@ -604,7 +605,7 @@ class _HomeContent extends StatelessWidget {
               },
               child: Container(
                 decoration: BoxDecoration(
-                  color: isDark ? DotColors.darkCardSoft : DotColors.lightCtaBg,
+                  color: DotColors.primary, // 브랜드 파란색 (라이트·다크 공통)
                   borderRadius: BorderRadius.circular(f.sx(10)),
                 ),
                 alignment: Alignment.center,
@@ -670,7 +671,9 @@ class _HomeContent extends StatelessWidget {
                       h: _StageLayout.bubbleH,
                       child: Container(
                         decoration: BoxDecoration(
-                          color: Colors.white,
+                          // 다크: Figma 말풍선색 #323266 / 라이트: 흰색.
+                          color:
+                              isDark ? const Color(0xFF323266) : Colors.white,
                           borderRadius: BorderRadius.circular(f.sx(10)),
                         ),
                         alignment: Alignment.center,
@@ -688,7 +691,8 @@ class _HomeContent extends StatelessWidget {
                               style: TextStyle(
                                 fontSize: f.sx(15),
                                 fontWeight: FontWeight.w700,
-                                color: Colors.black,
+                                // 다크: Figma 흰색 텍스트 / 라이트: 검정.
+                                color: isDark ? Colors.white : Colors.black,
                                 fontFamily: BlowfitTheme.fontFamily,
                               ),
                             ),
@@ -710,6 +714,13 @@ class _HomeContent extends StatelessWidget {
                       child: SvgPicture.asset(
                         'assets/dot/speech_tail.svg',
                         fit: BoxFit.fill,
+                        // 다크: 꼬리도 말풍선과 같은 #323266 (흰 텍스트 가독).
+                        colorFilter: isDark
+                            ? const ColorFilter.mode(
+                                Color(0xFF323266),
+                                BlendMode.srcIn,
+                              )
+                            : null,
                       ),
                     ),
 
@@ -756,13 +767,13 @@ class _HomeContent extends StatelessWidget {
 
         // ─── (디버그 전용) 캐릭터 진화 테스트 버튼 ───────────────────
         // 누적 훈련일을 기다리지 않고 진화/happy/리셋을 즉시 트리거. 릴리즈
-        // 빌드에는 포함되지 않음.
+        // 빌드에는 포함되지 않음. 우상단 알림(종) 버튼 아래(frame y 90, 우측 정렬)에
+        // 둬, 상단 아이콘(다크토글/설정/알림)을 가리지 않게 함.
         if (kDebugMode)
           Positioned(
-            top: MediaQuery.of(context).padding.top + 8,
-            left: 0,
-            right: 0,
-            child: const Center(child: BrelowCharacterDebugBar()),
+            top: f.sy(90),
+            right: f.sx(8),
+            child: const BrelowCharacterDebugBar(),
           ),
 
         // ─── 통계 카드 (362×194) — 화면 bottom 기준 ──────────────

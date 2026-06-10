@@ -436,18 +436,6 @@ class _TrainingContent extends ConsumerWidget {
       // 로딩 중 fallback — Normal · 기본값 기준.
       targetText = isInhaleSide ? '-40~-48' : '+30~+36';
     }
-    // 목표 구간 밴드 각도. 풀스케일 = target mid 이므로 mid → 180°(호 끝 = 호기
-    // 6시 / 흡기 12시). 밴드는 그 끝점을 가운데 두고 low(<180°)~high(>180°)로 양옆에
-    // 걸친다 → "목표 중간값" 이 6시/12시에 온다. (로딩 전엔 Normal 50/55·60/55 기준.)
-    double targetLowDeg = 163.6, targetHighDeg = 196.4;
-    if (pmStore != null) {
-      final t = isInhaleSide ? pmStore.inhaleTarget() : pmStore.exhaleTarget();
-      final mid = (t.low + t.high) / 2;
-      if (mid > 0) {
-        targetLowDeg = (t.low / mid * 180).clamp(0.0, 360.0);
-        targetHighDeg = (t.high / mid * 180).clamp(0.0, 360.0);
-      }
-    }
     // 사용자가 설정에서 선택한 훈련 시간(분, 기본 5). 기기 세션 길이와 동일.
     final trainMinutes =
         ref.watch(trainDurationStoreProvider).valueOrNull?.loadMinutes() ??
@@ -543,8 +531,6 @@ class _TrainingContent extends ConsumerWidget {
               phase: phase,
               exhaleArc: exhaleArc,
               inhaleArc: inhaleArc,
-              targetLowDeg: targetLowDeg,
-              targetHighDeg: targetHighDeg,
             ),
           ),
         ),
@@ -700,15 +686,11 @@ class _RingPainter extends CustomPainter {
     required this.phase,
     required this.exhaleArc,
     required this.inhaleArc,
-    required this.targetLowDeg,
-    required this.targetHighDeg,
   });
   final _Frame f;
   final _Phase phase;
   final double exhaleArc; // 0~180 degrees
   final double inhaleArc; // 0~180 degrees
-  final double targetLowDeg; // 목표 구간 시작 (현재 phase 쪽, 호 시작점 기준 °)
-  final double targetHighDeg; // 목표 구간 끝 (>180° 가능 — 끝점 6시/12시 를 넘어 걸침)
 
   // phase 별 안쪽 원 배경색 — 호기 연파랑 / 흡기 연초록 / 휴식 연회색.
   static Color _innerColor(_Phase p) {
@@ -745,24 +727,21 @@ class _RingPainter extends CustomPainter {
       ..strokeCap = StrokeCap.butt;
     canvas.drawCircle(center, radius, basePaint);
 
-    // 1.5 목표 구간 밴드 (amber) — 현재 phase 쪽 반원에 target low~high 를 표시.
-    //     트랙(흰 도넛) 위·fill 호 아래 → fill 이 밴드를 덮으며 진행 = "도달".
-    final bandSweepDeg = targetHighDeg - targetLowDeg;
-    if (bandSweepDeg > 0) {
+    // 1.5 목표 압력 — 호 끝점(호기 6시 / 흡기 12시 = 목표 중간값)에 "호기/흡기 색"
+    //     원 1개로 표시. (풀스케일이 목표 중간값이라 끝점 = 목표 위치.) fill 호 아래라
+    //     dot 이 끝점에 닿으면 자연스레 덮인다.
+    {
       final isInhaleSide = phase == _Phase.inhale || phase == _Phase.inhaleRest;
-      // 호기: 12시(-π/2)에서 시계방향. 흡기: 6시(+π/2)에서 시계방향(6→9→12).
+      // 호 끝점: 호기 12시(-π/2)+180°=6시, 흡기 6시(+π/2)+180°=12시.
       final base = isInhaleSide ? math.pi / 2 : -math.pi / 2;
-      final bandPaint = Paint()
-        ..color = const Color(0xFFFFB300) // amber — 목표 zone
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = strokeW
-        ..strokeCap = StrokeCap.butt;
-      canvas.drawArc(
-        ringRect,
-        base + targetLowDeg * math.pi / 180,
-        bandSweepDeg * math.pi / 180,
-        false,
-        bandPaint,
+      final a = base + math.pi;
+      canvas.drawCircle(
+        Offset(
+          center.dx + radius * math.cos(a),
+          center.dy + radius * math.sin(a),
+        ),
+        strokeW / 2, // 링 도넛 폭에 꽉 차게 (진행 dot 과 동일 크기)
+        Paint()..color = isInhaleSide ? _inhaleColor : _exhaleColor,
       );
     }
 
@@ -829,7 +808,5 @@ class _RingPainter extends CustomPainter {
   bool shouldRepaint(_RingPainter old) =>
       old.phase != phase ||
       old.exhaleArc != exhaleArc ||
-      old.inhaleArc != inhaleArc ||
-      old.targetLowDeg != targetLowDeg ||
-      old.targetHighDeg != targetHighDeg;
+      old.inhaleArc != inhaleArc;
 }
