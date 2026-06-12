@@ -4,7 +4,6 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/ble/ble_providers.dart';
 import '../../core/storage/last_device_store.dart';
-import '../../core/storage/pimax_mep_store.dart';
 import '../../core/storage/storage_providers.dart';
 import '../../core/storage/train_duration_store.dart';
 
@@ -29,7 +28,7 @@ class SettingsScreen extends ConsumerWidget {
         child: ListView(
           padding: const EdgeInsets.symmetric(vertical: 8),
           children: [
-            _SectionGap(),
+            const _SectionGap(),
             _DeviceCard(
               connected: connected,
               device: lastDevice,
@@ -199,6 +198,9 @@ class _DeviceCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final primary = Theme.of(context).colorScheme.primary;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final primaryText = isDark ? Colors.white : Colors.black87;
+    final secondaryText = isDark ? Colors.white70 : Colors.black54;
     final statusColor = connected ? Colors.green : Colors.grey;
     final deviceName = device?.name ?? '연결된 기기 없음';
     final deviceSubtitle = connected
@@ -214,7 +216,7 @@ class _DeviceCard extends StatelessWidget {
             Container(
               width: 44, height: 44,
               decoration: BoxDecoration(
-                color: primary.withOpacity(0.10),
+                color: primary.withValues(alpha: 0.10),
                 shape: BoxShape.circle,
               ),
               child: Icon(Icons.bluetooth, color: primary, size: 22),
@@ -224,15 +226,17 @@ class _DeviceCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
+                  Text(
                     '내 기기',
-                    style: TextStyle(fontSize: 12, color: Colors.black54),
+                    style: TextStyle(fontSize: 12, color: secondaryText),
                   ),
                   const SizedBox(height: 2),
                   Text(
                     deviceName,
-                    style: const TextStyle(
-                      fontSize: 16, fontWeight: FontWeight.w600, color: Colors.black87,
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: primaryText,
                     ),
                   ),
                   const SizedBox(height: 2),
@@ -254,7 +258,10 @@ class _DeviceCard extends StatelessWidget {
                 ],
               ),
             ),
-            const Icon(Icons.chevron_right, color: Colors.black38),
+            Icon(
+              Icons.chevron_right,
+              color: isDark ? Colors.white38 : Colors.black38,
+            ),
           ],
         ),
       ),
@@ -277,28 +284,33 @@ class _SettingsTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 다크 모드 대응 — 하드코딩 검정 대신 밝기에 맞는 텍스트/아이콘 색.
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final primaryText = isDark ? Colors.white : Colors.black87;
+    final secondaryText = isDark ? Colors.white70 : Colors.black54;
+    final mutedIcon = isDark ? Colors.white38 : Colors.black38;
     return InkWell(
       onTap: onTap,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         child: Row(
           children: [
-            Icon(icon, color: Colors.black54, size: 22),
+            Icon(icon, color: secondaryText, size: 22),
             const SizedBox(width: 16),
             Expanded(
               child: Text(
                 label,
-                style: const TextStyle(fontSize: 15, color: Colors.black87),
+                style: TextStyle(fontSize: 15, color: primaryText),
               ),
             ),
             if (trailing != null) ...[
               Text(
                 trailing!,
-                style: const TextStyle(fontSize: 13, color: Colors.black54),
+                style: TextStyle(fontSize: 13, color: secondaryText),
               ),
               const SizedBox(width: 6),
             ],
-            const Icon(Icons.chevron_right, color: Colors.black38, size: 20),
+            Icon(Icons.chevron_right, color: mutedIcon, size: 20),
           ],
         ),
       ),
@@ -311,9 +323,10 @@ class _SectionGap extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       height: 8,
-      color: const Color(0xFFF7F8FA),
+      color: isDark ? const Color(0xFF11122E) : const Color(0xFFF7F8FA),
     );
   }
 }

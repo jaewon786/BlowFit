@@ -20,6 +20,10 @@ import 'brelow_character.dart';
 /// 대시보드가 이 값을 watch 하여 말풍선·캐릭터 위치를 단계별로 맞춘다.
 final characterShownLevelProvider = StateProvider<int>((ref) => 1);
 
+/// 진화(bloom) 진행 중 여부. 대시보드가 watch 하여 진화 시작 시 말풍선을 먼저
+/// 페이드아웃했다가, 진화 완료 후 새 단계 말풍선을 다시 보인다.
+final characterEvolvingProvider = StateProvider<bool>((ref) => false);
+
 /// (디버그) 캐릭터 진화/표정 수동 트리거 명령.
 enum CharacterDebugCmd { evolve, happy, reset }
 
@@ -94,8 +98,18 @@ class _BrelowCharacterPanelState extends ConsumerState<BrelowCharacterPanel> {
     if (_evolving) return;
     final target = CharacterStage.forTrainingDays(stats.trainingDays);
     if (target.level <= _shownLevel) return;
+    _startEvolve();
+  }
+
+  /// 진화 시작 — 먼저 말풍선을 숨기고(대시보드가 페이드아웃), 잠깐 텀을 둔 뒤
+  /// 캐릭터 bloom 을 재생한다. → "말풍선 먼저 사라짐 → 캐릭터 사라짐(변신)".
+  void _startEvolve() {
     _evolving = true;
-    _motion.playBloom(); // 현재(표시) 단계의 bloom.
+    ref.read(characterEvolvingProvider.notifier).state = true;
+    Future.delayed(const Duration(milliseconds: 350), () {
+      if (!mounted || !_evolving) return;
+      _motion.playBloom(); // 현재(표시) 단계의 bloom.
+    });
   }
 
   // bloom 재생 완료 → 다음 단계로 교체 + 영속. 다단계 점프 대비 재평가.
@@ -105,6 +119,7 @@ class _BrelowCharacterPanelState extends ConsumerState<BrelowCharacterPanel> {
     ref.read(characterShownLevelProvider.notifier).state = newLevel;
     _store?.saveShownLevel(newLevel);
     _evolving = false;
+    ref.read(characterEvolvingProvider.notifier).state = false; // 새 말풍선 복귀
     // 새 단계 .riv 로드 후 한 번 더 평가(예: 데모 시드로 한 번에 여러 단계).
     Future.delayed(const Duration(milliseconds: 900), () {
       if (!mounted) return;
@@ -120,12 +135,12 @@ class _BrelowCharacterPanelState extends ConsumerState<BrelowCharacterPanel> {
       case CharacterDebugCmd.evolve:
         if (_evolving) return;
         if (_shownLevel >= 3) return; // 이미 최종(Oxygen).
-        _evolving = true;
-        _motion.playBloom(); // 현재 단계 bloom → _onBloomComplete 에서 단계 상승.
+        _startEvolve(); // 말풍선 먼저 숨김 → bloom (→ _onBloomComplete 에서 상승).
       case CharacterDebugCmd.happy:
         _motion.playHappy();
       case CharacterDebugCmd.reset:
         _evolving = false;
+        ref.read(characterEvolvingProvider.notifier).state = false;
         setState(() => _shownLevel = 1);
         ref.read(characterShownLevelProvider.notifier).state = 1;
         _store?.saveShownLevel(1);

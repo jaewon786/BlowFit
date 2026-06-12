@@ -1,11 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
-/// Figma DoT 디자인 v2 — 하단 NavigationBar 없음.
-///
-/// 시안 (1:2060 홈 / 1:2261 홈 다크 / 1:2128 추이 / 1:2236 훈련) 어느 화면에도
-/// 하단 탭바가 없어 MainShell 은 단순 pass-through 로만 동작. 화면 사이의
-/// 이동은 page indicator + swipe (추후) 또는 상단 액션 버튼으로만 처리.
+/// Figma DoT 디자인 v2 — 하단 NavigationBar 없음. 단순 pass-through.
+/// 시스템 뒤로가기는 네이티브(onBackPressed) → MethodChannel → HomePagerScreen
+/// 에서 처리한다.
 class MainShell extends StatelessWidget {
   const MainShell({super.key, required this.navigationShell});
 

@@ -63,6 +63,7 @@ class _SleepTrendScreenState extends ConsumerState<SleepTrendScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = ref.watch(themeModeProvider) == ThemeMode.dark;
     final media = MediaQuery.of(context);
     final f = _Frame(media.size.width);
     final records = ref.watch(recentSleepProvider).valueOrNull ?? const [];
@@ -70,7 +71,8 @@ class _SleepTrendScreenState extends ConsumerState<SleepTrendScreen> {
     final effect = computeSleepEffect(records);
 
     return Scaffold(
-      backgroundColor: const Color(0xFF4BA22B),
+      backgroundColor:
+          isDark ? const Color(0xFF030414) : const Color(0xFF4BA22B),
       body: SingleChildScrollView(
         child: SizedBox(
           width: media.size.width,
@@ -81,11 +83,11 @@ class _SleepTrendScreenState extends ConsumerState<SleepTrendScreen> {
                 child: LayoutBuilder(
                   builder: (_, c) => CustomPaint(
                     size: Size(c.maxWidth, c.maxHeight),
-                    painter: _SleepBgPainter(),
+                    painter: _SleepBgPainter(isDark: isDark),
                   ),
                 ),
               ),
-              _content(context, f, sorted, effect),
+              _content(context, f, sorted, effect, isDark),
             ],
           ),
         ),
@@ -98,6 +100,7 @@ class _SleepTrendScreenState extends ConsumerState<SleepTrendScreen> {
     _Frame f,
     List<SleepRecord> sorted,
     SleepEffect effect,
+    bool isDark,
   ) {
     final headline = _headline(effect);
     return Stack(
@@ -108,8 +111,31 @@ class _SleepTrendScreenState extends ConsumerState<SleepTrendScreen> {
           y: 56,
           w: 81,
           h: 22,
-          child: Image.asset('assets/dot/logo.png',
-              fit: BoxFit.contain, filterQuality: FilterQuality.high),
+          child: Image.asset(
+            isDark ? 'assets/dot/logo_dark.png' : 'assets/dot/logo.png',
+            fit: BoxFit.contain,
+            filterQuality: FilterQuality.high,
+          ),
+        ),
+        // 테마(라이트/다크) 토글 — 설정 좌측, hit 44×44
+        f.at(
+          x: 262,
+          y: 41,
+          w: 44,
+          h: 44,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => ref.read(themeModeProvider.notifier).toggle(),
+            child: Container(
+              color: Colors.transparent,
+              alignment: Alignment.center,
+              child: Icon(
+                isDark ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
+                size: f.sx(22),
+                color: isDark ? DotColors.darkTextPrimary : _ink,
+              ),
+            ),
+          ),
         ),
         // 설정
         f.at(
@@ -126,11 +152,15 @@ class _SleepTrendScreenState extends ConsumerState<SleepTrendScreen> {
               child: Container(
                 color: Colors.transparent,
                 alignment: Alignment.center,
-                child: SvgPicture.asset('assets/dot/icon_settings.svg',
-                    width: f.sx(22),
-                    height: f.sx(21),
-                    colorFilter:
-                        const ColorFilter.mode(_ink, BlendMode.srcIn)),
+                child: SvgPicture.asset(
+                  'assets/dot/icon_settings.svg',
+                  width: f.sx(22),
+                  height: f.sx(21),
+                  colorFilter: ColorFilter.mode(
+                    isDark ? DotColors.darkTextPrimary : _ink,
+                    BlendMode.srcIn,
+                  ),
+                ),
               ),
             ),
           ),
@@ -142,35 +172,47 @@ class _SleepTrendScreenState extends ConsumerState<SleepTrendScreen> {
           w: 44,
           h: 44,
           child: Center(
-            child: SvgPicture.asset('assets/dot/icon_bell.svg',
-                width: f.sx(18),
-                height: f.sx(20),
-                colorFilter: const ColorFilter.mode(_ink, BlendMode.srcIn)),
+            child: SvgPicture.asset(
+              'assets/dot/icon_bell.svg',
+              width: f.sx(18),
+              height: f.sx(20),
+              colorFilter: ColorFilter.mode(
+                isDark ? DotColors.darkTextPrimary : _ink,
+                BlendMode.srcIn,
+              ),
+            ),
           ),
         ),
         // "수면 추이"
         f.at(
           x: 19,
           y: 105,
-          child: Text('수면 추이',
-              style: TextStyle(
-                  fontSize: f.sx(15),
-                  fontWeight: FontWeight.w600,
-                  color: _ink.withValues(alpha: 0.7),
-                  fontFamily: BlowfitTheme.fontFamily)),
+          child: Text(
+            '수면 추이',
+            style: TextStyle(
+              fontSize: f.sx(15),
+              fontWeight: FontWeight.w600,
+              color: (isDark ? DotColors.darkTextPrimary : _ink)
+                  .withValues(alpha: 0.7),
+              fontFamily: BlowfitTheme.fontFamily,
+            ),
+          ),
         ),
         // 헤드라인
         f.at(
           x: 19,
           y: 127,
           w: 364,
-          child: Text(headline,
-              style: TextStyle(
-                  fontSize: f.sx(20),
-                  fontWeight: FontWeight.w700,
-                  color: _ink,
-                  letterSpacing: -0.4,
-                  fontFamily: BlowfitTheme.fontFamily)),
+          child: Text(
+            headline,
+            style: TextStyle(
+              fontSize: f.sx(20),
+              fontWeight: FontWeight.w700,
+              color: isDark ? DotColors.darkTextPrimary : _ink,
+              letterSpacing: -0.4,
+              fontFamily: BlowfitTheme.fontFamily,
+            ),
+          ),
         ),
         // 요약 카드
         f.at(
@@ -178,7 +220,7 @@ class _SleepTrendScreenState extends ConsumerState<SleepTrendScreen> {
           y: 175,
           w: 362,
           h: 91,
-          child: _SummaryCard(f: f, records: sorted),
+          child: _SummaryCard(f: f, records: sorted, isDark: isDark),
         ),
         // 차트 카드 — 최저 SpO₂ 추이
         f.at(
@@ -186,7 +228,7 @@ class _SleepTrendScreenState extends ConsumerState<SleepTrendScreen> {
           y: 290,
           w: 362,
           h: 250,
-          child: _Spo2TrendCard(f: f, records: sorted),
+          child: _Spo2TrendCard(f: f, records: sorted, isDark: isDark),
         ),
         // 달력 카드 — 측정한 밤
         f.at(
@@ -198,10 +240,38 @@ class _SleepTrendScreenState extends ConsumerState<SleepTrendScreen> {
             f: f,
             month: _calMonth,
             records: sorted,
-            onPrev: () => setState(() =>
-                _calMonth = DateTime(_calMonth.year, _calMonth.month - 1)),
-            onNext: () => setState(() =>
-                _calMonth = DateTime(_calMonth.year, _calMonth.month + 1)),
+            isDark: isDark,
+            onPrev: () => setState(
+              () => _calMonth = DateTime(_calMonth.year, _calMonth.month - 1),
+            ),
+            onNext: () => setState(
+              () => _calMonth = DateTime(_calMonth.year, _calMonth.month + 1),
+            ),
+          ),
+        ),
+        // ─── 페이지 indicator (3 페이지 — 홈·추이·수면, 수면은 index 2) ──
+        // 3 dot(32) 가운데 정렬 → x = (402-32)/2 = 185.
+        f.at(
+          x: 185,
+          y: 940,
+          w: 32,
+          h: 6,
+          child: Row(
+            children: [
+              for (var i = 0; i < 3; i++) ...[
+                if (i > 0) SizedBox(width: f.sx(7)),
+                Container(
+                  width: f.sx(6),
+                  height: f.sx(6),
+                  decoration: BoxDecoration(
+                    color: i == 2
+                        ? DotColors.primary
+                        : (isDark ? Colors.white24 : Colors.black26),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ],
+            ],
           ),
         ),
       ],
@@ -220,9 +290,14 @@ class _SleepTrendScreenState extends ConsumerState<SleepTrendScreen> {
 
 // ───────────────────────── 요약 카드 ─────────────────────────
 class _SummaryCard extends StatelessWidget {
-  const _SummaryCard({required this.f, required this.records});
+  const _SummaryCard({
+    required this.f,
+    required this.records,
+    required this.isDark,
+  });
   final _Frame f;
   final List<SleepRecord> records;
+  final bool isDark;
 
   @override
   Widget build(BuildContext context) {
@@ -236,23 +311,27 @@ class _SummaryCard extends StatelessWidget {
       if (!r.night.isBefore(monday)) week++;
       if (!r.night.isBefore(monthStart)) month++;
     }
+    final dividerColor =
+        isDark ? Colors.white.withValues(alpha: 0.12) : Colors.black12;
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.8),
+        color: isDark
+            ? const Color(0xFF181836)
+            : Colors.white.withValues(alpha: 0.8),
         borderRadius: BorderRadius.circular(f.sx(10)),
       ),
       child: Stack(
         children: [
           Positioned(
-              left: f.sx(117),
-              top: f.sx(17),
-              child:
-                  Container(width: 1, height: f.sx(58), color: Colors.black12)),
+            left: f.sx(117),
+            top: f.sx(17),
+            child: Container(width: 1, height: f.sx(58), color: dividerColor),
+          ),
           Positioned(
-              left: f.sx(241),
-              top: f.sx(17),
-              child:
-                  Container(width: 1, height: f.sx(58), color: Colors.black12)),
+            left: f.sx(241),
+            top: f.sx(17),
+            child: Container(width: 1, height: f.sx(58), color: dividerColor),
+          ),
           _col(0, 117, '이번 주', '$week박'),
           _col(117, 241, '이번 달', '$month박'),
           _col(241, 362, '지금까지', '${records.length}박'),
@@ -267,19 +346,25 @@ class _SummaryCard extends StatelessWidget {
         top: f.sx(18),
         child: Column(
           children: [
-            Text(label,
-                style: TextStyle(
-                    fontSize: f.sx(12),
-                    fontWeight: FontWeight.w500,
-                    color: _ink,
-                    fontFamily: BlowfitTheme.fontFamily)),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: f.sx(12),
+                fontWeight: FontWeight.w500,
+                color: isDark ? DotColors.darkTextPrimary : _ink,
+                fontFamily: BlowfitTheme.fontFamily,
+              ),
+            ),
             SizedBox(height: f.sx(2)),
-            Text(value,
-                style: TextStyle(
-                    fontSize: f.sx(27),
-                    fontWeight: FontWeight.w700,
-                    color: _ink,
-                    fontFamily: BlowfitTheme.fontFamily)),
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: f.sx(27),
+                fontWeight: FontWeight.w700,
+                color: isDark ? DotColors.darkTextPrimary : _ink,
+                fontFamily: BlowfitTheme.fontFamily,
+              ),
+            ),
           ],
         ),
       );
@@ -287,15 +372,20 @@ class _SummaryCard extends StatelessWidget {
 
 // ───────────────────────── 차트 카드 ─────────────────────────
 class _Spo2TrendCard extends StatelessWidget {
-  const _Spo2TrendCard({required this.f, required this.records});
+  const _Spo2TrendCard({
+    required this.f,
+    required this.records,
+    required this.isDark,
+  });
   final _Frame f;
   final List<SleepRecord> records; // asc
+  final bool isDark;
 
   @override
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isDark ? const Color(0xFF181836) : Colors.white,
         borderRadius: BorderRadius.circular(f.sx(10)),
       ),
       child: Stack(
@@ -307,33 +397,45 @@ class _Spo2TrendCard extends StatelessWidget {
             child: Row(
               children: [
                 Container(
-                    width: f.sx(9),
-                    height: f.sx(9),
-                    decoration: BoxDecoration(
-                        color: DotColors.primary,
-                        borderRadius: BorderRadius.circular(f.sx(1)))),
+                  width: f.sx(9),
+                  height: f.sx(9),
+                  decoration: BoxDecoration(
+                    color: DotColors.primary,
+                    borderRadius: BorderRadius.circular(f.sx(1)),
+                  ),
+                ),
                 SizedBox(width: f.sx(6)),
-                Text('최저 SpO₂ (%)',
-                    style: TextStyle(
-                        fontSize: f.sx(10),
-                        fontWeight: FontWeight.w500,
-                        color: _ink2,
-                        fontFamily: BlowfitTheme.fontFamily)),
+                Text(
+                  '최저 SpO₂ (%)',
+                  style: TextStyle(
+                    fontSize: f.sx(10),
+                    fontWeight: FontWeight.w500,
+                    color: isDark ? DotColors.darkTextSecondary : _ink2,
+                    fontFamily: BlowfitTheme.fontFamily,
+                  ),
+                ),
               ],
             ),
           ),
           Positioned.fill(
             child: CustomPaint(
-              painter: _Spo2LinePainter(scale: f.scale, records: records),
+              painter: _Spo2LinePainter(
+                scale: f.scale,
+                records: records,
+                isDark: isDark,
+              ),
             ),
           ),
           if (records.every((r) => r.spo2Min == null))
             Center(
-              child: Text('SpO₂ 데이터 없음',
-                  style: TextStyle(
-                      fontSize: f.sx(12),
-                      color: _muted,
-                      fontFamily: BlowfitTheme.fontFamily)),
+              child: Text(
+                'SpO₂ 데이터 없음',
+                style: TextStyle(
+                  fontSize: f.sx(12),
+                  color: isDark ? DotColors.darkTextMuted : _muted,
+                  fontFamily: BlowfitTheme.fontFamily,
+                ),
+              ),
             ),
         ],
       ),
@@ -342,9 +444,14 @@ class _Spo2TrendCard extends StatelessWidget {
 }
 
 class _Spo2LinePainter extends CustomPainter {
-  _Spo2LinePainter({required this.scale, required this.records});
+  _Spo2LinePainter({
+    required this.scale,
+    required this.records,
+    required this.isDark,
+  });
   final double scale;
   final List<SleepRecord> records;
+  final bool isDark;
   static const _yMin = 80.0, _yMax = 100.0;
 
   @override
@@ -353,14 +460,18 @@ class _Spo2LinePainter extends CustomPainter {
     final padR = size.width * 0.05;
     final padT = size.height * 0.24;
     final padB = size.height * 0.10;
-    final plot = Rect.fromLTRB(padL, padT, size.width - padR, size.height - padB);
+    final plot =
+        Rect.fromLTRB(padL, padT, size.width - padR, size.height - padB);
 
     double yFor(double v) =>
-        plot.top + (_yMax - v.clamp(_yMin, _yMax)) / (_yMax - _yMin) * plot.height;
+        plot.top +
+        (_yMax - v.clamp(_yMin, _yMax)) / (_yMax - _yMin) * plot.height;
 
     // grid + Y labels (100/95/90/85/80)
     final grid = Paint()
-      ..color = _muted.withValues(alpha: 0.25)
+      ..color = isDark
+          ? Colors.white.withValues(alpha: 0.12)
+          : _muted.withValues(alpha: 0.25)
       ..strokeWidth = 1;
     for (final v in const [100.0, 95.0, 90.0, 85.0, 80.0]) {
       final y = yFor(v);
@@ -369,13 +480,17 @@ class _Spo2LinePainter extends CustomPainter {
         text: TextSpan(
           text: v.toStringAsFixed(0),
           style: TextStyle(
-              color: _muted,
-              fontSize: 8 * scale,
-              fontFamily: BlowfitTheme.fontFamily),
+            color: isDark ? DotColors.darkTextMuted : _muted,
+            fontSize: 8 * scale,
+            fontFamily: BlowfitTheme.fontFamily,
+          ),
         ),
         textDirection: TextDirection.ltr,
       )..layout();
-      tp.paint(canvas, Offset(plot.left - tp.width - 4 * scale, y - tp.height / 2));
+      tp.paint(
+        canvas,
+        Offset(plot.left - tp.width - 4 * scale, y - tp.height / 2),
+      );
     }
 
     // line + dots
@@ -408,7 +523,8 @@ class _Spo2LinePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_Spo2LinePainter old) => old.records != records;
+  bool shouldRepaint(_Spo2LinePainter old) =>
+      old.records != records || old.isDark != isDark;
 }
 
 // ───────────────────────── 달력 카드 ─────────────────────────
@@ -419,12 +535,14 @@ class _SleepCalendarCard extends StatelessWidget {
     required this.records,
     required this.onPrev,
     required this.onNext,
+    required this.isDark,
   });
   final _Frame f;
   final DateTime month;
   final List<SleepRecord> records;
   final VoidCallback onPrev;
   final VoidCallback onNext;
+  final bool isDark;
 
   static const _measuredCircle = Color(0xFFA5D3FF);
   static const _todayCircle = Color(0xFF0084FF);
@@ -443,6 +561,14 @@ class _SleepCalendarCard extends StatelessWidget {
     final firstDow = DateTime(month.year, month.month, 1).weekday % 7; // Sun=0
     final daysInMonth = DateTime(month.year, month.month + 1, 0).day;
     const labels = ['일', '월', '화', '수', '목', '금', '토'];
+    // 측정한 밤 원/글씨 — 라이트: 연파랑 원 + 진회색 글씨 / 다크:
+    //   #86C5FF @30% 원 + 흰 글씨. 오늘 원 #0084FF 는 공통.
+    final measuredCircleCol = isDark
+        ? const Color(0xFF86C5FF).withValues(alpha: 0.3)
+        : _measuredCircle;
+    final measuredTextCol = isDark ? Colors.white : _measuredText;
+    final inkColor = isDark ? DotColors.darkTextPrimary : _ink;
+    final calGrayColor = isDark ? DotColors.darkTextMuted : _calGray;
 
     final cells = <Widget>[];
     var day = 1;
@@ -456,29 +582,33 @@ class _SleepCalendarCard extends StatelessWidget {
         final d = day;
         final isToday = isThisMonth && d == now.day;
         final isMeasured = measured.contains(d);
-        cells.add(Center(
-          child: Container(
-            width: f.sx(30),
-            height: f.sx(30),
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: isToday
-                  ? _todayCircle
-                  : (isMeasured ? _measuredCircle : Colors.transparent),
-              shape: BoxShape.circle,
-            ),
-            child: Text('$d',
+        cells.add(
+          Center(
+            child: Container(
+              width: f.sx(30),
+              height: f.sx(30),
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: isToday
+                    ? _todayCircle
+                    : (isMeasured ? measuredCircleCol : Colors.transparent),
+                shape: BoxShape.circle,
+              ),
+              child: Text(
+                '$d',
                 style: TextStyle(
                   fontSize: f.sx(13),
                   fontWeight:
                       isToday || isMeasured ? FontWeight.w600 : FontWeight.w400,
                   color: isToday
                       ? Colors.white
-                      : (isMeasured ? _measuredText : _calGray),
+                      : (isMeasured ? measuredTextCol : calGrayColor),
                   fontFamily: BlowfitTheme.fontFamily,
-                )),
+                ),
+              ),
+            ),
           ),
-        ));
+        );
         day++;
       }
     }
@@ -486,7 +616,7 @@ class _SleepCalendarCard extends StatelessWidget {
     return Container(
       padding: EdgeInsets.symmetric(horizontal: f.sx(20), vertical: f.sx(20)),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isDark ? const Color(0xFF181836) : Colors.white,
         borderRadius: BorderRadius.circular(f.sx(10)),
       ),
       child: Column(
@@ -495,18 +625,24 @@ class _SleepCalendarCard extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               GestureDetector(
-                  onTap: onPrev,
-                  child: Icon(Icons.chevron_left, color: _ink, size: f.sx(20))),
-              Text('${month.year}년 ${month.month}월',
-                  style: TextStyle(
-                      fontSize: f.sx(15),
-                      fontWeight: FontWeight.w700,
-                      color: _ink,
-                      fontFamily: BlowfitTheme.fontFamily)),
+                onTap: onPrev,
+                child:
+                    Icon(Icons.chevron_left, color: inkColor, size: f.sx(20)),
+              ),
+              Text(
+                '${month.year}년 ${month.month}월',
+                style: TextStyle(
+                  fontSize: f.sx(15),
+                  fontWeight: FontWeight.w700,
+                  color: inkColor,
+                  fontFamily: BlowfitTheme.fontFamily,
+                ),
+              ),
               GestureDetector(
-                  onTap: onNext,
-                  child:
-                      Icon(Icons.chevron_right, color: _ink, size: f.sx(20))),
+                onTap: onNext,
+                child:
+                    Icon(Icons.chevron_right, color: inkColor, size: f.sx(20)),
+              ),
             ],
           ),
           SizedBox(height: f.sx(12)),
@@ -515,12 +651,15 @@ class _SleepCalendarCard extends StatelessWidget {
               for (final l in labels)
                 Expanded(
                   child: Center(
-                    child: Text(l,
-                        style: TextStyle(
-                            fontSize: f.sx(11),
-                            fontWeight: FontWeight.w500,
-                            color: _calGray,
-                            fontFamily: BlowfitTheme.fontFamily)),
+                    child: Text(
+                      l,
+                      style: TextStyle(
+                        fontSize: f.sx(11),
+                        fontWeight: FontWeight.w500,
+                        color: calGrayColor,
+                        fontFamily: BlowfitTheme.fontFamily,
+                      ),
+                    ),
                   ),
                 ),
             ],
@@ -541,6 +680,9 @@ class _SleepCalendarCard extends StatelessWidget {
 
 // ───────────────────────── 배경 페인터 (추이와 동일) ─────────────────────────
 class _SleepBgPainter extends CustomPainter {
+  _SleepBgPainter({required this.isDark});
+  final bool isDark;
+
   static const _e47Width = 1017.3922729492188;
   static const _e47Height = 1284.04150390625;
   static const _e47Transform = <List<double>>[
@@ -569,6 +711,12 @@ class _SleepBgPainter extends CustomPainter {
     final paint = Paint();
     final scale = size.width / _kFrameW;
 
+    if (isDark) {
+      // 다크 모드 배경 — 추이 다크와 동일 단색 #030414 (물결 ellipse 없음).
+      canvas.drawRect(rect, Paint()..color = const Color(0xFF030414));
+      return;
+    }
+
     paint.shader = const LinearGradient(
       begin: Alignment(-0.4, -1.0),
       end: Alignment(0.4, 1.0),
@@ -582,22 +730,60 @@ class _SleepBgPainter extends CustomPainter {
     canvas.drawRect(rect, paint);
     paint.shader = null;
 
-    _drawEllipse(canvas, scale, _e48Transform, _e48Width, _e48Height,
-        _e48Colors, _e48Stops, 70);
-    _drawEllipse(canvas, scale, _e47Transform, _e47Width, _e47Height,
-        _e47Colors, _e47Stops, 18.1);
+    _drawEllipse(
+      canvas,
+      scale,
+      _e48Transform,
+      _e48Width,
+      _e48Height,
+      _e48Colors,
+      _e48Stops,
+      70,
+    );
+    _drawEllipse(
+      canvas,
+      scale,
+      _e47Transform,
+      _e47Width,
+      _e47Height,
+      _e47Colors,
+      _e47Stops,
+      18.1,
+    );
   }
 
-  void _drawEllipse(Canvas canvas, double scale, List<List<double>> m, double w,
-      double h, List<Color> colors, List<double> stops, double blurSigma) {
+  void _drawEllipse(
+    Canvas canvas,
+    double scale,
+    List<List<double>> m,
+    double w,
+    double h,
+    List<Color> colors,
+    List<double> stops,
+    double blurSigma,
+  ) {
     canvas.save();
     canvas.scale(scale, scale);
-    canvas.transform(Float64List.fromList(<double>[
-      m[0][0], m[1][0], 0, 0,
-      m[0][1], m[1][1], 0, 0,
-      0, 0, 1, 0,
-      m[0][2], m[1][2], 0, 1,
-    ]));
+    canvas.transform(
+      Float64List.fromList(<double>[
+        m[0][0],
+        m[1][0],
+        0,
+        0,
+        m[0][1],
+        m[1][1],
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        m[0][2],
+        m[1][2],
+        0,
+        1,
+      ]),
+    );
     final rect = Rect.fromLTWH(0, 0, w, h);
     final shader = LinearGradient(
       begin: Alignment.topCenter,
@@ -619,5 +805,5 @@ class _SleepBgPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_SleepBgPainter old) => false;
+  bool shouldRepaint(_SleepBgPainter old) => old.isDark != isDark;
 }

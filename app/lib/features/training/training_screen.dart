@@ -24,6 +24,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 import '../../core/ble/ble_providers.dart';
 import '../../core/storage/storage_providers.dart';
 import '../../core/storage/train_duration_store.dart';
+import '../../core/theme/blowfit_colors.dart';
 import '../../core/theme/blowfit_theme.dart';
 
 const double _kFrameW = 402;
@@ -194,13 +195,30 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen>
       _inhaleScale = (it.low + it.high) / 2;
     }
 
+    // 현재 압력이 활성 phase 목표대역 [low,high] 안이면 목표원을 솔리드로 표시
+    // (밖이면 점선 테두리 + 연한 fill). 휴식 phase 는 압력 무시 → false.
+    bool inTarget = false;
+    if (pm != null) {
+      final mag = _currentPressure.abs();
+      if (_phase == _Phase.exhale) {
+        final t = pm.exhaleTarget();
+        inTarget = mag >= t.low && mag <= t.high;
+      } else if (_phase == _Phase.inhale) {
+        final t = pm.inhaleTarget();
+        inTarget = mag >= t.low && mag <= t.high;
+      }
+    }
+
+    final isDark = ref.watch(themeModeProvider) == ThemeMode.dark;
     final media = MediaQuery.of(context);
     final f = _Frame(media.size.width);
     final phaseDur = _phaseDuration[_phase]!;
     final remainingSec = (phaseDur - _phaseElapsed).ceil().clamp(0, 999);
 
     return Scaffold(
-      backgroundColor: const Color(0xFF4BA22B),
+      // 다크: figma Rectangle 69 단색 #060725 / 라이트: 잔디 마지막 stop 색
+      backgroundColor:
+          isDark ? const Color(0xFF060725) : const Color(0xFF4BA22B),
       body: Stack(
         children: [
           // 1. 배경 — sky gradient + ellipse 47/48
@@ -208,16 +226,18 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen>
             child: LayoutBuilder(
               builder: (_, c) => CustomPaint(
                 size: Size(c.maxWidth, c.maxHeight),
-                painter: _TrainBgPainter(),
+                painter: _TrainBgPainter(isDark: isDark),
               ),
             ),
           ),
           // 2. 콘텐츠
           _TrainingContent(
             f: f,
+            isDark: isDark,
             phase: _phase,
             exhaleArc: _exhaleArc,
             inhaleArc: _inhaleArc,
+            inTarget: inTarget,
             remainingSec: remainingSec,
             peakExhale: _peakExhale,
             peakInhale: _peakInhale,
@@ -234,12 +254,30 @@ class _TrainingScreenState extends ConsumerState<TrainingScreen>
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _TrainBgPainter extends CustomPainter {
+  _TrainBgPainter({required this.isDark});
+  final bool isDark;
+
   static const _skyColors = <Color>[
     Color(0xFFDFF9FF),
     Color(0xFFC6F5FF),
     Color(0xFF8DE9FD),
   ];
   static const _skyStops = <double>[0.0, 0.2692, 1.0];
+
+  // ─── 다크 모드 ellipse 색 — 홈(dashboard) _BgPainter 다크 recipe 미러 ───
+  //   ellipse 47: figma 1:2264 / ellipse 48: figma 1:2263.
+  static const _e47DarkColors = <Color>[
+    Color(0xFF34346A), // pos 0.0    (어두운 보라/네이비, 잔디 위 가장자리)
+    Color(0xFF1D1E45), // pos 0.1298
+    Color(0xFF10112F), // pos 0.3654
+    Color(0xFF05061B), // pos 1.0    (매우 어두운 네이비)
+  ];
+  static const _e47DarkStops = <double>[0.0, 0.1298, 0.3654, 1.0];
+  static const _e48DarkColors = <Color>[
+    Color(0xFF161841), // pos 0.0
+    Color(0xFF05061B), // pos 1.0
+  ];
+  static const _e48DarkStops = <double>[0.0, 1.0];
 
   static const _e47Width = 934.5897216796875;
   static const _e47Height = 710.517333984375;
@@ -270,6 +308,31 @@ class _TrainBgPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final rect = Offset.zero & size;
     final scale = size.width / _kFrameW;
+
+    if (isDark) {
+      // 다크 모드 배경 — figma Rectangle 69 단색 #060725 + 어두운 물결 ellipse
+      // 두 개 (홈 다크와 동일 recipe). 라이트와 같은 transform/크기, 색만 다크.
+      canvas.drawRect(rect, Paint()..color = const Color(0xFF060725));
+      _drawEllipse(
+        canvas,
+        scale,
+        _e48Transform,
+        _e48Width,
+        _e48Height,
+        _e48DarkColors,
+        _e48DarkStops,
+      );
+      _drawEllipse(
+        canvas,
+        scale,
+        _e47Transform,
+        _e47Width,
+        _e47Height,
+        _e47DarkColors,
+        _e47DarkStops,
+      );
+      return;
+    }
 
     final skyPaint = Paint()
       ..shader = const LinearGradient(
@@ -343,7 +406,7 @@ class _TrainBgPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_TrainBgPainter old) => false;
+  bool shouldRepaint(_TrainBgPainter old) => old.isDark != isDark;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -353,18 +416,22 @@ class _TrainBgPainter extends CustomPainter {
 class _TrainingContent extends ConsumerWidget {
   const _TrainingContent({
     required this.f,
+    required this.isDark,
     required this.phase,
     required this.exhaleArc,
     required this.inhaleArc,
+    required this.inTarget,
     required this.remainingSec,
     required this.peakExhale,
     required this.peakInhale,
     required this.sessionElapsed,
   });
   final _Frame f;
+  final bool isDark;
   final _Phase phase;
   final double exhaleArc;
   final double inhaleArc;
+  final bool inTarget; // 현재 압력이 목표대역 안인지 (목표원 솔리드/점선 토글)
   final int remainingSec;
   final double peakExhale; // 이번 호기 최대 압력 (양수)
   final double peakInhale; // 이번 흡기 최소 압력 (음수)
@@ -372,6 +439,9 @@ class _TrainingContent extends ConsumerWidget {
 
   static const _ink = Color(0xFF101010);
   static const _restColor = Color(0xFF9E9E9E); // 휴식 — 중립 회색
+
+  // 라이트는 검정(_ink), 다크는 흰색. 텍스트/아이콘/divider 가 다크에서 흰색으로.
+  Color get _inkColor => isDark ? DotColors.darkTextPrimary : _ink;
 
   /// 오늘 날짜 → "5월 30일, 토요일" 형식.
   static String _koreanDate(DateTime d) {
@@ -425,16 +495,12 @@ class _TrainingContent extends ConsumerWidget {
     final String targetText;
     const String targetLabel = '목표 압력';
     if (pmStore != null) {
-      if (isInhaleSide) {
-        final t = pmStore.inhaleTarget();
-        targetText = '-${t.low.round()}~-${t.high.round()}';
-      } else {
-        final t = pmStore.exhaleTarget();
-        targetText = '+${t.low.round()}~+${t.high.round()}';
-      }
+      // 부호 없이 절대값으로 표시 (예: 30~36). 흡기/호기 구분은 phase 색으로.
+      final t = isInhaleSide ? pmStore.inhaleTarget() : pmStore.exhaleTarget();
+      targetText = '${t.low.round()}~${t.high.round()}';
     } else {
       // 로딩 중 fallback — Normal · 기본값 기준.
-      targetText = isInhaleSide ? '-40~-48' : '+30~+36';
+      targetText = isInhaleSide ? '40~48' : '30~36';
     }
     // 사용자가 설정에서 선택한 훈련 시간(분, 기본 5). 기기 세션 길이와 동일.
     final trainMinutes =
@@ -449,9 +515,34 @@ class _TrainingContent extends ConsumerWidget {
           w: 81,
           h: 22,
           child: Image.asset(
-            'assets/dot/logo.png',
+            // 다크: 글자만 흰색 변형(파란 O 유지). 라이트: 원본.
+            isDark ? 'assets/dot/logo_dark.png' : 'assets/dot/logo.png',
             fit: BoxFit.contain,
             filterQuality: FilterQuality.high,
+          ),
+        ),
+
+        // ─── 테마(라이트/다크) 토글 — 설정 좌측, hit 44×44 (Figma 97:254) ──
+        // 다크에선 해(light_mode) 아이콘 → 탭 시 라이트로 전환. 라이트에선 달.
+        f.at(
+          // 설정(y60,19h)·알림(y60,18h) 아이콘 중심(≈y69)에 맞추도록, 44×44 탭박스를
+          // 내려 중앙정렬된 22 아이콘 중심을 y69 로 (y47 + 44/2 = y69).
+          x: 262,
+          y: 47,
+          w: 44,
+          h: 44,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => ref.read(themeModeProvider.notifier).toggle(),
+            child: Container(
+              color: Colors.transparent,
+              alignment: Alignment.center,
+              child: Icon(
+                isDark ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
+                size: f.sx(22),
+                color: _inkColor,
+              ),
+            ),
           ),
         ),
 
@@ -466,7 +557,7 @@ class _TrainingContent extends ConsumerWidget {
           child: SvgPicture.asset(
             'assets/dot/icon_settings.svg',
             fit: BoxFit.contain,
-            colorFilter: const ColorFilter.mode(_ink, BlendMode.srcIn),
+            colorFilter: ColorFilter.mode(_inkColor, BlendMode.srcIn),
           ),
         ),
         f.at(
@@ -477,7 +568,7 @@ class _TrainingContent extends ConsumerWidget {
           child: SvgPicture.asset(
             'assets/dot/icon_bell.svg',
             fit: BoxFit.contain,
-            colorFilter: const ColorFilter.mode(_ink, BlendMode.srcIn),
+            colorFilter: ColorFilter.mode(_inkColor, BlendMode.srcIn),
           ),
         ),
 
@@ -490,7 +581,7 @@ class _TrainingContent extends ConsumerWidget {
             style: TextStyle(
               fontSize: f.sx(15),
               fontWeight: FontWeight.w600,
-              color: Colors.black,
+              color: _inkColor,
               fontFamily: BlowfitTheme.fontFamily,
             ),
           ),
@@ -509,14 +600,22 @@ class _TrainingContent extends ConsumerWidget {
           y: 174,
           w: 1,
           h: 58,
-          child: Container(color: Colors.black.withValues(alpha: 0.15)),
+          child: Container(
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.15)
+                : Colors.black.withValues(alpha: 0.15),
+          ),
         ),
         f.at(
           x: 248,
           y: 174,
           w: 1,
           h: 58,
-          child: Container(color: Colors.black.withValues(alpha: 0.15)),
+          child: Container(
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.15)
+                : Colors.black.withValues(alpha: 0.15),
+          ),
         ),
 
         // ─── 원형 ring (도넛 + arc + dot) ─────────────────────────
@@ -528,9 +627,11 @@ class _TrainingContent extends ConsumerWidget {
           child: CustomPaint(
             painter: _RingPainter(
               f: f,
+              isDark: isDark,
               phase: phase,
               exhaleArc: exhaleArc,
               inhaleArc: inhaleArc,
+              inTarget: inTarget,
             ),
           ),
         ),
@@ -561,7 +662,7 @@ class _TrainingContent extends ConsumerWidget {
                   style: TextStyle(
                     fontSize: f.sx(40),
                     fontWeight: FontWeight.w700,
-                    color: _ink, // 검정 고정
+                    color: _inkColor, // 라이트 검정 / 다크 흰색
                     fontFamily: BlowfitTheme.fontFamily,
                   ),
                 ),
@@ -579,7 +680,7 @@ class _TrainingContent extends ConsumerWidget {
             style: TextStyle(
               fontSize: f.sx(15),
               fontWeight: FontWeight.w500,
-              color: _ink,
+              color: _inkColor,
               fontFamily: BlowfitTheme.fontFamily,
             ),
           ),
@@ -592,7 +693,7 @@ class _TrainingContent extends ConsumerWidget {
             style: TextStyle(
               fontSize: f.sx(15),
               fontWeight: FontWeight.w500,
-              color: _ink,
+              color: _inkColor,
               fontFamily: BlowfitTheme.fontFamily,
             ),
           ),
@@ -609,7 +710,7 @@ class _TrainingContent extends ConsumerWidget {
               style: TextStyle(
                 fontSize: f.sx(45),
                 fontWeight: FontWeight.w700,
-                color: _ink,
+                color: _inkColor,
                 fontFamily: BlowfitTheme.fontFamily,
               ),
             ),
@@ -626,7 +727,7 @@ class _TrainingContent extends ConsumerWidget {
               style: TextStyle(
                 fontSize: f.sx(45),
                 fontWeight: FontWeight.w700,
-                color: _ink,
+                color: _inkColor,
                 fontFamily: BlowfitTheme.fontFamily,
               ),
             ),
@@ -655,7 +756,7 @@ class _TrainingContent extends ConsumerWidget {
               style: TextStyle(
                 fontSize: f.sx(30),
                 fontWeight: FontWeight.w700,
-                color: _ink,
+                color: _inkColor,
                 fontFamily: BlowfitTheme.fontFamily,
               ),
             ),
@@ -666,7 +767,7 @@ class _TrainingContent extends ConsumerWidget {
             style: TextStyle(
               fontSize: f.sx(12),
               fontWeight: FontWeight.w500,
-              color: _ink,
+              color: _inkColor,
               fontFamily: BlowfitTheme.fontFamily,
             ),
           ),
@@ -683,17 +784,23 @@ class _TrainingContent extends ConsumerWidget {
 class _RingPainter extends CustomPainter {
   _RingPainter({
     required this.f,
+    required this.isDark,
     required this.phase,
     required this.exhaleArc,
     required this.inhaleArc,
+    required this.inTarget,
   });
   final _Frame f;
+  final bool isDark;
   final _Phase phase;
   final double exhaleArc; // 0~180 degrees
   final double inhaleArc; // 0~180 degrees
+  final bool inTarget; // 압력이 목표대역 안 → 목표원 솔리드 / 밖 → 점선+연한 fill
 
-  // phase 별 안쪽 원 배경색 — 호기 연파랑 / 흡기 연초록 / 휴식 연회색.
-  static Color _innerColor(_Phase p) {
+  // phase 별 안쪽 원 배경색 — 라이트: 호기 연파랑 / 흡기 연초록 / 휴식 연회색.
+  // 다크(Figma 97:254): 모든 phase 공통 #393B6B (어두운 네이비-그레이).
+  Color _innerColor(_Phase p) {
+    if (isDark) return const Color(0xFF393B6B);
     switch (p) {
       case _Phase.exhale:
         return const Color(0xFFE3F1FE);
@@ -719,9 +826,9 @@ class _RingPainter extends CustomPainter {
       Paint()..color = _innerColor(phase),
     );
 
-    // 1. 흰 도넛 base — 전체 ring 흰색 (figma Ellipse 50 stroke 50 INSIDE)
+    // 1. 도넛 base — 라이트: 흰색 / 다크: #272751 (figma Ellipse 50 stroke 50 INSIDE)
     final basePaint = Paint()
-      ..color = Colors.white
+      ..color = isDark ? const Color(0xFF272751) : Colors.white
       ..style = PaintingStyle.stroke
       ..strokeWidth = strokeW
       ..strokeCap = StrokeCap.butt;
@@ -735,14 +842,24 @@ class _RingPainter extends CustomPainter {
       // 호 끝점: 호기 12시(-π/2)+180°=6시, 흡기 6시(+π/2)+180°=12시.
       final base = isInhaleSide ? math.pi / 2 : -math.pi / 2;
       final a = base + math.pi;
-      canvas.drawCircle(
-        Offset(
-          center.dx + radius * math.cos(a),
-          center.dy + radius * math.sin(a),
-        ),
-        strokeW / 2, // 링 도넛 폭에 꽉 차게 (진행 dot 과 동일 크기)
-        Paint()..color = isInhaleSide ? _inhaleColor : _exhaleColor,
+      final tCenter = Offset(
+        center.dx + radius * math.cos(a),
+        center.dy + radius * math.sin(a),
       );
+      final tColor = isInhaleSide ? _inhaleColor : _exhaleColor;
+      final tRadius = strokeW / 2; // 링 도넛 폭에 꽉 차게 (진행 dot 과 동일 크기)
+      if (inTarget) {
+        // 압력이 목표대역 안 — 원래대로 솔리드 원 (테두리 없음).
+        canvas.drawCircle(tCenter, tRadius, Paint()..color = tColor);
+      } else {
+        // 미도달 — 연한 fill(@25%) + 점선 테두리.
+        canvas.drawCircle(
+          tCenter,
+          tRadius,
+          Paint()..color = tColor.withValues(alpha: 0.25),
+        );
+        _drawDashedCircle(canvas, tCenter, tRadius, tColor, f.sx(2.5));
+      }
     }
 
     // 2. 파란 호기 호 (시계방향) — 12시 시작 → exhaleArc 만큼.
@@ -804,9 +921,37 @@ class _RingPainter extends CustomPainter {
     }
   }
 
+  /// 원 둘레를 짧은 호 세그먼트로 그려 점선 테두리 표현 (Flutter 점선 stroke 미지원).
+  void _drawDashedCircle(
+    Canvas canvas,
+    Offset center,
+    double radius,
+    Color color,
+    double strokeWidth,
+  ) {
+    const dashCount = 14; // 점선 개수
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth
+      ..strokeCap = StrokeCap.round;
+    // stroke 가 fill 바깥으로 삐져나오지 않도록 반지름을 절반 두께만큼 안쪽으로.
+    final rect = Rect.fromCircle(
+      center: center,
+      radius: radius - strokeWidth / 2,
+    );
+    const seg = (2 * math.pi) / dashCount;
+    const dash = seg * 0.55; // 55% dash, 45% gap
+    for (var i = 0; i < dashCount; i++) {
+      canvas.drawArc(rect, i * seg, dash, false, paint);
+    }
+  }
+
   @override
   bool shouldRepaint(_RingPainter old) =>
+      old.isDark != isDark ||
       old.phase != phase ||
       old.exhaleArc != exhaleArc ||
-      old.inhaleArc != inhaleArc;
+      old.inhaleArc != inhaleArc ||
+      old.inTarget != inTarget;
 }

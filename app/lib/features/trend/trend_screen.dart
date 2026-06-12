@@ -79,12 +79,14 @@ class _TrendScreenState extends ConsumerState<TrendScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = ref.watch(themeModeProvider) == ThemeMode.dark;
     final media = MediaQuery.of(context);
     final f = _Frame(media.size.width);
     final frameH = f.sy(_kFrameH);
 
     return Scaffold(
-      backgroundColor: const Color(0xFF4BA22B), // 잔디 마지막 stop 색
+      // 다크: figma Rectangle 69 단색 #060725 / 라이트: 잔디 마지막 stop 색
+      backgroundColor: isDark ? DotColors.darkBg : const Color(0xFF4BA22B),
       body: SingleChildScrollView(
         child: SizedBox(
           width: media.size.width,
@@ -96,13 +98,14 @@ class _TrendScreenState extends ConsumerState<TrendScreen> {
                 child: LayoutBuilder(
                   builder: (_, c) => CustomPaint(
                     size: Size(c.maxWidth, c.maxHeight),
-                    painter: _TrendBgPainter(),
+                    painter: _TrendBgPainter(isDark: isDark),
                   ),
                 ),
               ),
               // 2. 콘텐츠
               _TrendContent(
                 f: f,
+                isDark: isDark,
                 tabIndex: _tabIndex,
                 onTab: (i) => setState(() => _tabIndex = i),
                 calendarMonth: _calendarMonth,
@@ -132,6 +135,9 @@ class _TrendScreenState extends ConsumerState<TrendScreen> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _TrendBgPainter extends CustomPainter {
+  _TrendBgPainter({required this.isDark});
+  final bool isDark;
+
   // Ellipse 47 (추이) - 1:2172
   static const _e47Width = 1017.3922729492188;
   static const _e47Height = 1284.04150390625;
@@ -165,6 +171,13 @@ class _TrendBgPainter extends CustomPainter {
     final paint = Paint();
     final scale = size.width / _kFrameW;
 
+    if (isDark) {
+      // 다크 모드 배경 — figma "추이 - 다크모드" Rectangle 69 (88:160) 단색
+      // #030414. (홈 다크와 달리 물결 ellipse 없음 — 평평한 짙은 네이비.)
+      canvas.drawRect(rect, Paint()..color = const Color(0xFF030414));
+      return;
+    }
+
     // sky gradient
     paint.shader = const LinearGradient(
       begin: Alignment(-0.4, -1.0),
@@ -187,13 +200,23 @@ class _TrendBgPainter extends CustomPainter {
     //     위에서 아래로 점점 강해짐). 정확 시뮬레이션은 Flutter API 한계로 어려워서
     //     평균값 (~70) 의 NORMAL blur 로 근사. 시각적으로 비슷한 부드러운 분위기.
     _drawEllipse(
-      canvas, scale, _e48Transform, _e48Width, _e48Height,
-      _e48Colors, _e48Stops,
+      canvas,
+      scale,
+      _e48Transform,
+      _e48Width,
+      _e48Height,
+      _e48Colors,
+      _e48Stops,
       blurSigma: 70,
     );
     _drawEllipse(
-      canvas, scale, _e47Transform, _e47Width, _e47Height,
-      _e47Colors, _e47Stops,
+      canvas,
+      scale,
+      _e47Transform,
+      _e47Width,
+      _e47Height,
+      _e47Colors,
+      _e47Stops,
       blurSigma: 18.1,
     );
   }
@@ -212,10 +235,22 @@ class _TrendBgPainter extends CustomPainter {
     canvas.scale(scale, scale);
     canvas.transform(
       Float64List.fromList(<double>[
-        m[0][0], m[1][0], 0, 0,
-        m[0][1], m[1][1], 0, 0,
-        0, 0, 1, 0,
-        m[0][2], m[1][2], 0, 1,
+        m[0][0],
+        m[1][0],
+        0,
+        0,
+        m[0][1],
+        m[1][1],
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        m[0][2],
+        m[1][2],
+        0,
+        1,
       ]),
     );
     final rect = Rect.fromLTWH(0, 0, w, h);
@@ -245,7 +280,7 @@ class _TrendBgPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_TrendBgPainter old) => false;
+  bool shouldRepaint(_TrendBgPainter old) => old.isDark != isDark;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -255,6 +290,7 @@ class _TrendBgPainter extends CustomPainter {
 class _TrendContent extends ConsumerWidget {
   const _TrendContent({
     required this.f,
+    required this.isDark,
     required this.tabIndex,
     required this.onTab,
     required this.calendarMonth,
@@ -262,6 +298,7 @@ class _TrendContent extends ConsumerWidget {
     required this.onNextMonth,
   });
   final _Frame f;
+  final bool isDark;
   final int tabIndex;
   final ValueChanged<int> onTab;
   final DateTime calendarMonth;
@@ -273,10 +310,19 @@ class _TrendContent extends ConsumerWidget {
     return TrendPeriod.values[tabIndex];
   }
 
+  // 라이트 모드 텍스트 토큰 (DotColors.lightText* 와 동일). 다크 모드에서는
+  // build/_buildChartArea 안에서 isDark 로 darkText* 로 분기한다.
   static const _ink = Color(0xFF101010);
   static const _ink2 = Color(0xFF252525);
   static const _muted = Color(0xFF898989);
   static const _calGray = Color(0xFF808080);
+
+  // isDark 분기된 표면/텍스트 색 (라이트는 위 const, 다크는 DotColors.dark*).
+  Color get _cardBg => isDark ? const Color(0xFF181836) : Colors.white;
+  Color get _inkColor => isDark ? DotColors.darkTextPrimary : _ink;
+  Color get _ink2Color => isDark ? DotColors.darkTextSecondary : _ink2;
+  Color get _mutedColor => isDark ? DotColors.darkTextMuted : _muted;
+  Color get _calGrayColor => isDark ? DotColors.darkTextMuted : _calGray;
 
   // 탭별 indicator x 좌표 (frame). 일간 시 union shape 의 indicator 위치 = 20.
   // 다른 탭 선택 시 같은 width 79 의 indicator 가 그 탭 위로 이동.
@@ -299,7 +345,7 @@ class _TrendContent extends ConsumerWidget {
         h: 47,
         child: Container(
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: _cardBg,
             borderRadius: BorderRadius.only(
               topLeft: Radius.circular(f.sx(10)),
               topRight: Radius.circular(f.sx(10)),
@@ -320,11 +366,9 @@ class _TrendContent extends ConsumerWidget {
         h: 234,
         child: Container(
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: _cardBg,
             borderRadius: BorderRadius.only(
-              topLeft: tabIndex == 0
-                  ? Radius.zero
-                  : Radius.circular(f.sx(10)),
+              topLeft: tabIndex == 0 ? Radius.zero : Radius.circular(f.sx(10)),
               topRight: tabIndex == _tabs.length - 1
                   ? Radius.zero
                   : Radius.circular(f.sx(10)),
@@ -351,10 +395,8 @@ class _TrendContent extends ConsumerWidget {
                 _tabs[i],
                 style: TextStyle(
                   fontSize: f.sx(13),
-                  fontWeight: i == tabIndex
-                      ? FontWeight.w600
-                      : FontWeight.w500,
-                  color: _ink.withValues(alpha: i == tabIndex ? 1.0 : 0.7),
+                  fontWeight: i == tabIndex ? FontWeight.w600 : FontWeight.w500,
+                  color: _inkColor.withValues(alpha: i == tabIndex ? 1.0 : 0.7),
                   fontFamily: BlowfitTheme.fontFamily,
                 ),
               ),
@@ -382,7 +424,7 @@ class _TrendContent extends ConsumerWidget {
           style: TextStyle(
             fontSize: f.sx(10),
             fontWeight: FontWeight.w500,
-            color: _ink2,
+            color: _ink2Color,
             fontFamily: BlowfitTheme.fontFamily,
           ),
         ),
@@ -408,7 +450,7 @@ class _TrendContent extends ConsumerWidget {
           style: TextStyle(
             fontSize: f.sx(10),
             fontWeight: FontWeight.w500,
-            color: _ink2,
+            color: _ink2Color,
             fontFamily: BlowfitTheme.fontFamily,
           ),
         ),
@@ -431,7 +473,7 @@ class _TrendContent extends ConsumerWidget {
             style: TextStyle(
               fontSize: f.sx(8),
               fontWeight: FontWeight.w500,
-              color: _muted,
+              color: _mutedColor,
               fontFamily: BlowfitTheme.fontFamily,
             ),
           ),
@@ -451,7 +493,11 @@ class _TrendContent extends ConsumerWidget {
           y: y,
           w: 292,
           h: 1,
-          child: Container(color: _muted.withValues(alpha: 0.25)),
+          child: Container(
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.12)
+                : _muted.withValues(alpha: 0.25),
+          ),
         ),
       // 8. 실제 데이터 라인 차트 — 호기 (파랑, 위) + 흡기 mirror (초록, 아래).
       //    Figma 업데이트: dot 만 찍던 것 → dot + 연결선 (line chart).
@@ -459,7 +505,11 @@ class _TrendContent extends ConsumerWidget {
       Positioned.fill(
         child: IgnorePointer(
           child: CustomPaint(
-            painter: _ChartLinePainter(scale: f.scale, buckets: buckets),
+            painter: _ChartLinePainter(
+              scale: f.scale,
+              buckets: buckets,
+              isDark: isDark,
+            ),
           ),
         ),
       ),
@@ -467,12 +517,12 @@ class _TrendContent extends ConsumerWidget {
       f.at(
         x: 332,
         y: 365,
-        child: _EndLabel(f: f, text: '호기'),
+        child: _EndLabel(f: f, text: '호기', color: _inkColor),
       ),
       f.at(
         x: 332,
         y: 533,
-        child: _EndLabel(f: f, text: '흡기'),
+        child: _EndLabel(f: f, text: '흡기', color: _inkColor),
       ),
     ];
   }
@@ -494,9 +544,31 @@ class _TrendContent extends ConsumerWidget {
           w: 81,
           h: 22,
           child: Image.asset(
-            'assets/dot/logo.png',
+            // 다크: 글자만 흰색 변형(파란 O 유지). 라이트: 원본.
+            isDark ? 'assets/dot/logo_dark.png' : 'assets/dot/logo.png',
             fit: BoxFit.contain,
             filterQuality: FilterQuality.high,
+          ),
+        ),
+        // ─── 테마(라이트/다크) 토글 — 설정 좌측, hit 44×44 (Figma 88:306) ──
+        // 다크에선 해(light_mode) 아이콘 → 탭 시 라이트로 전환. 라이트에선 달.
+        f.at(
+          x: 262,
+          y: 41,
+          w: 44,
+          h: 44,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => ref.read(themeModeProvider.notifier).toggle(),
+            child: Container(
+              color: Colors.transparent,
+              alignment: Alignment.center,
+              child: Icon(
+                isDark ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
+                size: f.sx(22),
+                color: _inkColor,
+              ),
+            ),
           ),
         ),
         // ─── 설정 아이콘 (Figma SVG, 톱니바퀴) — 좌측, hit 44×44 ───
@@ -521,8 +593,7 @@ class _TrendContent extends ConsumerWidget {
                   'assets/dot/icon_settings.svg',
                   width: f.sx(22),
                   height: f.sx(21),
-                  colorFilter:
-                      const ColorFilter.mode(_ink, BlendMode.srcIn),
+                  colorFilter: ColorFilter.mode(_inkColor, BlendMode.srcIn),
                 ),
               ),
             ),
@@ -555,8 +626,7 @@ class _TrendContent extends ConsumerWidget {
                   'assets/dot/icon_bell.svg',
                   width: f.sx(18),
                   height: f.sx(20),
-                  colorFilter:
-                      const ColorFilter.mode(_ink, BlendMode.srcIn),
+                  colorFilter: ColorFilter.mode(_inkColor, BlendMode.srcIn),
                 ),
               ),
             ),
@@ -571,7 +641,7 @@ class _TrendContent extends ConsumerWidget {
             style: TextStyle(
               fontSize: f.sx(15),
               fontWeight: FontWeight.w600,
-              color: _ink.withValues(alpha: 0.7),
+              color: _inkColor.withValues(alpha: 0.7),
               fontFamily: BlowfitTheme.fontFamily,
             ),
           ),
@@ -585,7 +655,7 @@ class _TrendContent extends ConsumerWidget {
             style: TextStyle(
               fontSize: f.sx(20),
               fontWeight: FontWeight.w700,
-              color: _ink,
+              color: _inkColor,
               letterSpacing: -0.4,
               fontFamily: BlowfitTheme.fontFamily,
             ),
@@ -598,7 +668,7 @@ class _TrendContent extends ConsumerWidget {
           y: 175,
           w: 362,
           h: 91,
-          child: _SummaryCard(f: f, textColor: _ink),
+          child: _SummaryCard(f: f, isDark: isDark, textColor: _inkColor),
         ),
 
         // ─── 탭 + 차트 카드 (Figma Union 1:2136 모양) ─────────────
@@ -614,11 +684,12 @@ class _TrendContent extends ConsumerWidget {
           h: 348,
           child: _CalendarCard(
             f: f,
+            isDark: isDark,
             month: calendarMonth,
             onPrev: onPrevMonth,
             onNext: onNextMonth,
-            ink: _ink,
-            calGray: _calGray,
+            ink: _inkColor,
+            calGray: _calGrayColor,
           ),
         ),
 
@@ -628,34 +699,31 @@ class _TrendContent extends ConsumerWidget {
           y: 956,
           w: 362,
           h: 348,
-          child: _AchievementsCard(f: f, ink: _ink),
+          child: _AchievementsCard(f: f, isDark: isDark, ink: _inkColor),
         ),
 
-        // ─── 페이지 indicator (Group 53 at 191,1332) ──────────────
+        // ─── 페이지 indicator (3 페이지 — 홈·추이·수면, 추이는 index 1) ──────
+        // 3 dot(6 + 7 + 6 + 7 + 6 = 32) 가운데 정렬 → x = (402-32)/2 = 185.
         f.at(
-          x: 191,
+          x: 185,
           y: 1332,
-          w: 19,
+          w: 32,
           h: 6,
           child: Row(
             children: [
-              Container(
-                width: f.sx(6),
-                height: f.sx(6),
-                decoration: const BoxDecoration(
-                  color: Colors.black26,
-                  shape: BoxShape.circle,
+              for (var i = 0; i < 3; i++) ...[
+                if (i > 0) SizedBox(width: f.sx(7)),
+                Container(
+                  width: f.sx(6),
+                  height: f.sx(6),
+                  decoration: BoxDecoration(
+                    color: i == 1
+                        ? DotColors.primary
+                        : (isDark ? Colors.white24 : Colors.black26),
+                    shape: BoxShape.circle,
+                  ),
                 ),
-              ),
-              SizedBox(width: f.sx(7)),
-              Container(
-                width: f.sx(6),
-                height: f.sx(6),
-                decoration: const BoxDecoration(
-                  color: DotColors.primary,
-                  shape: BoxShape.circle,
-                ),
-              ),
+              ],
             ],
           ),
         ),
@@ -669,8 +737,13 @@ class _TrendContent extends ConsumerWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _SummaryCard extends ConsumerWidget {
-  const _SummaryCard({required this.f, required this.textColor});
+  const _SummaryCard({
+    required this.f,
+    required this.isDark,
+    required this.textColor,
+  });
   final _Frame f;
+  final bool isDark;
   final Color textColor;
 
   @override
@@ -683,9 +756,15 @@ class _SummaryCard extends ConsumerWidget {
     // 3개 컬럼 — divider (frame x=137, 261 → card-local 117, 241) 로 구분.
     // 라벨/값을 각 컬럼 중앙 정렬 → 자릿수와 무관하게 가운데 배치.
     //   col1: 0~117 (center 58.5) / col2: 117~241 (center 179) / col3: 241~362 (center 301.5)
+    // 다크: darkCard / 라이트: 흰색 80% (배경 잔디가 살짝 비침).
+    final cardBg =
+        isDark ? const Color(0xFF181836) : Colors.white.withValues(alpha: 0.8);
+    // divider: 라이트 black12 / 다크 white 12% (어두운 카드 위 가시성).
+    final dividerColor =
+        isDark ? Colors.white.withValues(alpha: 0.12) : Colors.black12;
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.8),
+        color: cardBg,
         borderRadius: BorderRadius.circular(f.sx(10)),
       ),
       child: Stack(
@@ -694,12 +773,12 @@ class _SummaryCard extends ConsumerWidget {
           Positioned(
             left: f.sx(117),
             top: f.sx(17),
-            child: Container(width: 1, height: f.sx(58), color: Colors.black12),
+            child: Container(width: 1, height: f.sx(58), color: dividerColor),
           ),
           Positioned(
             left: f.sx(241),
             top: f.sx(17),
-            child: Container(width: 1, height: f.sx(58), color: Colors.black12),
+            child: Container(width: 1, height: f.sx(58), color: dividerColor),
           ),
           // 이번 주 — 회수
           _col(0, 117, '이번 주', '$weekSessions회'),
@@ -757,6 +836,7 @@ class _SummaryCard extends ConsumerWidget {
 class _CalendarCard extends ConsumerWidget {
   const _CalendarCard({
     required this.f,
+    required this.isDark,
     required this.month,
     required this.onPrev,
     required this.onNext,
@@ -764,6 +844,7 @@ class _CalendarCard extends ConsumerWidget {
     required this.calGray,
   });
   final _Frame f;
+  final bool isDark;
   final DateTime month;
   final VoidCallback onPrev;
   final VoidCallback onNext;
@@ -785,6 +866,12 @@ class _CalendarCard extends ConsumerWidget {
         ref.watch(monthTrainedDaysProvider(month)).valueOrNull ?? const <int>{};
     final now = DateTime.now();
     final isCurrentMonth = now.year == month.year && now.month == month.month;
+    // 훈련일 원/글씨 — 라이트: 연파랑 원 + 진회색 글씨 / 다크(Figma 88:270):
+    //   #86C5FF @30% 원 + 흰 글씨(연한 원 위 가독). 오늘 원 #0084FF 는 공통.
+    final trainedCircleCol = isDark
+        ? const Color(0xFF86C5FF).withValues(alpha: 0.3)
+        : _trainedCircle;
+    final trainedTextCol = isDark ? Colors.white : _trainedText;
 
     // 카드 (20, 587) 기준 card-local 좌표 = frame - (20, 587).
     //   < (50, 615)  → local (30, 28)
@@ -805,7 +892,7 @@ class _CalendarCard extends ConsumerWidget {
 
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isDark ? const Color(0xFF181836) : Colors.white,
         borderRadius: BorderRadius.circular(f.sx(10)),
       ),
       child: Stack(
@@ -876,12 +963,10 @@ class _CalendarCard extends ConsumerWidget {
               if (row >= rowCenter.length) return const SizedBox.shrink();
               final isToday = isCurrentMonth && d == now.day;
               final trained = trainedDays.contains(d);
-              final Color? circleColor = isToday
-                  ? _todayCircle
-                  : (trained ? _trainedCircle : null);
-              final textColor = isToday
-                  ? Colors.white
-                  : (trained ? _trainedText : calGray);
+              final Color? circleColor =
+                  isToday ? _todayCircle : (trained ? trainedCircleCol : null);
+              final textColor =
+                  isToday ? Colors.white : (trained ? trainedTextCol : calGray);
               return Positioned(
                 left: f.sx(colCenter[col] - 15),
                 top: f.sx(rowCenter[row] - 15),
@@ -918,13 +1003,18 @@ class _CalendarCard extends ConsumerWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _AchievementsCard extends ConsumerWidget {
-  const _AchievementsCard({required this.f, required this.ink});
+  const _AchievementsCard({
+    required this.f,
+    required this.isDark,
+    required this.ink,
+  });
   final _Frame f;
+  final bool isDark;
   final Color ink;
 
   // Figma 의 item y 좌표 (frame, card-local 변환은 956 빼기). 최대 5개 표시
-  // — MilestoneEngine.compute 가 정확히 5개 반환.
-  static const _itemYs = [1029.0, 1068.0, 1110.0, 1152.0, 1194.0];
+  // — MilestoneEngine.compute 가 정확히 6개(1~6주차) 반환. (Figma 88:205~210)
+  static const _itemYs = [1029.0, 1068.0, 1110.0, 1152.0, 1194.0, 1236.0];
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -934,7 +1024,7 @@ class _AchievementsCard extends ConsumerWidget {
 
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isDark ? const Color(0xFF181836) : Colors.white,
         borderRadius: BorderRadius.circular(f.sx(10)),
       ),
       child: Stack(
@@ -954,9 +1044,7 @@ class _AchievementsCard extends ConsumerWidget {
             ),
           ),
           // milestones — 미달성 항목은 체크박스 회색 / 텍스트 fade.
-          for (var i = 0;
-              i < milestones.length && i < _itemYs.length;
-              i++) ...[
+          for (var i = 0; i < milestones.length && i < _itemYs.length; i++) ...[
             // 체크박스
             Positioned(
               left: f.sx(51 - 20),
@@ -984,7 +1072,9 @@ class _AchievementsCard extends ConsumerWidget {
                 style: TextStyle(
                   fontSize: f.sx(13),
                   fontWeight: FontWeight.w600,
-                  color: milestones[i].achievedAt != null
+                  // 다크: Figma 처럼 미달성도 흰색 풀(달성 여부는 체크박스로만 구분).
+                  // 라이트: 미달성은 50% 페이드.
+                  color: (milestones[i].achievedAt != null || isDark)
                       ? ink
                       : ink.withValues(alpha: 0.5),
                   fontFamily: BlowfitTheme.fontFamily,
@@ -1005,9 +1095,16 @@ class _AchievementsCard extends ConsumerWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _ChartLinePainter extends CustomPainter {
-  _ChartLinePainter({required this.scale, required this.buckets});
+  _ChartLinePainter({
+    required this.scale,
+    required this.buckets,
+    required this.isDark,
+  });
   final double scale;
   final List<TrendBucket> buckets;
+  // 데이터 라인(파랑/초록)은 라이트/다크 동일. isDark 는 향후 grid/baseline 등
+  // 중립색 분기 시 사용하기 위해 painter 동일성(shouldRepaint)에만 반영.
+  final bool isDark;
 
   // 차트 기하 (figma frame 좌표) — 0 line=458, +30=386, -30=529.
   static const _chartLeft = 66.0;
@@ -1067,7 +1164,7 @@ class _ChartLinePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_ChartLinePainter old) =>
-      old.scale != scale || old.buckets != buckets;
+      old.scale != scale || old.buckets != buckets || old.isDark != isDark;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1075,9 +1172,10 @@ class _ChartLinePainter extends CustomPainter {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _EndLabel extends StatelessWidget {
-  const _EndLabel({required this.f, required this.text});
+  const _EndLabel({required this.f, required this.text, required this.color});
   final _Frame f;
   final String text;
+  final Color color;
 
   @override
   Widget build(BuildContext context) {
@@ -1089,12 +1187,12 @@ class _EndLabel extends StatelessWidget {
           style: TextStyle(
             fontSize: f.sx(10),
             fontWeight: FontWeight.w500,
-            color: Colors.black,
+            color: color,
             fontFamily: BlowfitTheme.fontFamily,
           ),
         ),
         SizedBox(width: f.sx(3)),
-        Icon(Icons.arrow_upward, size: f.sx(10), color: Colors.black),
+        Icon(Icons.arrow_upward, size: f.sx(10), color: color),
       ],
     );
   }

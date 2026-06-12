@@ -605,7 +605,8 @@ class _HomeContent extends StatelessWidget {
               },
               child: Container(
                 decoration: BoxDecoration(
-                  color: DotColors.primary, // 브랜드 파란색 (라이트·다크 공통)
+                  // 라이트: 기존 검정(#000000) / 다크: 브랜드 파란색.
+                  color: isDark ? DotColors.primary : DotColors.lightCtaBg,
                   borderRadius: BorderRadius.circular(f.sx(10)),
                 ),
                 alignment: Alignment.center,
@@ -660,6 +661,9 @@ class _HomeContent extends StatelessWidget {
               builder: (context, ref, _) {
                 final shownLevel = ref.watch(characterShownLevelProvider);
                 final layout = _kStageLayouts[shownLevel] ?? _kStageLayouts[1]!;
+                // 진화 중이면 말풍선·꼬리를 먼저 페이드아웃(사라짐). 완료 시 복귀.
+                final bubbleOpacity =
+                    ref.watch(characterEvolvingProvider) ? 0.0 : 1.0;
                 return Stack(
                   children: [
                     // ─── 말풍선 박스 (단계별 위치/크기 — Figma 97:2/57/105) ───────
@@ -669,31 +673,35 @@ class _HomeContent extends StatelessWidget {
                       y: layout.bubbleY,
                       w: layout.bubbleW,
                       h: _StageLayout.bubbleH,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          // 다크: Figma 말풍선색 #323266 / 라이트: 흰색.
-                          color:
-                              isDark ? const Color(0xFF323266) : Colors.white,
-                          borderRadius: BorderRadius.circular(f.sx(10)),
-                        ),
-                        alignment: Alignment.center,
-                        child: Padding(
-                          padding: EdgeInsets.symmetric(horizontal: f.sx(10)),
-                          // FittedBox(scaleDown): Figma 폰트(15px)로 들어가면 그대로, 기기
-                          // 폰트 메트릭 차이로 살짝 넘치면 자동으로 아주 조금만 축소 →
-                          // "요!" 가 ellipsis 로 잘리던 문제 방지(절대 안 잘림).
-                          child: FittedBox(
-                            fit: BoxFit.scaleDown,
-                            child: Text(
-                              layout.speechText,
-                              maxLines: 1,
-                              softWrap: false,
-                              style: TextStyle(
-                                fontSize: f.sx(15),
-                                fontWeight: FontWeight.w700,
-                                // 다크: Figma 흰색 텍스트 / 라이트: 검정.
-                                color: isDark ? Colors.white : Colors.black,
-                                fontFamily: BlowfitTheme.fontFamily,
+                      child: AnimatedOpacity(
+                        opacity: bubbleOpacity,
+                        duration: const Duration(milliseconds: 250),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            // 다크: Figma 말풍선색 #323266 / 라이트: 흰색.
+                            color:
+                                isDark ? const Color(0xFF323266) : Colors.white,
+                            borderRadius: BorderRadius.circular(f.sx(10)),
+                          ),
+                          alignment: Alignment.center,
+                          child: Padding(
+                            padding: EdgeInsets.symmetric(horizontal: f.sx(10)),
+                            // FittedBox(scaleDown): Figma 폰트(15px)로 들어가면 그대로, 기기
+                            // 폰트 메트릭 차이로 살짝 넘치면 자동으로 아주 조금만 축소 →
+                            // "요!" 가 ellipsis 로 잘리던 문제 방지(절대 안 잘림).
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(
+                                layout.speechText,
+                                maxLines: 1,
+                                softWrap: false,
+                                style: TextStyle(
+                                  fontSize: f.sx(15),
+                                  fontWeight: FontWeight.w700,
+                                  // 다크: Figma 흰색 텍스트 / 라이트: 검정.
+                                  color: isDark ? Colors.white : Colors.black,
+                                  fontFamily: BlowfitTheme.fontFamily,
+                                ),
                               ),
                             ),
                           ),
@@ -711,16 +719,20 @@ class _HomeContent extends StatelessWidget {
                       y: layout.tailY,
                       w: _StageLayout.tailW,
                       h: _StageLayout.tailH,
-                      child: SvgPicture.asset(
-                        'assets/dot/speech_tail.svg',
-                        fit: BoxFit.fill,
-                        // 다크: 꼬리도 말풍선과 같은 #323266 (흰 텍스트 가독).
-                        colorFilter: isDark
-                            ? const ColorFilter.mode(
-                                Color(0xFF323266),
-                                BlendMode.srcIn,
-                              )
-                            : null,
+                      child: AnimatedOpacity(
+                        opacity: bubbleOpacity,
+                        duration: const Duration(milliseconds: 250),
+                        child: SvgPicture.asset(
+                          'assets/dot/speech_tail.svg',
+                          fit: BoxFit.fill,
+                          // 다크: 꼬리도 말풍선과 같은 #323266 (흰 텍스트 가독).
+                          colorFilter: isDark
+                              ? const ColorFilter.mode(
+                                  Color(0xFF323266),
+                                  BlendMode.srcIn,
+                                )
+                              : null,
+                        ),
                       ),
                     ),
 
@@ -798,23 +810,20 @@ class _HomeContent extends StatelessWidget {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Container(
-                width: f.sx(6),
-                height: f.sx(6),
-                decoration: const BoxDecoration(
-                  color: DotColors.primary,
-                  shape: BoxShape.circle,
+              // 3 페이지(홈·추이·수면) — 홈은 index 0 active.
+              for (var i = 0; i < 3; i++) ...[
+                if (i > 0) SizedBox(width: f.sx(7)),
+                Container(
+                  width: f.sx(6),
+                  height: f.sx(6),
+                  decoration: BoxDecoration(
+                    color: i == 0
+                        ? DotColors.primary
+                        : (isDark ? Colors.white24 : Colors.black26),
+                    shape: BoxShape.circle,
+                  ),
                 ),
-              ),
-              SizedBox(width: f.sx(7)),
-              Container(
-                width: f.sx(6),
-                height: f.sx(6),
-                decoration: BoxDecoration(
-                  color: isDark ? Colors.white24 : Colors.black26,
-                  shape: BoxShape.circle,
-                ),
-              ),
+              ],
             ],
           ),
         ),

@@ -14,8 +14,10 @@ import java.time.LocalDate
 class MainActivity : FlutterActivity() {
 
   private val channelName = "blowfit/shealth"
+  private val backChannelName = "blowfit/system_back"
   private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
   private lateinit var bridge: SamsungHealthBridge
+  private var backChannel: MethodChannel? = null
 
   override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
     super.configureFlutterEngine(flutterEngine)
@@ -23,6 +25,26 @@ class MainActivity : FlutterActivity() {
 
     MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
       .setMethodCallHandler { call, result -> onCall(call, result) }
+
+    // 시스템 뒤로가기 — Flutter 로 위임. (go_router StatefulShellRoute 에서 Dart
+    // 측 PopScope/observer 가 루트 백을 못 잡는 문제를 네이티브에서 우회.)
+    backChannel = MethodChannel(
+      flutterEngine.dartExecutor.binaryMessenger, backChannelName
+    ).also { ch ->
+      ch.setMethodCallHandler { call, result ->
+        when (call.method) {
+          "exitApp" -> { finishAffinity(); result.success(null) }
+          else -> result.notImplemented()
+        }
+      }
+    }
+  }
+
+  // 레거시 뒤로가기(enableOnBackInvokedCallback=false) — super 호출 안 함(소비)
+  // 하고 Flutter 가 pop/페이지 복귀/종료 다이얼로그를 결정하도록 위임.
+  @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
+  override fun onBackPressed() {
+    backChannel?.invokeMethod("onBack", null)
   }
 
   private fun onCall(call: MethodCall, result: MethodChannel.Result) {

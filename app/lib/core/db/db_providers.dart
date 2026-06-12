@@ -49,8 +49,13 @@ final trainedDatesProvider = StreamProvider<Set<DateTime>>((ref) {
   final since = DateTime.now().subtract(const Duration(days: 90));
   return ref.watch(sessionRepositoryProvider).watchSince(since).map(
         (sessions) => sessions
-            .map((s) => DateTime(
-                s.receivedAt.year, s.receivedAt.month, s.receivedAt.day))
+            .map(
+              (s) => DateTime(
+                s.receivedAt.year,
+                s.receivedAt.month,
+                s.receivedAt.day,
+              ),
+            )
             .toSet(),
       );
 });
@@ -84,30 +89,34 @@ final sessionPersistenceProvider = Provider<void>((ref) {
 /// v4.1: 절대값 zone (setTarget) 이 아닌 %PImax 기반 (setIntensityTarget) 으로
 /// 전송. 펌웨어가 흡기/호기 4개 target 을 자동 계산.
 final targetSyncProvider = Provider<void>((ref) {
-  ref.listen(connectionProvider, (_, next) {
-    next.whenData((connected) async {
-      if (!connected) return;
-      // Service discovery + setNotifyValue 가 안정화될 때까지 충분히 대기.
-      // 너무 짧으면 _control characteristic 가 아직 null 이라 write 가 no-op.
-      await Future.delayed(const Duration(milliseconds: 1500));
-      try {
-        final pmStore = await ref.read(pimaxMepStoreProvider.future);
-        await ref.read(bleManagerProvider).setIntensityTarget(
-              level: pmStore.loadLevel().value,
-              pimax: pmStore.loadPimax(),
-              mep: pmStore.loadMep(),
-            );
-        // 훈련 시간도 함께 sync — 펌웨어 reboot 시 default 로 리셋되므로
-        // 사용자가 설정한 값을 매 connect 마다 재전송.
-        final durStore = await ref.read(trainDurationStoreProvider.future);
-        await ref
-            .read(bleManagerProvider)
-            .setTrainDuration(durStore.loadMinutes() * 60);
-      } catch (_) {
-        // 실패 시 사용자가 설정 화면에서 다시 저장하면 복구. silently ignore.
-      }
-    });
-  }, fireImmediately: true);
+  ref.listen(
+    connectionProvider,
+    (_, next) {
+      next.whenData((connected) async {
+        if (!connected) return;
+        // Service discovery + setNotifyValue 가 안정화될 때까지 충분히 대기.
+        // 너무 짧으면 _control characteristic 가 아직 null 이라 write 가 no-op.
+        await Future.delayed(const Duration(milliseconds: 1500));
+        try {
+          final pmStore = await ref.read(pimaxMepStoreProvider.future);
+          await ref.read(bleManagerProvider).setIntensityTarget(
+                level: pmStore.loadLevel().value,
+                pimax: pmStore.loadPimax(),
+                mep: pmStore.loadMep(),
+              );
+          // 훈련 시간도 함께 sync — 펌웨어 reboot 시 default 로 리셋되므로
+          // 사용자가 설정한 값을 매 connect 마다 재전송.
+          final durStore = await ref.read(trainDurationStoreProvider.future);
+          await ref
+              .read(bleManagerProvider)
+              .setTrainDuration(durStore.loadMinutes() * 60);
+        } catch (_) {
+          // 실패 시 사용자가 설정 화면에서 다시 저장하면 복구. silently ignore.
+        }
+      });
+    },
+    fireImmediately: true,
+  );
 });
 
 /// 앱 시작 시 1회 자동 재연결 시도. SharedPreferences 의 lastDevice 가 있으면
@@ -211,14 +220,12 @@ final trendBucketsProvider =
 });
 
 /// 이번 주 / 지난 주 호기 평균. Dashboard quick stats.
-final weekAvgPressureProvider =
-    StreamProvider<WeekPressureAvgPair>((ref) {
+final weekAvgPressureProvider = StreamProvider<WeekPressureAvgPair>((ref) {
   return ref.watch(sessionRepositoryProvider).watchWeekAvgPressurePair();
 });
 
 /// 첫 세션 호기 통계. Profile 베이스라인 카드.
-final firstSessionStatsProvider =
-    FutureProvider<FirstSessionStats?>((ref) {
+final firstSessionStatsProvider = FutureProvider<FirstSessionStats?>((ref) {
   return ref.watch(sessionRepositoryProvider).firstSessionStats();
 });
 
@@ -269,7 +276,9 @@ final trendSummaryStatsProvider = StreamProvider<TrendSummaryStats>((ref) {
     for (final s in sessions) {
       final t = s.receivedAt;
       if (!t.isBefore(monday)) weekSessions++;
-      if (!t.isBefore(monthStart) && t.year == now.year && t.month == now.month) {
+      if (!t.isBefore(monthStart) &&
+          t.year == now.year &&
+          t.month == now.month) {
         monthSessions++;
       }
     }
@@ -281,17 +290,12 @@ final trendSummaryStatsProvider = StreamProvider<TrendSummaryStats>((ref) {
   });
 });
 
-/// Trend 화면 마일스톤 카드용 — 최근 200일 세션 + 현재 streak 합쳐서
-/// MilestoneEngine 으로 5종 마일스톤 계산.
+/// Trend 화면 "업적" 카드용 — 최근 200일 세션으로 6개 주차 업적 계산.
 final milestonesProvider = StreamProvider<List<Milestone>>((ref) {
   final repo = ref.watch(sessionRepositoryProvider);
-  // 200일 윈도우 — 30일 streak / 호기 25 돌파 모두 안에 들어옴.
+  // 200일 윈도우 — 6주(42일) 연속 업적이 모두 안에 들어옴.
   final since = DateTime.now().subtract(const Duration(days: 200));
-  return repo.watchSince(since).asyncMap((sessions) async {
-    final streak = await repo.watchConsecutiveDays().first;
-    return MilestoneEngine.compute(
-      sessions: sessions,
-      currentStreak: streak,
-    );
-  });
+  return repo
+      .watchSince(since)
+      .map((sessions) => MilestoneEngine.compute(sessions: sessions));
 });

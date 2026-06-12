@@ -26,131 +26,85 @@ Session _s({
 
 void main() {
   group('MilestoneEngine.compute', () {
-    test('empty input — 모두 미달성', () {
-      final ms = MilestoneEngine.compute(sessions: [], currentStreak: 0);
-      expect(ms, hasLength(5));
+    test('empty input — 6개 모두 미달성', () {
+      final ms = MilestoneEngine.compute(sessions: []);
+      expect(ms, hasLength(6));
       expect(ms.every((m) => !m.achieved), isTrue);
+      expect(ms.map((m) => m.week).toList(), [1, 2, 3, 4, 5, 6]);
     });
 
-    test('첫 세션 → firstTraining 달성, 나머지는 임계치에 따라', () {
+    test('첫 세션 → 1주차 달성, 2~6주차 미달성', () {
       final t = DateTime(2026, 4, 1);
-      final ms = MilestoneEngine.compute(
-        sessions: [_s(at: t, maxPressure: 18, id: 1)],
-        currentStreak: 1,
-      );
-      final byKind = {for (final m in ms) m.kind: m};
-
-      expect(byKind[MilestoneKind.firstTraining]!.achieved, isTrue);
-      expect(
-          byKind[MilestoneKind.firstTraining]!.achievedAt!
-              .isAtSameMomentAs(t),
-          isTrue);
-      expect(byKind[MilestoneKind.exhale20]!.achieved, isFalse);
-      expect(byKind[MilestoneKind.exhale25]!.achieved, isFalse);
-      expect(byKind[MilestoneKind.sevenDayStreak]!.achieved, isFalse);
+      final ms = MilestoneEngine.compute(sessions: [_s(at: t, id: 1)]);
+      expect(ms[0].achieved, isTrue);
+      expect(ms[0].achievedAt!.isAtSameMomentAs(t), isTrue);
+      expect(ms[0].title, '1주차 - 첫 훈련 완료');
+      expect(ms[1].title, '2주차 - 연속 훈련 완료');
+      for (var i = 1; i < 6; i++) {
+        expect(ms[i].achieved, isFalse, reason: '${i + 1}주차');
+      }
     });
 
-    test('호기 20 / 25 임계치 — 첫 도달 세션의 날짜', () {
+    test('3주 연속(매주 1회) → 1~3주차 달성, 4주차+ 미달성', () {
+      final start = DateTime(2026, 4, 1);
       final ms = MilestoneEngine.compute(
         sessions: [
-          _s(at: DateTime(2026, 4, 1), maxPressure: 19, id: 1),
-          _s(at: DateTime(2026, 4, 5), maxPressure: 22, id: 2),
-          _s(at: DateTime(2026, 4, 10), maxPressure: 27, id: 3),
+          _s(at: start, id: 1), // week 0
+          _s(at: start.add(const Duration(days: 8)), id: 2), // week 1
+          _s(at: start.add(const Duration(days: 16)), id: 3), // week 2
         ],
-        currentStreak: 0,
       );
-      final byKind = {for (final m in ms) m.kind: m};
-
-      expect(byKind[MilestoneKind.exhale20]!.achievedAt,
-          DateTime(2026, 4, 5));
-      expect(byKind[MilestoneKind.exhale25]!.achievedAt,
-          DateTime(2026, 4, 10));
+      expect(ms[0].achieved, isTrue); // 1주차
+      expect(ms[1].achieved, isTrue); // 2주차
+      expect(ms[2].achieved, isTrue); // 3주차
+      expect(ms[3].achieved, isFalse); // 4주차
+      // 3주차 달성일 = week 2 의 첫 세션.
+      expect(ms[2].achievedAt, start.add(const Duration(days: 16)));
     });
 
-    test('7일 연속 — 정확히 7번째 날짜에 달성', () {
+    test('중간 주 누락 → 연속 끊김(2주차+ 미달성)', () {
       final start = DateTime(2026, 4, 1);
-      final list = [
-        for (var i = 0; i < 7; i++)
-          _s(at: start.add(Duration(days: i)), id: i),
-      ];
+      // week 0 과 week 2 만 (week 1 누락).
       final ms = MilestoneEngine.compute(
-        sessions: list,
-        currentStreak: 7,
+        sessions: [
+          _s(at: start, id: 1),
+          _s(at: start.add(const Duration(days: 16)), id: 2),
+        ],
       );
-      final m7 = ms.firstWhere((m) => m.kind == MilestoneKind.sevenDayStreak);
-      expect(m7.achieved, isTrue);
-      expect(m7.achievedAt, DateTime(2026, 4, 7));
-    });
-
-    test('streak 끊겼다가 다시 7일 — 처음 도달 시점 반환', () {
-      final list = [
-        // 첫 번째 7일 streak (3월 1일 ~ 3월 7일)
-        for (var i = 0; i < 7; i++)
-          _s(at: DateTime(2026, 3, 1).add(Duration(days: i)), id: i),
-        // 한 달 갭 후 다시 7일 streak
-        for (var i = 0; i < 7; i++)
-          _s(at: DateTime(2026, 4, 1).add(Duration(days: i)), id: i + 100),
-      ];
-      final m7 = MilestoneEngine.compute(sessions: list, currentStreak: 7)
-          .firstWhere((m) => m.kind == MilestoneKind.sevenDayStreak);
-      expect(m7.achievedAt, DateTime(2026, 3, 7),
-          reason: '처음 7일 도달 시점');
-    });
-
-    test('30일 미달 — title 에 진행도 (12 / 30)', () {
-      final ms = MilestoneEngine.compute(
-        sessions: [_s(at: DateTime(2026, 4, 1), id: 1)],
-        currentStreak: 12,
-      );
-      final m30 =
-          ms.firstWhere((m) => m.kind == MilestoneKind.thirtyDayStreak);
-      expect(m30.achieved, isFalse);
-      expect(m30.title.contains('(12 / 30)'), isTrue);
-    });
-
-    test('30일 달성 — title 에 진행도 없음', () {
-      final start = DateTime(2026, 3, 1);
-      final list = [
-        for (var i = 0; i < 30; i++)
-          _s(at: start.add(Duration(days: i)), id: i),
-      ];
-      final m30 = MilestoneEngine.compute(sessions: list, currentStreak: 30)
-          .firstWhere((m) => m.kind == MilestoneKind.thirtyDayStreak);
-      expect(m30.achieved, isTrue);
-      expect(m30.title.contains('/ 30'), isFalse);
+      expect(ms[0].achieved, isTrue); // 1주차
+      expect(ms[1].achieved, isFalse); // 2주차 — week 1 누락
+      expect(ms[2].achieved, isFalse); // 3주차
     });
   });
 
-  group('firstStreakReached (pure)', () {
+  group('consecutiveWeeksReached (pure)', () {
     test('빈 입력 → null', () {
-      expect(
-        MilestoneEngine.firstStreakReached([], target: 7),
-        isNull,
-      );
+      expect(MilestoneEngine.consecutiveWeeksReached([], target: 2), isNull);
     });
 
-    test('연속 5일만 있으면 7 미도달', () {
-      final list = [
-        for (var i = 0; i < 5; i++)
-          _s(at: DateTime(2026, 4, 1).add(Duration(days: i)), id: i),
-      ];
-      expect(
-        MilestoneEngine.firstStreakReached(list, target: 7),
-        isNull,
-      );
-    });
-
-    test('같은 날 여러 세션은 1일로 카운트', () {
+    test('같은 주 여러 세션 → 1주차만 달성, 2주차 미달', () {
       final t = DateTime(2026, 4, 1);
       final list = [
         _s(at: t, id: 1),
-        _s(at: t.add(const Duration(hours: 5)), id: 2),
-        _s(at: t.add(const Duration(days: 1)), id: 3),
+        _s(at: t.add(const Duration(days: 3)), id: 2), // 여전히 week 0
       ];
-      // 2일 연속, 3일째는 없음 → target=2 만 도달
-      expect(MilestoneEngine.firstStreakReached(list, target: 2),
-          DateTime(2026, 4, 2));
-      expect(MilestoneEngine.firstStreakReached(list, target: 3), isNull);
+      expect(
+        MilestoneEngine.consecutiveWeeksReached(list, target: 1),
+        isNotNull,
+      );
+      expect(MilestoneEngine.consecutiveWeeksReached(list, target: 2), isNull);
+    });
+
+    test('6주 연속 → 6주차 달성일 = week 5 첫 세션', () {
+      final start = DateTime(2026, 4, 1);
+      final list = [
+        for (var w = 0; w < 6; w++)
+          _s(at: start.add(Duration(days: w * 7)), id: w),
+      ];
+      expect(
+        MilestoneEngine.consecutiveWeeksReached(list, target: 6),
+        start.add(const Duration(days: 35)),
+      );
     });
   });
 }
