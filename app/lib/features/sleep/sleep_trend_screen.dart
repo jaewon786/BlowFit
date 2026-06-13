@@ -1,10 +1,8 @@
 // 수면 추이 화면 — 추이(Trend) 화면과 동일한 비주얼 스타일.
-//   잔디/하늘 배경(추이와 동일 페인터) + 헤더(로고/설정/알림) +
-//   요약 카드 + 최저 SpO₂ 라인차트 카드 + 측정 달력 카드.
+//   잔디/하늘 배경(추이와 동일 페인터) + 헤더(로고/토글/설정/알림) +
+//   요약 카드(최저 혈중산소·수면점수·수면무호흡 징후) + 최저 SpO₂ 라인차트 +
+//   하단 페이지 indicator(nav 위 고정).
 // 데이터: sleep_records (실측, 없으면 데모 시드).
-
-import 'dart:typed_data';
-import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -12,18 +10,17 @@ import 'package:flutter_svg/flutter_svg.dart';
 
 import '../../core/db/app_database.dart';
 import '../../core/db/db_providers.dart';
+import '../../core/db/trend_bucketing.dart';
 import '../../core/health/sleep_analysis.dart';
 import '../../core/theme/blowfit_colors.dart';
 import '../../core/theme/blowfit_theme.dart';
 import '../settings/settings_screen.dart';
 
 const double _kFrameW = 402;
-const double _kFrameH = 980;
 
 const _ink = Color(0xFF101010);
 const _ink2 = Color(0xFF252525);
 const _muted = Color(0xFF898989);
-const _calGray = Color(0xFF808080);
 
 class _Frame {
   _Frame(this.screenW) : scale = screenW / _kFrameW;
@@ -55,11 +52,10 @@ class SleepTrendScreen extends ConsumerStatefulWidget {
 }
 
 class _SleepTrendScreenState extends ConsumerState<SleepTrendScreen> {
-  DateTime _calMonth = _thisMonth();
-  static DateTime _thisMonth() {
-    final n = DateTime.now();
-    return DateTime(n.year, n.month);
-  }
+  int _tabIndex = 0;
+
+  /// 탭 index → TrendPeriod 매핑 (일간/주간/월간/년간).
+  TrendPeriod get _period => TrendPeriod.values[_tabIndex];
 
   @override
   Widget build(BuildContext context) {
@@ -69,28 +65,61 @@ class _SleepTrendScreenState extends ConsumerState<SleepTrendScreen> {
     final records = ref.watch(recentSleepProvider).valueOrNull ?? const [];
     final sorted = [...records]..sort((a, b) => a.night.compareTo(b.night));
     final effect = computeSleepEffect(records);
+    final buckets = bucketizeSpo2(records, _period);
+    final trainedDates =
+        ref.watch(trainedDatesProvider).valueOrNull ?? const <DateTime>{};
 
     return Scaffold(
       backgroundColor:
           isDark ? const Color(0xFF030414) : const Color(0xFF4BA22B),
-      body: SingleChildScrollView(
-        child: SizedBox(
-          width: media.size.width,
-          height: f.sx(_kFrameH),
-          child: Stack(
-            children: [
-              Positioned.fill(
-                child: LayoutBuilder(
-                  builder: (_, c) => CustomPaint(
-                    size: Size(c.maxWidth, c.maxHeight),
-                    painter: _SleepBgPainter(isDark: isDark),
-                  ),
-                ),
+      body: Stack(
+        children: [
+          // 배경 — 전체 화면 (sky+잔디 / 다크 솔리드 #030414)
+          Positioned.fill(
+            child: LayoutBuilder(
+              builder: (_, c) => CustomPaint(
+                size: Size(c.maxWidth, c.maxHeight),
+                painter: _SleepBgPainter(isDark: isDark),
               ),
-              _content(context, f, sorted, effect, isDark),
-            ],
+            ),
           ),
-        ),
+          // 콘텐츠 (헤더 + 요약/차트 카드) — 상단 정렬.
+          Positioned.fill(
+            child: _content(
+              context,
+              f,
+              sorted,
+              effect,
+              buckets,
+              trainedDates,
+              isDark,
+            ),
+          ),
+          // 페이지 indicator — 갤럭시 nav 버튼 위 고정 (홈/추이처럼).
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: media.padding.bottom + f.sx(16),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                for (var i = 0; i < 3; i++) ...[
+                  if (i > 0) SizedBox(width: f.sx(7)),
+                  Container(
+                    width: f.sx(6),
+                    height: f.sx(6),
+                    decoration: BoxDecoration(
+                      color: i == 2
+                          ? DotColors.primary
+                          : (isDark ? Colors.white24 : Colors.black26),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -100,6 +129,8 @@ class _SleepTrendScreenState extends ConsumerState<SleepTrendScreen> {
     _Frame f,
     List<SleepRecord> sorted,
     SleepEffect effect,
+    List<Spo2Bucket> buckets,
+    Set<DateTime> trainedDates,
     bool isDark,
   ) {
     final headline = _headline(effect);
@@ -214,64 +245,39 @@ class _SleepTrendScreenState extends ConsumerState<SleepTrendScreen> {
             ),
           ),
         ),
-        // 요약 카드
+        // 요약 카드 — 최저 혈중산소 / 수면점수 / 수면무호흡 징후
         f.at(
           x: 20,
           y: 175,
           w: 362,
           h: 91,
-          child: _SummaryCard(f: f, records: sorted, isDark: isDark),
+          child: _SummaryCard(f: f, effect: effect, isDark: isDark),
         ),
-        // 차트 카드 — 최저 SpO₂ 추이
+        // 차트 카드 — 일간/주간/월간/년간 탭 + 최저 SpO₂ 추이.
         f.at(
           x: 20,
           y: 290,
           w: 362,
-          h: 250,
-          child: _Spo2TrendCard(f: f, records: sorted, isDark: isDark),
-        ),
-        // 달력 카드 — 측정한 밤
-        f.at(
-          x: 20,
-          y: 560,
-          w: 362,
-          h: 348,
-          child: _SleepCalendarCard(
+          h: 290,
+          child: _Spo2TrendCard(
             f: f,
-            month: _calMonth,
-            records: sorted,
+            buckets: buckets,
             isDark: isDark,
-            onPrev: () => setState(
-              () => _calMonth = DateTime(_calMonth.year, _calMonth.month - 1),
-            ),
-            onNext: () => setState(
-              () => _calMonth = DateTime(_calMonth.year, _calMonth.month + 1),
-            ),
+            tabIndex: _tabIndex,
+            onTab: (i) => setState(() => _tabIndex = i),
           ),
         ),
-        // ─── 페이지 indicator (3 페이지 — 홈·추이·수면, 수면은 index 2) ──
-        // 3 dot(32) 가운데 정렬 → x = (402-32)/2 = 185.
+        // 훈련 연관성 카드 — 차트 아래.
         f.at(
-          x: 185,
-          y: 940,
-          w: 32,
-          h: 6,
-          child: Row(
-            children: [
-              for (var i = 0; i < 3; i++) ...[
-                if (i > 0) SizedBox(width: f.sx(7)),
-                Container(
-                  width: f.sx(6),
-                  height: f.sx(6),
-                  decoration: BoxDecoration(
-                    color: i == 2
-                        ? DotColors.primary
-                        : (isDark ? Colors.white24 : Colors.black26),
-                    shape: BoxShape.circle,
-                  ),
-                ),
-              ],
-            ],
+          x: 20,
+          y: 600,
+          w: 362,
+          h: 150,
+          child: _TrainingCorrelationCard(
+            f: f,
+            records: sorted,
+            trainedDates: trainedDates,
+            isDark: isDark,
           ),
         ),
       ],
@@ -282,9 +288,9 @@ class _SleepTrendScreenState extends ConsumerState<SleepTrendScreen> {
     final d = e.spo2MinDelta;
     if (e.nights == 0) return '수면 데이터를 모아볼까요?';
     if (d == null) return '수면을 꾸준히 기록해 봐요!';
-    if (d >= 0.5) return '최저 SpO₂가 ${d.toStringAsFixed(1)}%p 좋아졌어요!';
-    if (d <= -0.5) return '최저 SpO₂가 ${(-d).toStringAsFixed(1)}%p 낮아졌어요';
-    return '최저 SpO₂가 비슷하게 유지돼요';
+    if (d >= 0.5) return '잠자는 동안 혈중 산소가 좋아지고 있어요!';
+    if (d <= -0.5) return '잠자는 동안 혈중 산소가 조금 낮아졌어요';
+    return '잠자는 동안 혈중 산소가 잘 유지되고 있어요';
   }
 }
 
@@ -292,25 +298,24 @@ class _SleepTrendScreenState extends ConsumerState<SleepTrendScreen> {
 class _SummaryCard extends StatelessWidget {
   const _SummaryCard({
     required this.f,
-    required this.records,
+    required this.effect,
     required this.isDark,
   });
   final _Frame f;
-  final List<SleepRecord> records;
+  final SleepEffect effect;
   final bool isDark;
 
   @override
   Widget build(BuildContext context) {
-    final now = DateTime.now();
-    final daysFromMon = now.weekday - DateTime.monday;
-    final monday = DateTime(now.year, now.month, now.day)
-        .subtract(Duration(days: daysFromMon));
-    final monthStart = DateTime(now.year, now.month, 1);
-    var week = 0, month = 0;
-    for (final r in records) {
-      if (!r.night.isBefore(monday)) week++;
-      if (!r.night.isBefore(monthStart)) month++;
-    }
+    // 최근 측정값 기준. 데이터 없으면 '—'.
+    final spo2 = effect.recentSpo2Min;
+    final score = effect.recentScore;
+    final apnea = effect.apneaRecent;
+    final spo2Str = spo2 != null ? '${spo2.round()}%' : '—';
+    final scoreStr = score != null ? '${score.round()}점' : '—';
+    final apneaStr =
+        apnea == 'DETECTED' ? '있음' : (apnea == 'NOT_DETECTED' ? '없음' : '—');
+
     final dividerColor =
         isDark ? Colors.white.withValues(alpha: 0.12) : Colors.black12;
     return Container(
@@ -323,18 +328,18 @@ class _SummaryCard extends StatelessWidget {
       child: Stack(
         children: [
           Positioned(
-            left: f.sx(117),
+            left: f.sx(127),
             top: f.sx(17),
             child: Container(width: 1, height: f.sx(58), color: dividerColor),
           ),
           Positioned(
-            left: f.sx(241),
+            left: f.sx(238),
             top: f.sx(17),
             child: Container(width: 1, height: f.sx(58), color: dividerColor),
           ),
-          _col(0, 117, '이번 주', '$week박'),
-          _col(117, 241, '이번 달', '$month박'),
-          _col(241, 362, '지금까지', '${records.length}박'),
+          _col(0, 127, '최저 혈중산소', spo2Str),
+          _col(127, 238, '수면점수', scoreStr),
+          _col(238, 362, '수면무호흡 징후', apneaStr),
         ],
       ),
     );
@@ -343,26 +348,37 @@ class _SummaryCard extends StatelessWidget {
   Widget _col(double l, double r, String label, String value) => Positioned(
         left: f.sx(l),
         width: f.sx(r - l),
-        top: f.sx(18),
+        top: f.sx(20),
         child: Column(
           children: [
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: f.sx(12),
-                fontWeight: FontWeight.w500,
-                color: isDark ? DotColors.darkTextPrimary : _ink,
-                fontFamily: BlowfitTheme.fontFamily,
+            // 라벨이 길어 폭을 넘으면 살짝 축소(줄바꿈 방지).
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                label,
+                maxLines: 1,
+                softWrap: false,
+                style: TextStyle(
+                  fontSize: f.sx(11),
+                  fontWeight: FontWeight.w500,
+                  color: isDark ? DotColors.darkTextPrimary : _ink,
+                  fontFamily: BlowfitTheme.fontFamily,
+                ),
               ),
             ),
-            SizedBox(height: f.sx(2)),
-            Text(
-              value,
-              style: TextStyle(
-                fontSize: f.sx(27),
-                fontWeight: FontWeight.w700,
-                color: isDark ? DotColors.darkTextPrimary : _ink,
-                fontFamily: BlowfitTheme.fontFamily,
+            SizedBox(height: f.sx(5)),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                value,
+                maxLines: 1,
+                softWrap: false,
+                style: TextStyle(
+                  fontSize: f.sx(24),
+                  fontWeight: FontWeight.w700,
+                  color: isDark ? DotColors.darkTextPrimary : _ink,
+                  fontFamily: BlowfitTheme.fontFamily,
+                ),
               ),
             ),
           ],
@@ -374,15 +390,24 @@ class _SummaryCard extends StatelessWidget {
 class _Spo2TrendCard extends StatelessWidget {
   const _Spo2TrendCard({
     required this.f,
-    required this.records,
+    required this.buckets,
     required this.isDark,
+    required this.tabIndex,
+    required this.onTab,
   });
   final _Frame f;
-  final List<SleepRecord> records; // asc
+  final List<Spo2Bucket> buckets;
   final bool isDark;
+  final int tabIndex;
+  final ValueChanged<int> onTab;
+
+  static const _tabs = ['일간', '주간', '월간', '년간'];
 
   @override
   Widget build(BuildContext context) {
+    final allEmpty = buckets.every((b) => b.avgSpo2Min == null);
+    // 카드 내부 세로 레이아웃: 탭 행(높이 ~32) → 그 아래 차트 영역.
+    // 차트 영역은 card-local frame 좌표로 그리되, 탭 행 높이만큼 내려서 시작.
     return Container(
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF181836) : Colors.white,
@@ -390,10 +415,57 @@ class _Spo2TrendCard extends StatelessWidget {
       ),
       child: Stack(
         children: [
-          // legend
+          // ── 탭 행 (일간/주간/월간/년간) — 카드 상단, 4등분 균등 배치 ──
+          Positioned(
+            left: 0,
+            right: 0,
+            top: f.sx(12),
+            child: Row(
+              children: [
+                for (var i = 0; i < _tabs.length; i++)
+                  Expanded(
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => onTab(i),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            _tabs[i],
+                            style: TextStyle(
+                              fontSize: f.sx(13),
+                              fontWeight: i == tabIndex
+                                  ? FontWeight.w700
+                                  : FontWeight.w500,
+                              color: i == tabIndex
+                                  ? DotColors.primary
+                                  : (isDark ? DotColors.darkTextMuted : _muted),
+                              fontFamily: BlowfitTheme.fontFamily,
+                            ),
+                          ),
+                          SizedBox(height: f.sx(5)),
+                          // active indicator (pill)
+                          Container(
+                            width: f.sx(20),
+                            height: f.sx(2.5),
+                            decoration: BoxDecoration(
+                              color: i == tabIndex
+                                  ? DotColors.primary
+                                  : Colors.transparent,
+                              borderRadius: BorderRadius.circular(f.sx(2)),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          // ── legend (탭 행 아래) ──
           Positioned(
             left: f.sx(16),
-            top: f.sx(14),
+            top: f.sx(50),
             child: Row(
               children: [
                 Container(
@@ -417,23 +489,34 @@ class _Spo2TrendCard extends StatelessWidget {
               ],
             ),
           ),
-          Positioned.fill(
+          // ── 차트 (탭 행 + legend 아래 영역) ──
+          Positioned(
+            left: 0,
+            right: 0,
+            top: f.sx(64),
+            bottom: 0,
             child: CustomPaint(
               painter: _Spo2LinePainter(
                 scale: f.scale,
-                records: records,
+                buckets: buckets,
                 isDark: isDark,
               ),
             ),
           ),
-          if (records.every((r) => r.spo2Min == null))
-            Center(
-              child: Text(
-                'SpO₂ 데이터 없음',
-                style: TextStyle(
-                  fontSize: f.sx(12),
-                  color: isDark ? DotColors.darkTextMuted : _muted,
-                  fontFamily: BlowfitTheme.fontFamily,
+          if (allEmpty)
+            Positioned(
+              left: 0,
+              right: 0,
+              top: f.sx(64),
+              bottom: 0,
+              child: Center(
+                child: Text(
+                  'SpO₂ 데이터 없음',
+                  style: TextStyle(
+                    fontSize: f.sx(12),
+                    color: isDark ? DotColors.darkTextMuted : _muted,
+                    fontFamily: BlowfitTheme.fontFamily,
+                  ),
                 ),
               ),
             ),
@@ -446,11 +529,11 @@ class _Spo2TrendCard extends StatelessWidget {
 class _Spo2LinePainter extends CustomPainter {
   _Spo2LinePainter({
     required this.scale,
-    required this.records,
+    required this.buckets,
     required this.isDark,
   });
   final double scale;
-  final List<SleepRecord> records;
+  final List<Spo2Bucket> buckets;
   final bool isDark;
   static const _yMin = 80.0, _yMax = 100.0;
 
@@ -458,8 +541,8 @@ class _Spo2LinePainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final padL = size.width * 0.12;
     final padR = size.width * 0.05;
-    final padT = size.height * 0.24;
-    final padB = size.height * 0.10;
+    final padT = size.height * 0.06;
+    final padB = size.height * 0.20; // x축 라벨 공간 확보
     final plot =
         Rect.fromLTRB(padL, padT, size.width - padR, size.height - padB);
 
@@ -493,14 +576,40 @@ class _Spo2LinePainter extends CustomPainter {
       );
     }
 
-    // line + dots
-    final n = records.length;
+    final n = buckets.length;
+    if (n == 0) return;
+    // x 좌표 — 버킷 중심(xPos 1-based) 을 plot 폭에 균등 배치.
+    double xFor(int xPos) =>
+        plot.left + (n == 1 ? 0.5 : (xPos - 1) / (n - 1)) * plot.width;
+
+    // x축 라벨 (모든 슬롯, 빈 버킷도 라벨은 그림).
+    for (final b in buckets) {
+      final tp = TextPainter(
+        text: TextSpan(
+          text: b.label,
+          style: TextStyle(
+            color: isDark ? DotColors.darkTextMuted : _muted,
+            fontSize: 8 * scale,
+            fontFamily: BlowfitTheme.fontFamily,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      tp.paint(
+        canvas,
+        Offset(
+          xFor(b.xPos) - tp.width / 2,
+          plot.bottom + 5 * scale,
+        ),
+      );
+    }
+
+    // line + dots — 값 있는(avgSpo2Min != null) 버킷만.
     final pts = <Offset>[];
-    for (var i = 0; i < n; i++) {
-      final v = records[i].spo2Min;
+    for (final b in buckets) {
+      final v = b.avgSpo2Min;
       if (v == null) continue;
-      final x = plot.left + (n == 1 ? 0.5 : i / (n - 1)) * plot.width;
-      pts.add(Offset(x, yFor(v)));
+      pts.add(Offset(xFor(b.xPos), yFor(v)));
     }
     if (pts.isEmpty) return;
     if (pts.length > 1) {
@@ -524,155 +633,166 @@ class _Spo2LinePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_Spo2LinePainter old) =>
-      old.records != records || old.isDark != isDark;
+      old.buckets != buckets || old.isDark != isDark;
 }
 
-// ───────────────────────── 달력 카드 ─────────────────────────
-class _SleepCalendarCard extends StatelessWidget {
-  const _SleepCalendarCard({
+// ───────────────────────── 훈련 연관성 카드 ─────────────────────────
+class _TrainingCorrelationCard extends StatelessWidget {
+  const _TrainingCorrelationCard({
     required this.f,
-    required this.month,
     required this.records,
-    required this.onPrev,
-    required this.onNext,
+    required this.trainedDates,
     required this.isDark,
   });
   final _Frame f;
-  final DateTime month;
-  final List<SleepRecord> records;
-  final VoidCallback onPrev;
-  final VoidCallback onNext;
+  final List<SleepRecord> records; // asc
+  final Set<DateTime> trainedDates;
   final bool isDark;
 
-  static const _measuredCircle = Color(0xFFA5D3FF);
-  static const _todayCircle = Color(0xFF0084FF);
-  static const _measuredText = Color(0xFF2F2F2F);
+  bool _isTrained(SleepRecord r) =>
+      trainedDates.contains(DateTime(r.night.year, r.night.month, r.night.day));
 
   @override
   Widget build(BuildContext context) {
-    final measured = <int>{};
-    for (final r in records) {
-      if (r.night.year == month.year && r.night.month == month.month) {
-        measured.add(r.night.day);
-      }
-    }
-    final now = DateTime.now();
-    final isThisMonth = now.year == month.year && now.month == month.month;
-    final firstDow = DateTime(month.year, month.month, 1).weekday % 7; // Sun=0
-    final daysInMonth = DateTime(month.year, month.month + 1, 0).day;
-    const labels = ['일', '월', '화', '수', '목', '금', '토'];
-    // 측정한 밤 원/글씨 — 라이트: 연파랑 원 + 진회색 글씨 / 다크:
-    //   #86C5FF @30% 원 + 흰 글씨. 오늘 원 #0084FF 는 공통.
-    final measuredCircleCol = isDark
-        ? const Color(0xFF86C5FF).withValues(alpha: 0.3)
-        : _measuredCircle;
-    final measuredTextCol = isDark ? Colors.white : _measuredText;
+    final cmp = compareTrainingSpo2(records, trainedDates);
     final inkColor = isDark ? DotColors.darkTextPrimary : _ink;
-    final calGrayColor = isDark ? DotColors.darkTextMuted : _calGray;
+    final mutedColor = isDark ? DotColors.darkTextMuted : _muted;
+    final trainedStr =
+        cmp.trainedAvg != null ? '${cmp.trainedAvg!.round()}%' : '—';
+    final untrainedStr =
+        cmp.untrainedAvg != null ? '${cmp.untrainedAvg!.round()}%' : '—';
 
-    final cells = <Widget>[];
-    var day = 1;
-    for (var row = 0; row < 6; row++) {
-      for (var col = 0; col < 7; col++) {
-        final idx = row * 7 + col;
-        if (idx < firstDow || day > daysInMonth) {
-          cells.add(const SizedBox());
-          continue;
-        }
-        final d = day;
-        final isToday = isThisMonth && d == now.day;
-        final isMeasured = measured.contains(d);
-        cells.add(
-          Center(
-            child: Container(
-              width: f.sx(30),
-              height: f.sx(30),
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: isToday
-                    ? _todayCircle
-                    : (isMeasured ? measuredCircleCol : Colors.transparent),
-                shape: BoxShape.circle,
-              ),
-              child: Text(
-                '$d',
-                style: TextStyle(
-                  fontSize: f.sx(13),
-                  fontWeight:
-                      isToday || isMeasured ? FontWeight.w600 : FontWeight.w400,
-                  color: isToday
-                      ? Colors.white
-                      : (isMeasured ? measuredTextCol : calGrayColor),
-                  fontFamily: BlowfitTheme.fontFamily,
-                ),
-              ),
-            ),
-          ),
-        );
-        day++;
-      }
-    }
+    // 최근 ~14박 (오래→최신, 왼→오른쪽). records 는 asc 정렬.
+    final recent =
+        records.length > 14 ? records.sublist(records.length - 14) : records;
 
     return Container(
-      padding: EdgeInsets.symmetric(horizontal: f.sx(20), vertical: f.sx(20)),
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF181836) : Colors.white,
         borderRadius: BorderRadius.circular(f.sx(10)),
       ),
-      child: Column(
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              GestureDetector(
-                onTap: onPrev,
-                child:
-                    Icon(Icons.chevron_left, color: inkColor, size: f.sx(20)),
+      child: Padding(
+        padding: EdgeInsets.symmetric(
+          horizontal: f.sx(16),
+          vertical: f.sx(14),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 타이틀
+            Text(
+              '훈련과 수면',
+              style: TextStyle(
+                fontSize: f.sx(13),
+                fontWeight: FontWeight.w700,
+                color: inkColor,
+                fontFamily: BlowfitTheme.fontFamily,
               ),
-              Text(
-                '${month.year}년 ${month.month}월',
-                style: TextStyle(
-                  fontSize: f.sx(15),
-                  fontWeight: FontWeight.w700,
-                  color: inkColor,
-                  fontFamily: BlowfitTheme.fontFamily,
-                ),
-              ),
-              GestureDetector(
-                onTap: onNext,
-                child:
-                    Icon(Icons.chevron_right, color: inkColor, size: f.sx(20)),
-              ),
-            ],
-          ),
-          SizedBox(height: f.sx(12)),
-          Row(
-            children: [
-              for (final l in labels)
-                Expanded(
-                  child: Center(
-                    child: Text(
-                      l,
-                      style: TextStyle(
-                        fontSize: f.sx(11),
-                        fontWeight: FontWeight.w500,
-                        color: calGrayColor,
-                        fontFamily: BlowfitTheme.fontFamily,
-                      ),
-                    ),
+            ),
+            SizedBox(height: f.sx(10)),
+            // 평균 비교 한 줄
+            Wrap(
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                Text(
+                  '훈련한 날 평균 최저 산소  ',
+                  style: TextStyle(
+                    fontSize: f.sx(11),
+                    fontWeight: FontWeight.w500,
+                    color: mutedColor,
+                    fontFamily: BlowfitTheme.fontFamily,
                   ),
                 ),
-            ],
-          ),
-          SizedBox(height: f.sx(6)),
-          Expanded(
-            child: GridView.count(
-              physics: const NeverScrollableScrollPhysics(),
-              crossAxisCount: 7,
-              children: cells,
+                Text(
+                  trainedStr,
+                  style: TextStyle(
+                    fontSize: f.sx(13),
+                    fontWeight: FontWeight.w700,
+                    color: DotColors.primary,
+                    fontFamily: BlowfitTheme.fontFamily,
+                  ),
+                ),
+                Text(
+                  '   ·   안 한 날  ',
+                  style: TextStyle(
+                    fontSize: f.sx(11),
+                    fontWeight: FontWeight.w500,
+                    color: mutedColor,
+                    fontFamily: BlowfitTheme.fontFamily,
+                  ),
+                ),
+                Text(
+                  untrainedStr,
+                  style: TextStyle(
+                    fontSize: f.sx(13),
+                    fontWeight: FontWeight.w700,
+                    color: mutedColor,
+                    fontFamily: BlowfitTheme.fontFamily,
+                  ),
+                ),
+              ],
             ),
-          ),
-        ],
+            SizedBox(height: f.sx(12)),
+            // 일별 훈련 띠 (strip) — 최근 ~14박.
+            if (recent.isEmpty)
+              Text(
+                '최근 수면 기록이 없어요',
+                style: TextStyle(
+                  fontSize: f.sx(11),
+                  color: mutedColor,
+                  fontFamily: BlowfitTheme.fontFamily,
+                ),
+              )
+            else
+              Row(
+                children: [
+                  for (var i = 0; i < recent.length; i++) ...[
+                    if (i > 0) SizedBox(width: f.sx(5)),
+                    _DayCell(
+                      f: f,
+                      trained: _isTrained(recent[i]),
+                      isDark: isDark,
+                    ),
+                  ],
+                ],
+              ),
+            SizedBox(height: f.sx(10)),
+            // legend
+            Text(
+              '● 훈련함  ○ 안 함',
+              style: TextStyle(
+                fontSize: f.sx(10),
+                fontWeight: FontWeight.w500,
+                color: mutedColor,
+                fontFamily: BlowfitTheme.fontFamily,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DayCell extends StatelessWidget {
+  const _DayCell({
+    required this.f,
+    required this.trained,
+    required this.isDark,
+  });
+  final _Frame f;
+  final bool trained;
+  final bool isDark;
+
+  @override
+  Widget build(BuildContext context) {
+    final hollow = isDark ? Colors.white24 : Colors.black12;
+    return Container(
+      width: f.sx(14),
+      height: f.sx(14),
+      decoration: BoxDecoration(
+        color: trained ? DotColors.primary : hollow,
+        borderRadius: BorderRadius.circular(f.sx(4)),
       ),
     );
   }
@@ -683,40 +803,20 @@ class _SleepBgPainter extends CustomPainter {
   _SleepBgPainter({required this.isDark});
   final bool isDark;
 
-  static const _e47Width = 1017.3922729492188;
-  static const _e47Height = 1284.04150390625;
-  static const _e47Transform = <List<double>>[
-    [0.9964643716812134, -0.08401674032211304, -453.1190185546875],
-    [0.08401674032211304, 0.9964643716812134, 650.0],
-  ];
-  static const _e47Colors = <Color>[
-    Color(0xFFCFFF94),
-    Color(0xFF89C76A),
-    Color(0xFF4BA22B),
-  ];
-  static const _e47Stops = <double>[0.0, 0.5144, 1.0];
-
-  static const _e48Width = 488.5125427246094;
-  static const _e48Height = 503.53411865234375;
-  static const _e48Transform = <List<double>>[
-    [0.7538431286811829, -0.6570544242858887, 323.30615234375],
-    [0.6570544242858887, 0.7538431286811829, 455.0],
-  ];
-  static const _e48Colors = <Color>[Color(0xFFE2F8C8), Color(0xFF78CA59)];
-  static const _e48Stops = <double>[0.0, 1.0];
-
   @override
   void paint(Canvas canvas, Size size) {
     final rect = Offset.zero & size;
     final paint = Paint();
-    final scale = size.width / _kFrameW;
 
     if (isDark) {
-      // 다크 모드 배경 — 추이 다크와 동일 단색 #030414 (물결 ellipse 없음).
+      // 다크 모드 배경 — 추이 다크와 동일 단색 #030414.
       canvas.drawRect(rect, Paint()..color = const Color(0xFF030414));
       return;
     }
 
+    // 라이트 — 하늘 그라데이션만. (잔디 ellipse 제거: 수면은 콘텐츠가 하단을 다
+    // 못 덮어 블러 잔디가 보였고, 추이로 스와이프 시 초록 언덕이 깜빡였음. 추이의
+    // 보이는 영역도 하늘이라, 하늘만 두면 전환이 매끄럽다.)
     paint.shader = const LinearGradient(
       begin: Alignment(-0.4, -1.0),
       end: Alignment(0.4, 1.0),
@@ -728,80 +828,6 @@ class _SleepBgPainter extends CustomPainter {
       ],
     ).createShader(rect);
     canvas.drawRect(rect, paint);
-    paint.shader = null;
-
-    _drawEllipse(
-      canvas,
-      scale,
-      _e48Transform,
-      _e48Width,
-      _e48Height,
-      _e48Colors,
-      _e48Stops,
-      70,
-    );
-    _drawEllipse(
-      canvas,
-      scale,
-      _e47Transform,
-      _e47Width,
-      _e47Height,
-      _e47Colors,
-      _e47Stops,
-      18.1,
-    );
-  }
-
-  void _drawEllipse(
-    Canvas canvas,
-    double scale,
-    List<List<double>> m,
-    double w,
-    double h,
-    List<Color> colors,
-    List<double> stops,
-    double blurSigma,
-  ) {
-    canvas.save();
-    canvas.scale(scale, scale);
-    canvas.transform(
-      Float64List.fromList(<double>[
-        m[0][0],
-        m[1][0],
-        0,
-        0,
-        m[0][1],
-        m[1][1],
-        0,
-        0,
-        0,
-        0,
-        1,
-        0,
-        m[0][2],
-        m[1][2],
-        0,
-        1,
-      ]),
-    );
-    final rect = Rect.fromLTWH(0, 0, w, h);
-    final shader = LinearGradient(
-      begin: Alignment.topCenter,
-      end: Alignment.bottomCenter,
-      colors: colors,
-      stops: stops,
-    ).createShader(rect);
-    final paint = Paint()..shader = shader;
-    final blurBounds = rect.inflate(blurSigma * 2);
-    canvas.saveLayer(
-      blurBounds,
-      Paint()
-        ..imageFilter =
-            ui.ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
-    );
-    canvas.drawOval(rect, paint);
-    canvas.restore();
-    canvas.restore();
   }
 
   @override
