@@ -298,7 +298,7 @@ class _TodayCard extends StatelessWidget {
             children: [
               Expanded(
                 child: _MiniStat(
-                  label: '호기',
+                  label: '날숨',
                   value: today.avgExhale.round().toString(),
                   unit: 'cmH₂O',
                   color: DotColorsLite.exhale,
@@ -307,7 +307,7 @@ class _TodayCard extends StatelessWidget {
               const SizedBox(width: 12),
               Expanded(
                 child: _MiniStat(
-                  label: '흡기',
+                  label: '들숨',
                   value: today.avgInhale.round().toString(),
                   unit: 'cmH₂O',
                   color: DotColorsLite.inhale,
@@ -534,9 +534,9 @@ class _TrendCard extends StatelessWidget {
           const SizedBox(height: 14),
           const Row(
             children: [
-              _Legend(color: DotColorsLite.exhale, label: '호기 평균'),
+              _Legend(color: DotColorsLite.exhale, label: '날숨 평균'),
               SizedBox(width: 16),
-              _Legend(color: DotColorsLite.inhale, label: '흡기 평균'),
+              _Legend(color: DotColorsLite.inhale, label: '들숨 평균'),
             ],
           ),
           const SizedBox(height: 12),

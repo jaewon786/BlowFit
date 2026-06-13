@@ -420,7 +420,7 @@ class _TrendContent extends ConsumerWidget {
         x: 60,
         y: 352,
         child: Text(
-          '호기 평균',
+          '날숨 평균',
           style: TextStyle(
             fontSize: f.sx(10),
             fontWeight: FontWeight.w500,
@@ -446,7 +446,7 @@ class _TrendContent extends ConsumerWidget {
         x: 128,
         y: 352,
         child: Text(
-          '흡기 평균',
+          '들숨 평균',
           style: TextStyle(
             fontSize: f.sx(10),
             fontWeight: FontWeight.w500,
@@ -517,12 +517,12 @@ class _TrendContent extends ConsumerWidget {
       f.at(
         x: 332,
         y: 365,
-        child: _EndLabel(f: f, text: '호기', color: _inkColor),
+        child: _EndLabel(f: f, text: '날숨', color: _inkColor),
       ),
       f.at(
         x: 332,
         y: 533,
-        child: _EndLabel(f: f, text: '흡기', color: _inkColor),
+        child: _EndLabel(f: f, text: '들숨', color: _inkColor),
       ),
     ];
   }

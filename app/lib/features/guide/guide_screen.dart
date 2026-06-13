@@ -25,7 +25,7 @@ const _phases = <_Phase>[
   _Phase(
     title: '시작',
     duration: '4분',
-    description: '호기 압력을 목표 구간(20-30 cmH₂O)에 유지하세요',
+    description: '날숨 압력을 목표 구간(20-30 cmH₂O)에 유지하세요',
   ),
   _Phase(
     title: '휴식',

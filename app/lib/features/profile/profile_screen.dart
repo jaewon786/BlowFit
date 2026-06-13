@@ -326,7 +326,7 @@ class _BaselineCard extends ConsumerWidget {
             children: [
               Expanded(
                 child: _BaselineTile(
-                  label: '시작 시점 호기',
+                  label: '시작 시점 날숨',
                   value: exhaleLabel,
                   unit: 'cmH₂O',
                 ),
@@ -334,7 +334,7 @@ class _BaselineCard extends ConsumerWidget {
               const SizedBox(width: 10),
               const Expanded(
                 child: _BaselineTile(
-                  label: '시작 시점 흡기',
+                  label: '시작 시점 들숨',
                   value: '—',
                   unit: 'cmH₂O',
                 ),

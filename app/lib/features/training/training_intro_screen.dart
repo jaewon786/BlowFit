@@ -126,7 +126,7 @@ class _SessionInfoCard extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           const Text(
-            '흡기 30초 · 호기 30초 · 3세트',
+            '들숨 30초 · 날숨 30초 · 3세트',
             style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w500,

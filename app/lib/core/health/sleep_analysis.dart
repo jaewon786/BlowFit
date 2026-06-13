@@ -10,6 +10,8 @@ class SleepEffect {
     required this.baselineScore,
     required this.recentScore,
     required this.nights,
+    this.latestSpo2Min,
+    this.latestScore,
     this.apneaBaseline,
     this.apneaRecent,
   });
@@ -19,6 +21,11 @@ class SleepEffect {
   final double? baselineScore;
   final double? recentScore;
   final int nights;
+
+  // 가장 최근 밤(어젯밤)의 실측값 — 요약 카드용(삼성헬스 표시와 일치).
+  // recent* 는 최근 N박 "평균"(추세/효과용)이라 단일 밤 값과 다르다.
+  final double? latestSpo2Min;
+  final int? latestScore;
   final String? apneaBaseline; // 가장 이른 무호흡 징후 (DETECTED/NOT_DETECTED)
   final String? apneaRecent; // 가장 최근 무호흡 징후
 
@@ -52,14 +59,19 @@ SleepEffect computeSleepEffect(List<SleepRecord> records, {int window = 7}) {
   final baseline = sorted.take(w);
   final recent = sorted.skip(n - w);
 
-  // 무호흡 징후 — 희소하므로 전체에서 가장 이른/최근 non-null 값을 사용.
+  // 무호흡 징후 + 최신 밤 실측값 — sorted 오름차순을 순회하며 가장 최근 non-null
+  // 값을 잡는다(가장 최근 밤에 해당 값이 없으면 그 이전 밤 값으로 폴백).
   String? apneaBaseline;
   String? apneaRecent;
+  double? latestSpo2Min;
+  int? latestScore;
   for (final r in sorted) {
     if (r.apneaSign != null) {
       apneaBaseline ??= r.apneaSign;
       apneaRecent = r.apneaSign;
     }
+    if (r.spo2Min != null) latestSpo2Min = r.spo2Min;
+    if (r.score != null) latestScore = r.score;
   }
 
   return SleepEffect(
@@ -68,6 +80,8 @@ SleepEffect computeSleepEffect(List<SleepRecord> records, {int window = 7}) {
     baselineScore: _avgI(baseline.map((e) => e.score)),
     recentScore: _avgI(recent.map((e) => e.score)),
     nights: n,
+    latestSpo2Min: latestSpo2Min,
+    latestScore: latestScore,
     apneaBaseline: apneaBaseline,
     apneaRecent: apneaRecent,
   );

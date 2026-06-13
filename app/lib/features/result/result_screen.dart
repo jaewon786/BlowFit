@@ -270,7 +270,7 @@ class _StatsGrid extends StatelessWidget {
           children: [
             Expanded(
               child: _StatTile(
-                label: '호기 평균',
+                label: '날숨 평균',
                 value: summary.avgPressure.toStringAsFixed(1),
                 unit: 'cmH₂O',
               ),
@@ -278,7 +278,7 @@ class _StatsGrid extends StatelessWidget {
             const SizedBox(width: 10),
             Expanded(
               child: _StatTile(
-                label: '호기 최대',
+                label: '날숨 최대',
                 value: summary.maxPressure.toStringAsFixed(1),
                 unit: 'cmH₂O',
               ),
@@ -290,7 +290,7 @@ class _StatsGrid extends StatelessWidget {
           children: [
             Expanded(
               child: _StatTile(
-                label: '흡기 평균',
+                label: '들숨 평균',
                 value: '—',
                 unit: 'cmH₂O',
                 placeholder: true,
@@ -299,7 +299,7 @@ class _StatsGrid extends StatelessWidget {
             SizedBox(width: 10),
             Expanded(
               child: _StatTile(
-                label: '흡기 최대',
+                label: '들숨 최대',
                 value: '—',
                 unit: 'cmH₂O',
                 placeholder: true,

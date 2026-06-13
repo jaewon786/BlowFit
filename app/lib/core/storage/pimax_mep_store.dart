@@ -16,9 +16,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 /// 강도 단계 — 펌웨어 session::IntensityLevel 과 1:1 매핑 (BLE payload byte).
 enum IntensityLevel {
-  beginner(0, '초보자', 0.30, 0.40),
-  normal(1, '일반', 0.50, 0.60),
-  advanced(2, '숙련자', 0.70, 0.75);
+  beginner(0, '약하게', 0.30, 0.40),
+  normal(1, '보통', 0.50, 0.60),
+  advanced(2, '강하게', 0.70, 0.75);
 
   const IntensityLevel(this.value, this.label, this.lowPct, this.highPct);
 

@@ -60,15 +60,15 @@ class _Frame {
 enum _Phase { exhale, exhaleRest, inhale, inhaleRest }
 
 // 펌웨어 session.cpp 의 TURN_*_MS 와 1:1 동기화.
-// 1 호흡 cycle = exhale 5s + (exhaleRest 0s skip) + inhale 5s + inhaleRest 5s = 15s.
-// 10 호흡 × 2 set = 1 session (≈ 5분).
+// 1 호흡 cycle = exhale 5s + exhaleRest 5s + inhale 5s + inhaleRest 5s = 20s.
+//   → 호기 → 휴식 → 흡기 → 휴식 반복.
 //
 // 근거: Vranish & Bailey 2016 (5분/일 IMT) + The Breather 10×2 sets 프로토콜.
 const _phaseDuration = <_Phase, double>{
   _Phase.exhale: 5.0,
-  _Phase.exhaleRest: 0.0, // skip — 펌웨어와 동일 (3-phase 사실상 동작)
+  _Phase.exhaleRest: 5.0, // 호기 뒤 휴식
   _Phase.inhale: 5.0,
-  _Phase.inhaleRest: 5.0, // 한 호흡 끝 휴식
+  _Phase.inhaleRest: 5.0, // 흡기 뒤 휴식
 };
 
 // 색상 — 추이 차트와 동일 스킴.
@@ -461,9 +461,9 @@ class _TrainingContent extends ConsumerWidget {
   static String _phaseLabel(_Phase p) {
     switch (p) {
       case _Phase.exhale:
-        return '호기';
+        return '날숨';
       case _Phase.inhale:
-        return '흡기';
+        return '들숨';
       case _Phase.exhaleRest:
       case _Phase.inhaleRest:
         return '휴식';
@@ -676,7 +676,7 @@ class _TrainingContent extends ConsumerWidget {
           x: 70,
           y: 689,
           child: Text(
-            '호기',
+            '날숨',
             style: TextStyle(
               fontSize: f.sx(15),
               fontWeight: FontWeight.w500,
@@ -689,7 +689,7 @@ class _TrainingContent extends ConsumerWidget {
           x: 300,
           y: 689,
           child: Text(
-            '흡기',
+            '들숨',
             style: TextStyle(
               fontSize: f.sx(15),
               fontWeight: FontWeight.w500,

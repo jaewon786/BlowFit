@@ -2,7 +2,8 @@
 //   잔디/하늘 배경(추이와 동일 페인터) + 헤더(로고/토글/설정/알림) +
 //   요약 카드(최저 혈중산소·수면점수·수면무호흡 징후) + 최저 SpO₂ 라인차트 +
 //   하단 페이지 indicator(nav 위 고정).
-// 데이터: sleep_records (실측, 없으면 데모 시드).
+// 데이터: sleep_records (로컬 DB). 화면 진입 시 sleepAutoSync 가 갤럭시 워치
+//   → DB 로 하루 1회 자동 동기화하므로 실측 SpO₂/수면점수/무호흡이 반영된다.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -56,6 +57,17 @@ class _SleepTrendScreenState extends ConsumerState<SleepTrendScreen> {
 
   /// 탭 index → TrendPeriod 매핑 (일간/주간/월간/년간).
   TrendPeriod get _period => TrendPeriod.values[_tabIndex];
+
+  @override
+  void initState() {
+    super.initState();
+    // 화면 진입 시 갤럭시 워치 → 로컬 DB 자동 동기화(하루 1회 throttle).
+    // sync 가 DB 를 upsert 하면 recentSleepProvider 스트림이 자동 emit 하여
+    // 화면이 실측 데이터로 rebuild 된다. fire-and-forget.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) ref.read(sleepAutoSyncProvider).maybeSync();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -307,12 +319,13 @@ class _SummaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 최근 측정값 기준. 데이터 없으면 '—'.
-    final spo2 = effect.recentSpo2Min;
-    final score = effect.recentScore;
+    // 가장 최근 밤(어젯밤) 실측값 기준 — 삼성헬스 표시와 일치. 데이터 없으면 '—'.
+    // (recent* 는 최근 7박 평균이라 단일 밤 점수와 달라 혼동을 유발했음.)
+    final spo2 = effect.latestSpo2Min;
+    final score = effect.latestScore;
     final apnea = effect.apneaRecent;
     final spo2Str = spo2 != null ? '${spo2.round()}%' : '—';
-    final scoreStr = score != null ? '${score.round()}점' : '—';
+    final scoreStr = score != null ? '$score점' : '—';
     final apneaStr =
         apnea == 'DETECTED' ? '있음' : (apnea == 'NOT_DETECTED' ? '없음' : '—');
 

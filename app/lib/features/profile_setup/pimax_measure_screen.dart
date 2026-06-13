@@ -55,10 +55,10 @@ import '../../core/storage/storage_providers.dart';
 import '../../core/theme/blowfit_colors.dart';
 
 enum _Step {
-  introExhale,      // 호기 — 사용자가 수동 시작
+  introExhale, // 호기 — 사용자가 수동 시작
   countdownExhale,
   measureExhale,
-  introInhale,      // 호기 측정 종료 → 자동 진입 (3초 안내 후 카운트다운)
+  introInhale, // 호기 측정 종료 → 자동 진입 (3초 안내 후 카운트다운)
   countdownInhale,
   measureInhale,
   summary,
@@ -69,23 +69,28 @@ enum _Step {
 enum _Direction { inhale, exhale }
 
 class PimaxMeasureScreen extends ConsumerStatefulWidget {
-  const PimaxMeasureScreen({super.key});
+  const PimaxMeasureScreen({super.key, this.fromSettings = false});
+
+  /// 설정의 "다시 측정하기" 에서 진입했는지.
+  ///   true  → 저장 후 이전 화면(설정)으로 pop, 상단 "건너뛰기" 숨김.
+  ///   false → (온보딩) 저장 후 /connect 로 이동, 건너뛰기 노출.
+  final bool fromSettings;
 
   @override
   ConsumerState<PimaxMeasureScreen> createState() => _PimaxMeasureScreenState();
 }
 
 class _PimaxMeasureScreenState extends ConsumerState<PimaxMeasureScreen> {
-  static const _measureSec = 5;       // 측정 길이
-  static const _countdownSec = 3;     // intro → measure 전 카운트다운
+  static const _measureSec = 5; // 측정 길이
+  static const _countdownSec = 3; // intro → measure 전 카운트다운
 
-  _Step _step = _Step.introExhale;    // 호기부터 시작
+  _Step _step = _Step.introExhale; // 호기부터 시작
   int _countdownRemain = _countdownSec;
   int _measureRemain = _measureSec;
 
-  double _pimax = 0;        // 측정된 max |음압|
-  double _mep = 0;          // 측정된 max 양압
-  double _currentMagnitude = 0;  // 실시간 |p| (게이지용)
+  double _pimax = 0; // 측정된 max |음압|
+  double _mep = 0; // 측정된 max 양압
+  double _currentMagnitude = 0; // 실시간 |p| (게이지용)
 
   /// 펌웨어가 현재 Train state (= 우리가 startSession 으로 진입시킨 측정 모드)
   /// 인지. true 일 때 stopSession 호출 안전. 한 측정(호기 또는 흡기)이 끝나면
@@ -177,7 +182,7 @@ class _PimaxMeasureScreenState extends ConsumerState<PimaxMeasureScreen> {
       final p = s.cmH2O;
       final double mag;
       if (dir == _Direction.inhale) {
-        if (p >= 0) return;       // 양압은 흡기 측정 대상 아님
+        if (p >= 0) return; // 양압은 흡기 측정 대상 아님
         mag = -p;
         if (mag > _pimax) {
           setState(() {
@@ -258,12 +263,12 @@ class _PimaxMeasureScreenState extends ConsumerState<PimaxMeasureScreen> {
   Future<void> _saveAndContinue() async {
     await _releaseDeviceMeasureMode();
     final pimax = _pimax > 0 ? _pimax : PimaxMepStore.defaultPimax;
-    final mep   = _mep   > 0 ? _mep   : PimaxMepStore.defaultMep;
+    final mep = _mep > 0 ? _mep : PimaxMepStore.defaultMep;
     try {
       final store = await ref.read(pimaxMepStoreProvider.future);
       await store.savePimax(pimax);
       await store.saveMep(mep);
-      await store.saveLevel(PimaxMepStore.defaultLevel);  // Normal 시작
+      await store.saveLevel(PimaxMepStore.defaultLevel); // Normal 시작
       ref.invalidate(pimaxMepStoreProvider);
       // 미연결이면 전송 실패 무시 — 다음 connect 때 targetSyncProvider 재전송.
       try {
@@ -281,7 +286,11 @@ class _PimaxMeasureScreenState extends ConsumerState<PimaxMeasureScreen> {
       return;
     }
     if (!mounted) return;
-    context.go('/connect');
+    if (widget.fromSettings) {
+      context.pop(); // 설정(목표 설정) 화면으로 복귀.
+    } else {
+      context.go('/connect');
+    }
   }
 
   @override
@@ -319,7 +328,11 @@ class _PimaxMeasureScreenState extends ConsumerState<PimaxMeasureScreen> {
                   context.go('/profile-setup');
                 }
               },
-              onSkip: () { _skipWithDefaults(); },
+              onSkip: widget.fromSettings
+                  ? null
+                  : () {
+                      _skipWithDefaults();
+                    },
             ),
             _StepProgress(step: _step),
             const SizedBox(height: 8),
@@ -338,18 +351,16 @@ class _PimaxMeasureScreenState extends ConsumerState<PimaxMeasureScreen> {
     switch (_step) {
       case _Step.introExhale:
         return _IntroPanel(
-          title: '최대 호기압 (MEP) 측정',
-          description:
-              '마우스피스를 입에 무신 뒤,\n5초 동안 가능한 가장 강하게\n숨을 내쉬어 주세요.',
+          title: '최대 날숨 세기 측정',
+          description: '마우스피스를 입에 무신 뒤,\n5초 동안 가능한 가장 강하게\n숨을 내쉬어 주세요.',
           icon: Icons.arrow_upward_rounded,
           accent: const Color(0xFF0A89FC),
           connected: connected,
         );
       case _Step.introInhale:
         return _IntroPanel(
-          title: '최대 흡기압 (PImax) 측정',
-          description:
-              '잠시 숨을 고르신 뒤,\n5초 동안 가능한 가장 강하게\n숨을 들이마셔 주세요.',
+          title: '최대 들숨 세기 측정',
+          description: '잠시 숨을 고르신 뒤,\n5초 동안 가능한 가장 강하게\n숨을 들이마셔 주세요.',
           icon: Icons.arrow_downward_rounded,
           accent: const Color(0xFF32B65E),
           connected: connected,
@@ -387,9 +398,8 @@ class _PimaxMeasureScreenState extends ConsumerState<PimaxMeasureScreen> {
         return SizedBox(
           width: double.infinity,
           child: FilledButton(
-            onPressed: connected
-                ? () => _startCountdown(_Step.countdownExhale)
-                : null,
+            onPressed:
+                connected ? () => _startCountdown(_Step.countdownExhale) : null,
             child: Text(connected ? '측정 시작' : '기기 연결 필요'),
           ),
         );
@@ -398,9 +408,8 @@ class _PimaxMeasureScreenState extends ConsumerState<PimaxMeasureScreen> {
         return SizedBox(
           width: double.infinity,
           child: FilledButton(
-            onPressed: connected
-                ? () => _startCountdown(_Step.countdownInhale)
-                : null,
+            onPressed:
+                connected ? () => _startCountdown(_Step.countdownInhale) : null,
             child: Text(connected ? '측정 시작' : '기기 연결 필요'),
           ),
         );
@@ -417,7 +426,7 @@ class _PimaxMeasureScreenState extends ConsumerState<PimaxMeasureScreen> {
               width: double.infinity,
               child: FilledButton(
                 onPressed: _saveAndContinue,
-                child: const Text('저장하고 시작'),
+                child: Text(widget.fromSettings ? '저장하기' : '저장하고 시작'),
               ),
             ),
             const SizedBox(height: 8),
@@ -670,10 +679,10 @@ class _SummaryPanel extends ConsumerWidget {
     // 기본 강도(Normal) 로 계산된 흡기/호기 target 미리보기.
     const level = PimaxMepStore.defaultLevel;
     final effectivePimax = pimax > 0 ? pimax : PimaxMepStore.defaultPimax;
-    final effectiveMep   = mep   > 0 ? mep   : PimaxMepStore.defaultMep;
-    final inhaleLow  = (effectivePimax * level.lowPct).round();
+    final effectiveMep = mep > 0 ? mep : PimaxMepStore.defaultMep;
+    final inhaleLow = (effectivePimax * level.lowPct).round();
     final inhaleHigh = (effectivePimax * level.highPct).round();
-    final exhaleLow  = (effectiveMep * level.lowPct).round();
+    final exhaleLow = (effectiveMep * level.lowPct).round();
     final exhaleHigh = (effectiveMep * level.highPct).round();
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -703,10 +712,10 @@ class _SummaryPanel extends ConsumerWidget {
             ),
           ),
           const SizedBox(height: 24),
-          // 측정 순서대로 표시 — 호기 (MEP) → 흡기 (PImax).
-          _MeasureRow(label: 'MEP',   value: mep,   isInhale: false),
+          // 측정 순서대로 표시 — 날숨(MEP) → 들숨(PImax).
+          _MeasureRow(label: '최대 날숨 세기', value: mep, isInhale: false),
           const SizedBox(height: 8),
-          _MeasureRow(label: 'PImax', value: pimax, isInhale: true),
+          _MeasureRow(label: '최대 들숨 세기', value: pimax, isInhale: true),
           const SizedBox(height: 24),
           Container(
             padding: const EdgeInsets.all(16),
@@ -717,9 +726,9 @@ class _SummaryPanel extends ConsumerWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  '계산된 목표 압력 (${level.label} · ${level.midPct}%)',
-                  style: const TextStyle(
+                const Text(
+                  '내게 맞는 목표 압력',
+                  style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w700,
                     color: BlowfitColors.ink,
@@ -727,7 +736,7 @@ class _SummaryPanel extends ConsumerWidget {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  '흡기  -$inhaleLow ~ -$inhaleHigh cmH₂O',
+                  '들숨  -$inhaleLow ~ -$inhaleHigh cmH₂O',
                   style: const TextStyle(
                     fontSize: 15,
                     color: BlowfitColors.ink,
@@ -736,7 +745,7 @@ class _SummaryPanel extends ConsumerWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  '호기  +$exhaleLow ~ +$exhaleHigh cmH₂O',
+                  '날숨  +$exhaleLow ~ +$exhaleHigh cmH₂O',
                   style: const TextStyle(
                     fontSize: 15,
                     color: BlowfitColors.ink,
@@ -768,7 +777,7 @@ class _MeasureRow extends StatelessWidget {
     return Row(
       children: [
         SizedBox(
-          width: 60,
+          width: 120,
           child: Text(
             label,
             style: const TextStyle(
@@ -800,9 +809,9 @@ class _MeasureRow extends StatelessWidget {
 // ───────────────────────────────────────────────────────────────────────────
 
 class _TopBar extends StatelessWidget {
-  const _TopBar({required this.onBack, required this.onSkip});
+  const _TopBar({required this.onBack, this.onSkip});
   final VoidCallback onBack;
-  final VoidCallback onSkip;
+  final VoidCallback? onSkip;
 
   @override
   Widget build(BuildContext context) {
@@ -822,17 +831,18 @@ class _TopBar extends StatelessWidget {
             constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
           ),
           const Spacer(),
-          TextButton(
-            onPressed: onSkip,
-            child: const Text(
-              '건너뛰기',
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: BlowfitColors.ink3,
+          if (onSkip != null)
+            TextButton(
+              onPressed: onSkip,
+              child: const Text(
+                '건너뛰기',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: BlowfitColors.ink3,
+                ),
               ),
             ),
-          ),
         ],
       ),
     );
@@ -846,13 +856,20 @@ class _StepProgress extends StatelessWidget {
   /// 진행률 — 7 단계 중 어느 정도 왔는지 (호기 → 흡기 순).
   double get _progress {
     switch (step) {
-      case _Step.introExhale:      return 0.10;
-      case _Step.countdownExhale:  return 0.20;
-      case _Step.measureExhale:    return 0.40;
-      case _Step.introInhale:      return 0.55;
-      case _Step.countdownInhale:  return 0.65;
-      case _Step.measureInhale:    return 0.85;
-      case _Step.summary:          return 1.00;
+      case _Step.introExhale:
+        return 0.10;
+      case _Step.countdownExhale:
+        return 0.20;
+      case _Step.measureExhale:
+        return 0.40;
+      case _Step.introInhale:
+        return 0.55;
+      case _Step.countdownInhale:
+        return 0.65;
+      case _Step.measureInhale:
+        return 0.85;
+      case _Step.summary:
+        return 1.00;
     }
   }
 
@@ -899,8 +916,8 @@ class _GaugePainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = 16
       ..strokeCap = StrokeCap.round;
-    const startAngle = math.pi * 0.75;   // 135°
-    const sweepAngle = math.pi * 1.5;    // 270°
+    const startAngle = math.pi * 0.75; // 135°
+    const sweepAngle = math.pi * 1.5; // 270°
     canvas.drawArc(
       Rect.fromCircle(center: center, radius: radius),
       startAngle,

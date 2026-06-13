@@ -29,7 +29,7 @@ class CoachingEngine {
     if (delta != null && delta >= 1.5) {
       return CoachingTip(
         eyebrow: '이번 주 코칭',
-        body: '호기 압력이 지난주 대비 +${delta.toStringAsFixed(1)} cmH₂O '
+        body: '날숨 압력이 지난주 대비 +${delta.toStringAsFixed(1)} cmH₂O '
             '향상됐어요. 다음 주는 다이얼 한 단계 올려보세요.',
         tone: CoachingTone.positive,
       );

@@ -5,6 +5,7 @@ import '../ble/ble_providers.dart';
 import '../ble/discovered_device.dart';
 import '../coach/milestone_engine.dart';
 import '../health/samsung_health_service.dart';
+import '../health/sleep_auto_sync.dart';
 import '../health/sleep_sync.dart';
 import '../pairing/user_data_service.dart';
 import '../storage/storage_providers.dart';
@@ -36,6 +37,14 @@ final sleepSyncProvider = Provider<SleepSync>((ref) {
   return SleepSync(
     ref.watch(samsungHealthServiceProvider),
     ref.watch(sleepRepositoryProvider),
+  );
+});
+
+/// 수면 화면 진입 시 워치→DB 자동 동기화(하루 1회 throttle).
+final sleepAutoSyncProvider = Provider<SleepAutoSync>((ref) {
+  return SleepAutoSync(
+    ref.watch(samsungHealthServiceProvider),
+    ref.watch(sleepSyncProvider),
   );
 });
 

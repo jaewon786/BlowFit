@@ -17,22 +17,20 @@ namespace {
   // ============================================================
   // Timing — 모두 config.h::session 의 임상 상수에서 derive. 한 곳 관리.
   //
-  //   1 호흡 cycle (Exhale → ExhaleRest=0 → Inhale → InhaleRest)
-  //     = 5s + 0s + 5s + 5s = 15 s
-  //   10 cycles                  = 150 s = 1 set
-  //   2 sets + 세트 사이 30 s   ≈ 5.5 분 = 1 session
+  //   1 호흡 cycle (Exhale → ExhaleRest → Inhale → InhaleRest)
+  //     = 5s + 5s + 5s + 5s = 20 s  (호기 → 휴식 → 흡기 → 휴식)
+  //   호기/흡기 사이에도 5s 휴식을 둬 매 호흡 phase 뒤 휴식.
   //
-  // 4-phase Turn enum 은 v4.0 호환을 위해 유지. ExhaleRest=0 이라 사실상
-  // 3-phase (Exhale → Inhale → InhaleRest) 동작. UI/햅틱 분기 코드는
-  // ExhaleRest 가 즉시 skip 되는 식으로 무변경.
+  // 4-phase Turn enum 의 ExhaleRest 도 InhaleRest 와 동일한 5s 휴식.
+  // UI 는 둘 다 Rest, 햅틱은 둘 다 REST_TICK.
   // ============================================================
   constexpr uint32_t TURN_EXHALE_MS      = BREATH_EXHALE_MS;  // 5000
-  constexpr uint32_t TURN_EXHALE_REST_MS = 0;                 // skip
+  constexpr uint32_t TURN_EXHALE_REST_MS = BREATH_REST_MS;    // 5000 (호기 뒤 휴식)
   constexpr uint32_t TURN_INHALE_MS      = BREATH_INHALE_MS;  // 5000
-  constexpr uint32_t TURN_INHALE_REST_MS = BREATH_REST_MS;    // 5000 (한 호흡 끝)
+  constexpr uint32_t TURN_INHALE_REST_MS = BREATH_REST_MS;    // 5000 (흡기 뒤 휴식)
   constexpr uint32_t TURN_CYCLE_MS =
       TURN_EXHALE_MS + TURN_EXHALE_REST_MS +
-      TURN_INHALE_MS + TURN_INHALE_REST_MS;  // 15000
+      TURN_INHALE_MS + TURN_INHALE_REST_MS;  // 20000
 
   State    g_state       = State::Boot;
   Turn     g_turn        = Turn::None;
@@ -335,8 +333,9 @@ void tick(uint32_t now_ms, float p) {
             haptic::play(haptic::EXHALE_CUE);
           } else if (g_turn == Turn::Inhale) {
             haptic::play(haptic::INHALE_CUE);
-          } else if (g_turn == Turn::InhaleRest) {
-            haptic::play(haptic::REST_TICK);  // 휴식 시작 — 짧은 진동
+          } else if (g_turn == Turn::InhaleRest ||
+                     g_turn == Turn::ExhaleRest) {
+            haptic::play(haptic::REST_TICK);  // 휴식 시작(호기뒤/흡기뒤) — 짧은 진동
           }
         }
         g_prev_turn = g_turn;

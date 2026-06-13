@@ -119,17 +119,26 @@ final _router = GoRouter(
               builder: (_, __) => const TrainingIntroScreen(),
             ),
             // 실시간 훈련 — intro 의 시작 버튼에서 push.
-            GoRoute(path: '/training', builder: (_, __) => const TrainingScreen()),
+            GoRoute(
+              path: '/training',
+              builder: (_, __) => const TrainingScreen(),
+            ),
             // 설정 — 홈의 톱니바퀴 아이콘에서 push. /training 과 같은 branch
             // 라우트로 두어야 shell branch context 에서 push 가 안정적으로
             // 동작 (root-level parentNavigatorKey 라우트는 일부 케이스에서
             // silent fail).
-            GoRoute(path: '/settings', builder: (_, __) => const SettingsScreen()),
+            GoRoute(
+              path: '/settings',
+              builder: (_, __) => const SettingsScreen(),
+            ),
           ],
         ),
         StatefulShellBranch(
           routes: [
-            GoRoute(path: '/history', builder: (_, __) => const HistoryScreen()),
+            GoRoute(
+              path: '/history',
+              builder: (_, __) => const HistoryScreen(),
+            ),
           ],
         ),
         StatefulShellBranch(
@@ -139,7 +148,10 @@ final _router = GoRouter(
         ),
         StatefulShellBranch(
           routes: [
-            GoRoute(path: '/profile', builder: (_, __) => const ProfileScreen()),
+            GoRoute(
+              path: '/profile',
+              builder: (_, __) => const ProfileScreen(),
+            ),
           ],
         ),
       ],
@@ -161,6 +173,12 @@ final _router = GoRouter(
       parentNavigatorKey: _rootNavKey,
       path: '/settings/target',
       builder: (_, __) => const TargetSettingsScreen(),
+    ),
+    // 설정의 "다시 측정하기" — 측정 후 설정으로 복귀 (fromSettings).
+    GoRoute(
+      parentNavigatorKey: _rootNavKey,
+      path: '/settings/measure',
+      builder: (_, __) => const PimaxMeasureScreen(fromSettings: true),
     ),
     // 훈련 종료 직후 push — extra 로 SessionSummary 전달.
     GoRoute(
@@ -247,14 +265,16 @@ class BlowfitApp extends ConsumerStatefulWidget {
   ConsumerState<BlowfitApp> createState() => _BlowfitAppState();
 }
 
-class _BlowfitAppState extends ConsumerState<BlowfitApp> with WidgetsBindingObserver {
+class _BlowfitAppState extends ConsumerState<BlowfitApp>
+    with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     // 알림 권한 (Android 13+) — 다음 frame 에서 요청 (context 안정화 후).
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      final permResult = await FlutterForegroundTask.checkNotificationPermission();
+      final permResult =
+          await FlutterForegroundTask.checkNotificationPermission();
       if (permResult != NotificationPermission.granted) {
         await FlutterForegroundTask.requestNotificationPermission();
       }

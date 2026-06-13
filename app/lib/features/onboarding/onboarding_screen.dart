@@ -522,7 +522,7 @@ class _BreathIllust extends StatelessWidget {
                 Icon(Icons.arrow_back, size: 20, color: Color(0xFF0099CC)),
                 SizedBox(width: 4),
                 Text(
-                  '흡기',
+                  '들숨',
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w700,
@@ -542,7 +542,7 @@ class _BreathIllust extends StatelessWidget {
                     size: 20, color: BlowfitColors.blue500,),
                 SizedBox(width: 4),
                 Text(
-                  '호기',
+                  '날숨',
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w700,

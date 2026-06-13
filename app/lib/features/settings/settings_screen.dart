@@ -40,7 +40,7 @@ class SettingsScreen extends ConsumerWidget {
               label: '목표 압력 설정',
               trailing: pmStore == null
                   ? '—'
-                  : '${pmStore.loadLevel().label} · ${pmStore.loadLevel().midPct}%',
+                  : '강도 ${pmStore.loadLevel().label}',
               onTap: () => context.push('/settings/target'),
             ),
             _SettingsTile(
@@ -66,16 +66,6 @@ class SettingsScreen extends ConsumerWidget {
               icon: Icons.replay_outlined,
               label: '제품 소개 다시 보기',
               onTap: () => context.push('/onboarding'),
-            ),
-            _SettingsTile(
-              icon: Icons.menu_book_outlined,
-              label: '훈련 가이드 다시 보기',
-              onTap: () => context.push('/guide'),
-            ),
-            _SettingsTile(
-              icon: Icons.help_outline,
-              label: '도움말',
-              onTap: () => _comingSoon(context, '도움말'),
             ),
             _SettingsTile(
               icon: Icons.info_outline,
@@ -176,7 +166,7 @@ class SettingsScreen extends ConsumerWidget {
       children: const [
         SizedBox(height: 12),
         Text(
-          '수면무호흡 개선용 호기 저항 훈련 스마트 기기의 컴패니언 앱입니다.',
+          '수면무호흡 개선용 날숨 저항 훈련 스마트 기기의 컴패니언 앱입니다.',
           style: TextStyle(fontSize: 13),
         ),
       ],

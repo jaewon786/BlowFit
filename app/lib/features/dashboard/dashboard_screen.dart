@@ -942,7 +942,7 @@ class _StatsCard extends ConsumerWidget {
             height: f.sx(106),
             child: _BreathSubCard(
               f: f,
-              label: '호기',
+              label: '날숨',
               count: '$cycleCount회',
               duration: '$phaseMinutes분',
               bg: subCardBg,
@@ -956,7 +956,7 @@ class _StatsCard extends ConsumerWidget {
             height: f.sx(106),
             child: _BreathSubCard(
               f: f,
-              label: '흡기',
+              label: '들숨',
               count: '$cycleCount회',
               duration: '$phaseMinutes분',
               bg: subCardBg,
