@@ -87,6 +87,7 @@ static void switchScreenFor(session::State s) {
         screens::standby_show();
         screens::standby_set_connected(false);
         screens::standby_set_battery(battery::percent());  // 실측 VBAT 잔량.
+        screens::standby_set_orifice(session::orifice());  // 현재 다이얼 단계.
       }
       break;
     case session::State::Prep:
@@ -299,8 +300,8 @@ void loop() {
     switchScreenFor(cur);
 
 #if HAS_BLE
-    // Device State notify (4B). battery 는 실측 VBAT, orifice/charging 은 placeholder.
-    ble_service::pushState((uint8_t)cur, /*orifice=*/0,
+    // Device State notify (4B). battery 는 실측 VBAT, charging 은 placeholder.
+    ble_service::pushState((uint8_t)cur, /*orifice=*/session::orifice(),
                            /*battery=*/(uint8_t)(battery::percent() < 0 ? 0 : battery::percent()),
                            /*charging=*/false);
 
@@ -314,7 +315,7 @@ void loop() {
         .maxPressure   = st.max_exhale,
         .avgPressure   = st.avg_exhale,
         .enduranceSec  = st.hit_ms / 1000,
-        .orificeLevel  = 0,     // TODO M9
+        .orificeLevel  = session::orifice(),
         .targetHits    = 0,     // TODO M9 (15s hold count)
         .sampleCount   = (uint16_t)((uint32_t)st.duration_sec * 100u > 65535u ? 65535u
                                     : (uint16_t)((uint32_t)st.duration_sec * 100u)),

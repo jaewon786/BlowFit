@@ -122,6 +122,13 @@ namespace session {
   float pimax();
   float mep();
 
+  /// 다이얼(orifice) 단계 설정 — 0=1단(3mm)/1=2단(2mm,기준)/2=3단(1mm).
+  /// 구멍 크기에 따라 같은 호흡도 다른 압력으로 측정되므로, PImax/MEP(기준 2단
+  /// 측정값)에 단계별 보정계수(config DIAL_COEFFICIENT)를 곱해 target 을 재계산.
+  /// startSession 의 orifice 인자로 들어와 호출된다. 범위 밖 값은 clamp.
+  void setOrifice(uint8_t level);
+  uint8_t orifice();
+
   /// 흡기 target — magnitude (양수). 측정 압력 |p| 가 [low, high] 안이면
   /// "흡기 zone hit". session.cpp 내부에서 음수 부호 처리.
   float inhaleTargetLow();

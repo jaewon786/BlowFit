@@ -4,6 +4,7 @@
 #include "config.h"
 #include "session.h"
 #include "haptic.h"
+#include "display/screens/screen_standby.h"
 
 #include <Arduino.h>
 #include <esp_sleep.h>
@@ -16,10 +17,13 @@ namespace {
   uint32_t g_boot_press_start_ms = 0;  // BOOT 버튼 누름 시작 시점 (0 = not pressed)
   bool     g_boot_long_fired     = false;  // 한 번 fire 후 release 까지 무시
 
-  // PWR_BUTTON (외부, PB61412L) — long-press(deep sleep) + short-press(훈련 시작).
+  // PWR_BUTTON (외부, PB61412L):
+  //   짧게(single) → 훈련 시작 · 더블 탭 → 다이얼 순환 · 길게 3초 → deep sleep.
   uint32_t g_pwr_press_start_ms = 0;      // 누름 시작 시점 (0 = not pressed)
   bool     g_pwr_long_fired     = false;  // long-press fire 후 release 까지 무시
-  constexpr uint32_t PWR_DEBOUNCE_MS = 30;  // short-press 최소 유지 (노이즈 무시)
+  uint32_t g_pwr_last_tap_ms    = 0;      // 직전 짧은 탭 시점 (더블탭 판별, 0=없음)
+  constexpr uint32_t PWR_DEBOUNCE_MS = 30;   // short-press 최소 유지 (노이즈 무시)
+  constexpr uint32_t PWR_DBLTAP_MS   = 400;  // 더블 탭 인정 간격 (탭-탭)
 
   bool     g_woke_from_button   = false;  // 이번 부팅이 EXT1(버튼) wake 인지
 
@@ -122,7 +126,8 @@ void tick(uint32_t now_ms) {
   }
 
   // ---------- 외부 PWR_BUTTON (PB61412L) ----------
-  // 짧게 누름(뗄 때) → 훈련 시작. 길게 3초 → deep sleep (끄기).
+  // 짧게(single) → 훈련 시작 · 더블 탭 → 다이얼 순환(Standby) · 길게 3초 → 끄기.
+  // 단일/더블 구분을 위해 짧은 탭은 PWR_DBLTAP_MS 후 확정 → 시작이 ~0.4s 지연.
   const bool pwr_pressed = (digitalRead(pins::PWR_BUTTON) == LOW);
   if (pwr_pressed) {
     if (g_pwr_press_start_ms == 0) {
@@ -134,14 +139,36 @@ void tick(uint32_t now_ms) {
       enterDeepSleep();   // [[noreturn]]
     }
   } else {
-    // 떼는 순간 — long press 가 아니었고 debounce 이상 눌렸으면 short = 훈련 시작.
+    // 떼는 순간 — long press 가 아니고 debounce 이상 눌렸으면 유효한 짧은 탭.
     if (g_pwr_press_start_ms != 0 && !g_pwr_long_fired &&
         (now_ms - g_pwr_press_start_ms >= PWR_DEBOUNCE_MS)) {
-      Serial.println("[power] PWR_BUTTON short-press -> startSession");
-      session::startSession();  // Standby/Summary 에서만 동작 (내부 가드)
+      if (g_pwr_last_tap_ms != 0 &&
+          (now_ms - g_pwr_last_tap_ms <= PWR_DBLTAP_MS)) {
+        // 두 번째 탭이 창 안 → 더블 탭 = 다이얼 단계 순환 (Standby 에서만).
+        g_pwr_last_tap_ms = 0;
+        if (session::currentState() == session::State::Standby) {
+          const uint8_t next = (session::orifice() + 1) % 3;
+          session::setOrifice(next);
+          screens::standby_set_orifice(next);
+          Serial.printf("[power] PWR double-tap -> dial %u단\n",
+                        (unsigned)(next + 1));
+        }
+      } else {
+        // 첫 번째 탭 — 더블 탭일 수 있어 보류. 창 만료 시 단일 탭으로 처리.
+        g_pwr_last_tap_ms = now_ms;
+      }
     }
     g_pwr_press_start_ms = 0;
     g_pwr_long_fired = false;
+  }
+
+  // 보류 중인 단일 탭이 더블탭 창을 넘기면(두 번째 탭 없음) → 훈련 시작.
+  // 버튼이 안 눌린 상태에서만 확정 — 두 번째 탭 입력 중 오발동 방지.
+  if (!pwr_pressed && g_pwr_last_tap_ms != 0 &&
+      (now_ms - g_pwr_last_tap_ms > PWR_DBLTAP_MS)) {
+    g_pwr_last_tap_ms = 0;
+    Serial.println("[power] PWR single-tap -> startSession");
+    session::startSession();  // Standby/Summary 에서만 동작 (내부 가드)
   }
 }
 

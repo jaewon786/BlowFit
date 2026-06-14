@@ -17,6 +17,7 @@ namespace {
   // 상태 핸들 — set_* 함수에서 갱신.
   lv_obj_t* g_bt_dot      = nullptr;   // BT 아이콘 (off/connect/pairing)
   lv_obj_t* g_batt_fill   = nullptr;   // 배터리 아이콘 내부 fill
+  lv_obj_t* g_dial_label  = nullptr;   // "DIAL N" — 현재 다이얼 단계
 
   /// 작은 알약 chip (둥근 끝, 컬러 텍스트, 반투명 배경).
   lv_obj_t* make_chip(lv_obj_t* parent, const char* text,
@@ -113,6 +114,13 @@ void standby_show() {
   lv_obj_set_style_text_font(lbl_title, theme::font_28(), 0);
   lv_obj_set_style_text_color(lbl_title, theme::color(theme::DEV_TEXT), 0);
   lv_obj_align(lbl_title, LV_ALIGN_CENTER, 0, 0);
+
+  // 3. 현재 다이얼 단계 — 제목 아래. 기본 "다이얼 2단"(기준). set_orifice 가 갱신.
+  g_dial_label = lv_label_create(scr);
+  lv_label_set_text(g_dial_label, "다이얼 2단");
+  lv_obj_set_style_text_font(g_dial_label, theme::font_20(), 0);
+  lv_obj_set_style_text_color(g_dial_label, theme::color(theme::DEV_TEXT_SUB), 0);
+  lv_obj_align(g_dial_label, LV_ALIGN_CENTER, 0, 44);
 }
 
 void standby_set_connected(bool connected) {
@@ -120,6 +128,13 @@ void standby_set_connected(bool connected) {
     const uint32_t c = connected ? theme::DEV_PRIMARY_LT : theme::DEV_TEXT_MUTE;
     lv_obj_set_style_text_color(g_bt_dot, theme::color(c), 0);
   }
+}
+
+void standby_set_orifice(uint8_t level) {
+  if (!g_dial_label) return;
+  char buf[24];
+  std::snprintf(buf, sizeof(buf), "다이얼 %u단", (unsigned)(level + 1));
+  lv_label_set_text(g_dial_label, buf);
 }
 
 void standby_set_battery(int8_t percent) {

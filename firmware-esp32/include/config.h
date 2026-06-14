@@ -208,6 +208,15 @@ namespace session {
   constexpr float INTENSITY_LOW_PCT[3]  = {0.30f, 0.50f, 0.70f};
   constexpr float INTENSITY_HIGH_PCT[3] = {0.40f, 0.60f, 0.75f};
 
+  // ── 다이얼(orifice) 보정계수 ───────────────────────────────────────────────
+  // 다이얼은 구멍 크기로 저항을 바꾼다(큰 구멍=약한 저항=낮은 압력). 기준 2단(2mm)
+  // 에서 측정한 PImax/MEP 로 다른 단계 목표를 자동 산출하기 위한 보정계수.
+  // 베르누이 ΔP ∝ 1/A² ∝ 1/d⁴, 호흡 일률 일정 가정 → ΔP ∝ 1/d^(4/3).
+  // 기준 2단 대비: 1단 3mm=(2/3)^(4/3)≈0.58 · 2단 2mm=1.00 · 3단 1mm=(2/1)^(4/3)≈2.52.
+  // 인덱스 = orifice level (0=1단/3mm, 1=2단/2mm, 2=3단/1mm).
+  constexpr float   DIAL_COEFFICIENT[3] = {0.58f, 1.00f, 2.52f};
+  constexpr uint8_t ORIFICE_DEFAULT     = 1;  // 기준 2단
+
   // ── Safety ceiling ──────────────────────────────────────────────────────
   // target (계산값) 이 이를 넘으면 clamp + 경고. magnitude 단위 (양수).
   constexpr float INHALE_SAFETY_LIMIT_CMH2O = 90.0f;   // |음압| 한계

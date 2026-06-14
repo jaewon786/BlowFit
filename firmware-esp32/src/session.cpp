@@ -45,6 +45,9 @@ namespace {
   float           g_mep       = MEP_DEFAULT_CMH2O;
   IntensityLevel  g_intensity = INTENSITY_DEFAULT;
 
+  // 다이얼(orifice) 단계 — 0/1/2. 기준 2단(=1). 목표압력에 보정계수를 곱한다.
+  uint8_t         g_orifice   = ORIFICE_DEFAULT;
+
   // 계산된 target — magnitude (양수). recomputeTargets() 결과물.
   float g_inhale_target_low  = 0.0f;
   float g_inhale_target_high = 0.0f;
@@ -108,10 +111,13 @@ namespace {
     const uint8_t i = static_cast<uint8_t>(g_intensity);
     const float low_pct  = INTENSITY_LOW_PCT[i];
     const float high_pct = INTENSITY_HIGH_PCT[i];
+    // 다이얼 보정계수 — 기준 2단(2mm) 측정값을 현재 단계 압력으로 환산.
+    const uint8_t d = (g_orifice < 3) ? g_orifice : ORIFICE_DEFAULT;
+    const float coeff = DIAL_COEFFICIENT[d];
 
-    // 흡기 target — PImax × %.
-    float inh_lo = g_pimax * low_pct;
-    float inh_hi = g_pimax * high_pct;
+    // 흡기 target — PImax × % × 다이얼 계수.
+    float inh_lo = g_pimax * low_pct * coeff;
+    float inh_hi = g_pimax * high_pct * coeff;
     if (inh_hi > INHALE_SAFETY_LIMIT_CMH2O) {
       Serial.printf("[session] WARN: inhale target %.1f > safety %.1f cmH2O — clamped\n",
                     inh_hi, INHALE_SAFETY_LIMIT_CMH2O);
@@ -121,9 +127,9 @@ namespace {
     g_inhale_target_low  = inh_lo;
     g_inhale_target_high = inh_hi;
 
-    // 호기 target — MEP × %.
-    float exh_lo = g_mep * low_pct;
-    float exh_hi = g_mep * high_pct;
+    // 호기 target — MEP × % × 다이얼 계수.
+    float exh_lo = g_mep * low_pct * coeff;
+    float exh_hi = g_mep * high_pct * coeff;
     if (exh_hi > EXHALE_SAFETY_LIMIT_CMH2O) {
       Serial.printf("[session] WARN: exhale target %.1f > safety %.1f cmH2O — clamped\n",
                     exh_hi, EXHALE_SAFETY_LIMIT_CMH2O);
@@ -134,8 +140,8 @@ namespace {
     g_exhale_target_high = exh_hi;
 
     Serial.printf(
-        "[session] targets: level=%u inhale -%.1f~-%.1f exhale +%.1f~+%.1f (PImax=%.1f MEP=%.1f)\n",
-        (unsigned)g_intensity,
+        "[session] targets: level=%u dial=%u(c=%.2f) inhale -%.1f~-%.1f exhale +%.1f~+%.1f (PImax=%.1f MEP=%.1f)\n",
+        (unsigned)g_intensity, (unsigned)g_orifice, coeff,
         g_inhale_target_low, g_inhale_target_high,
         g_exhale_target_low, g_exhale_target_high,
         g_pimax, g_mep);
@@ -451,6 +457,13 @@ void setIntensity(IntensityLevel level) {
   recomputeTargets();
 }
 IntensityLevel intensity() { return g_intensity; }
+
+void setOrifice(uint8_t level) {
+  g_orifice = (level < 3) ? level : ORIFICE_DEFAULT;
+  recomputeTargets();  // 다이얼 보정계수로 target 재계산.
+  Serial.printf("[session] setOrifice dial=%u\n", (unsigned)g_orifice);
+}
+uint8_t orifice() { return g_orifice; }
 float pimax()              { return g_pimax; }
 float mep()                { return g_mep; }
 float inhaleTargetLow()    { return g_inhale_target_low; }

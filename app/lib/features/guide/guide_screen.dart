@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/ble/blowfit_uuids.dart';
+import '../../core/coach/training_recommender.dart';
 import '../../core/db/db_providers.dart';
 
 /// Single training phase shown as a numbered list item.
@@ -39,30 +40,31 @@ const _phases = <_Phase>[
   ),
 ];
 
-/// 0~3주: 4mm, 4~7주: 3mm, 8주+: 2mm.
+/// 다이얼 단계 → 표시 정보(라벨/설명/지름). 추천 다이얼을 카드에 표시할 때 사용.
 ({OrificeLevel level, String label, String description, String diameter})
-_recommendOrifice(int weeksUsing) {
-  if (weeksUsing < 4) {
-    return (
-      level: OrificeLevel.low,
-      label: '저강도',
-      description: '입문 단계 (1~4주차)',
-      diameter: '4.0mm',
-    );
-  } else if (weeksUsing < 8) {
-    return (
-      level: OrificeLevel.medium,
-      label: '중강도',
-      description: '기본 단계 (5~8주차)',
-      diameter: '3.0mm',
-    );
-  } else {
-    return (
-      level: OrificeLevel.high,
-      label: '고강도',
-      description: '심화 단계 (9~12주차)',
-      diameter: '2.0mm',
-    );
+_orificeInfo(OrificeLevel level) {
+  switch (level) {
+    case OrificeLevel.low:
+      return (
+        level: level,
+        label: '저강도',
+        description: '약한 저항 · 입문',
+        diameter: level.label,
+      );
+    case OrificeLevel.medium:
+      return (
+        level: level,
+        label: '중강도',
+        description: '기준 · 기본',
+        diameter: level.label,
+      );
+    case OrificeLevel.high:
+      return (
+        level: level,
+        label: '고강도',
+        description: '강한 저항 · 심화',
+        diameter: level.label,
+      );
   }
 }
 
@@ -76,7 +78,9 @@ class GuideScreen extends ConsumerWidget {
     final weeksUsing = firstDate == null
         ? 0
         : DateTime.now().difference(firstDate).inDays ~/ 7;
-    final orifice = _recommendOrifice(weeksUsing);
+    final rec = ref.watch(trainingRecommendationProvider).valueOrNull;
+    final recDial = rec?.dial ?? dialForWeeks(weeksUsing);
+    final orifice = _orificeInfo(recDial);
     final isFirstTime = firstDate == null;
 
     return Scaffold(
@@ -122,10 +126,12 @@ class GuideScreen extends ConsumerWidget {
               orifice: orifice,
               isFirstTime: isFirstTime,
               weeksUsing: weeksUsing,
+              reason: rec?.reason,
+              minutes: rec?.minutes,
             ),
             const SizedBox(height: 24),
             FilledButton.icon(
-              onPressed: () => context.push('/training'),
+              onPressed: () => context.push('/pre-training'),
               icon: const Icon(Icons.play_arrow),
               label: const Text('훈련 시작'),
               style: FilledButton.styleFrom(
@@ -218,11 +224,15 @@ class _OrificeCard extends StatelessWidget {
     required this.orifice,
     required this.isFirstTime,
     required this.weeksUsing,
+    this.reason,
+    this.minutes,
   });
 
   final ({OrificeLevel level, String label, String description, String diameter}) orifice;
   final bool isFirstTime;
   final int weeksUsing;
+  final String? reason; // 추이 기반 추천 사유 (없으면 주차 기반 설명)
+  final int? minutes; // 추천 훈련 시간(분)
 
   @override
   Widget build(BuildContext context) {
@@ -285,14 +295,26 @@ class _OrificeCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    isFirstTime
-                        ? '처음 사용하시는군요 — 가장 가벼운 단계로 시작합니다'
-                        : '${orifice.description} · 훈련 ${weeksUsing}주차',
+                    reason ??
+                        (isFirstTime
+                            ? '처음 사용하시는군요 — 가장 가벼운 단계로 시작합니다'
+                            : '${orifice.description} · 훈련 ${weeksUsing}주차'),
                     style: const TextStyle(
                       fontSize: 12,
                       color: Colors.black54,
                     ),
                   ),
+                  if (minutes != null) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      '추천 훈련 시간 · $minutes분',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.black87,
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),

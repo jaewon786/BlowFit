@@ -352,7 +352,7 @@ class _PimaxMeasureScreenState extends ConsumerState<PimaxMeasureScreen> {
       case _Step.introExhale:
         return _IntroPanel(
           title: '최대 날숨 세기 측정',
-          description: '마우스피스를 입에 무신 뒤,\n5초 동안 가능한 가장 강하게\n숨을 내쉬어 주세요.',
+          description: '다이얼을 기준 2단(2mm)에 맞추고\n마우스피스를 입에 무신 뒤,\n5초 동안 가장 강하게 내쉬어 주세요.',
           icon: Icons.arrow_upward_rounded,
           accent: const Color(0xFF0A89FC),
           connected: connected,

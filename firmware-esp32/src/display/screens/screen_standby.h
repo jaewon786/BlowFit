@@ -24,4 +24,7 @@ namespace screens {
   /// 배터리 % 갱신 (0~100). -1 이면 측정 불가 / 숨김.
   void standby_set_battery(int8_t percent);
 
+  /// 현재 다이얼 단계 표시 갱신 — level 0/1/2 → "다이얼 1/2/3단".
+  void standby_set_orifice(uint8_t level);
+
 }  // namespace screens

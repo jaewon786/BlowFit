@@ -278,6 +278,14 @@ class _TargetSettingsScreenState extends ConsumerState<TargetSettingsScreen> {
                               fontWeight: FontWeight.bold,
                             ),
                           ),
+                          const SizedBox(height: 2),
+                          Text(
+                            '기준 다이얼 2단 · 훈련 시작 시 단계별 자동 조정',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.black.withValues(alpha: 0.5),
+                            ),
+                          ),
                           const SizedBox(height: 8),
                           _PreviewRow(
                             label: '내쉬기(날숨)',

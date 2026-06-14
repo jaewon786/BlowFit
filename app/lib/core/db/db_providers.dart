@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../ble/ble_providers.dart';
 import '../ble/discovered_device.dart';
 import '../coach/milestone_engine.dart';
+import '../coach/training_recommender.dart';
 import '../health/samsung_health_service.dart';
 import '../health/sleep_auto_sync.dart';
 import '../health/sleep_sync.dart';
@@ -236,6 +237,39 @@ final weekAvgPressureProvider = StreamProvider<WeekPressureAvgPair>((ref) {
 /// 첫 세션 호기 통계. Profile 베이스라인 카드.
 final firstSessionStatsProvider = FutureProvider<FirstSessionStats?>((ref) {
   return ref.watch(sessionRepositoryProvider).firstSessionStats();
+});
+
+/// 압력 추이 + 목표 도달률 기반 훈련 추천 (다이얼 단계 + 시간).
+/// 최근 21일 세션 + 현재 다이얼/시간 + 경험 주차를 결합. 사전 선택 화면 / 가이드용.
+final trainingRecommendationProvider =
+    StreamProvider<TrainingRecommendation>((ref) async* {
+  final pm = await ref.watch(pimaxMepStoreProvider.future);
+  final dur = await ref.watch(trainDurationStoreProvider.future);
+  final firstDate = await ref.watch(firstSessionDateProvider.future);
+  final repo = ref.watch(sessionRepositoryProvider);
+
+  final since = DateTime.now().subtract(const Duration(days: 21));
+  await for (final sessions in repo.watchSince(since)) {
+    final recent = [
+      for (final s in sessions)
+        SessionPerf(
+          orificeLevel: s.orificeLevel,
+          avgExhale: s.avgPressure,
+          enduranceSec: s.enduranceSec,
+          durationSec: s.durationSec,
+          at: s.receivedAt,
+        ),
+    ];
+    final weeks = firstDate == null
+        ? 0
+        : DateTime.now().difference(firstDate).inDays ~/ 7;
+    yield recommendTraining(
+      recent: recent,
+      currentDial: pm.loadDialLevel(),
+      currentMinutes: dur.loadMinutes(),
+      weeksUsing: weeks,
+    );
+  }
 });
 
 /// Trend 화면 Calendar — 주어진 달에서 1+ 세션 있는 day-of-month 집합.

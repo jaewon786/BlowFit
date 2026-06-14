@@ -24,8 +24,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../core/ble/ble_providers.dart';
-import '../../core/ble/blowfit_uuids.dart';
 import '../../core/coach/growth_message.dart';
 import '../../core/db/db_providers.dart';
 import '../../core/storage/storage_providers.dart';
@@ -588,20 +586,9 @@ class _HomeContent extends StatelessWidget {
             builder: (ctx) => GestureDetector(
               onTap: () {
                 debugPrint('[home] 훈련하기 onTap');
-                final mgr = ref.read(bleManagerProvider);
-                // BLE write — fire-and-forget. RealBleManager.startSession 이
-                // 내부에서 ensureConnected (readRssi + 필요 시 hard reconnect)
-                // 를 수행하므로 dashboard 가 multi-step 복구 로직 가질 필요 X.
-                // 미연결이라 startSession 실패해도 navigation 은 진행 — 훈련
-                // 화면이 자체적으로 연결 상태 표시.
-                () async {
-                  try {
-                    await mgr.startSession(OrificeLevel.medium);
-                  } catch (e) {
-                    debugPrint('[home] startSession failed: $e');
-                  }
-                }();
-                ctx.push('/training');
+                // 사전 선택 화면(다이얼/시간/목표)으로 이동. startSession 은
+                // 그 화면의 "훈련 시작"에서 선택된 다이얼 단계로 전송.
+                ctx.push('/pre-training');
               },
               child: Container(
                 decoration: BoxDecoration(

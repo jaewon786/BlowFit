@@ -71,10 +71,11 @@ namespace {
           const uint8_t phase = (plen >= 2) ? payload[1] : 0;
           Serial.printf("[ble] START_SESSION orifice=%u phase=%u\n",
                         (unsigned)lvl, (unsigned)phase);
+          // 다이얼 단계 적용 → 단계별 보정계수로 target 재계산 (M9).
+          session::setOrifice(lvl);
           session::startSession(
               phase == 1 ? session::StartPhase::Inhale
                          : session::StartPhase::Exhale);
-          // TODO: orifice level 적용 (M9: NVS 저장 + 화면 표시)
           break;
         }
         case opcode::STOP_SESSION:

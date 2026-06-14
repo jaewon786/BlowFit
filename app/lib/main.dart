@@ -34,6 +34,7 @@ import 'features/sleep/sleep_effect_screen.dart';
 import 'features/sleep/sleep_trend_screen.dart';
 import 'features/settings/target_settings_screen.dart';
 import 'features/shell/main_shell.dart';
+import 'features/training/pre_training_screen.dart';
 import 'features/training/training_intro_screen.dart';
 import 'features/training/training_screen.dart';
 import 'features/trend/trend_screen.dart';
@@ -113,7 +114,12 @@ final _router = GoRouter(
           routes: [
             // 홈 = 홈/추이 PageView (좌우 swipe 로 전환)
             GoRoute(path: '/', builder: (_, __) => const HomePagerScreen()),
-            // 훈련 시작 전 페이지 (체크리스트 + 팁) — 홈 탭 안에서 push.
+            // 훈련 시작 전 선택 (다이얼/시간/목표) — 홈 "훈련하기"에서 push.
+            GoRoute(
+              path: '/pre-training',
+              builder: (_, __) => const PreTrainingScreen(),
+            ),
+            // (레거시) 훈련 시작 전 체크리스트 + 팁.
             GoRoute(
               path: '/training-intro',
               builder: (_, __) => const TrainingIntroScreen(),

@@ -8,11 +8,17 @@
 //   - PImax 80 / MEP 60 — 일반 성인 평균 (Black & Hyatt 1969)
 //   - Normal (50~60% PImax) — POWERbreathe 임상 표준
 //
+// 다이얼 보정 (유체역학):
+//   - PImax/MEP 는 기준 다이얼 2단(2mm)에서 측정한 값으로 저장.
+//   - 목표 = PImax(or MEP) × 강도% × 다이얼 보정계수(OrificeLevel.coefficient).
+//
 // 안전 상한 (consumer device ceiling):
-//   - 흡기 target high (PImax × high_pct) > 90 cmH₂O → 경고
-//   - 호기 target high (MEP   × high_pct) > 100 cmH₂O → 경고
+//   - 흡기 target high > 90 cmH₂O → clamp
+//   - 호기 target high > 100 cmH₂O → clamp
 
 import 'package:shared_preferences/shared_preferences.dart';
+
+import '../ble/blowfit_uuids.dart';
 
 /// 강도 단계 — 펌웨어 session::IntensityLevel 과 1:1 매핑 (BLE payload byte).
 enum IntensityLevel {
@@ -49,11 +55,15 @@ class PimaxMepStore {
   static const _kPimax = 'pimax_cmh2o_x10';   // ×10 정수로 저장 (decimal 1자리)
   static const _kMep   = 'mep_cmh2o_x10';
   static const _kLevel = 'intensity_level';
+  static const _kDial  = 'dial_orifice_level'; // 현재 다이얼 단계 (OrificeLevel.value)
 
   /// 일반 성인 평균 (Black & Hyatt 1969).
   static const defaultPimax = 80.0;
   static const defaultMep   = 60.0;
   static const defaultLevel = IntensityLevel.normal;
+
+  /// 기본 다이얼 — 기준 2단(측정 단계, 계수 1.00).
+  static const defaultDial = OrificeLevel.medium;
 
   /// Consumer device ceiling — Vranish 2016 등 IMT 임상 상한 + 압력 손상 예방.
   static const inhaleSafetyLimitCmH2O = 90.0;
@@ -81,6 +91,12 @@ class PimaxMepStore {
     return v == null ? defaultLevel : IntensityLevel.fromValue(v);
   }
 
+  /// 현재 선택된 다이얼 단계 (기본 2단=기준).
+  OrificeLevel loadDialLevel() {
+    final v = _prefs.getInt(_kDial);
+    return v == null ? defaultDial : OrificeLevel.fromValue(v);
+  }
+
   Future<void> savePimax(double pimax) =>
       _prefs.setInt(_kPimax, (pimax * 10).round());
 
@@ -90,13 +106,18 @@ class PimaxMepStore {
   Future<void> saveLevel(IntensityLevel level) =>
       _prefs.setInt(_kLevel, level.value);
 
-  /// 흡기 target (cmH₂O magnitude) — PImax × (low_pct~high_pct).
-  /// 안전 상한 초과 시 high 를 clamp (low 도 추월하면 같이 끌어내림).
-  ({double low, double high}) inhaleTarget() {
+  Future<void> saveDialLevel(OrificeLevel dial) =>
+      _prefs.setInt(_kDial, dial.value);
+
+  /// 흡기 target (cmH₂O magnitude) — PImax × (low_pct~high_pct) × 다이얼 보정계수.
+  /// [dial] 미지정 시 저장된 현재 단계 사용. 안전 상한 초과 시 high 를 clamp
+  /// (low 도 추월하면 같이 끌어내림).
+  ({double low, double high}) inhaleTarget({OrificeLevel? dial}) {
     final pimax = loadPimax();
     final level = loadLevel();
-    var low  = pimax * level.lowPct;
-    var high = pimax * level.highPct;
+    final coeff = (dial ?? loadDialLevel()).coefficient;
+    var low  = pimax * level.lowPct * coeff;
+    var high = pimax * level.highPct * coeff;
     if (high > inhaleSafetyLimitCmH2O) {
       high = inhaleSafetyLimitCmH2O;
       if (low > high) low = high;
@@ -104,11 +125,12 @@ class PimaxMepStore {
     return (low: low, high: high);
   }
 
-  ({double low, double high}) exhaleTarget() {
+  ({double low, double high}) exhaleTarget({OrificeLevel? dial}) {
     final mep = loadMep();
     final level = loadLevel();
-    var low  = mep * level.lowPct;
-    var high = mep * level.highPct;
+    final coeff = (dial ?? loadDialLevel()).coefficient;
+    var low  = mep * level.lowPct * coeff;
+    var high = mep * level.highPct * coeff;
     if (high > exhaleSafetyLimitCmH2O) {
       high = exhaleSafetyLimitCmH2O;
       if (low > high) low = high;
@@ -116,10 +138,11 @@ class PimaxMepStore {
     return (low: low, high: high);
   }
 
-  /// 사용자가 PImax/MEP 를 너무 높게 입력해서 계산된 target high 가 안전 상한을
-  /// 넘었는지 — 설정 화면에서 ⚠ 표시용.
+  /// 계산된 target high 가 안전 상한을 넘었는지 (현재 다이얼 기준) — ⚠ 표시용.
   bool get inhaleExceedsSafetyLimit =>
-      loadPimax() * loadLevel().highPct > inhaleSafetyLimitCmH2O;
+      loadPimax() * loadLevel().highPct * loadDialLevel().coefficient >
+      inhaleSafetyLimitCmH2O;
   bool get exhaleExceedsSafetyLimit =>
-      loadMep() * loadLevel().highPct > exhaleSafetyLimitCmH2O;
+      loadMep() * loadLevel().highPct * loadDialLevel().coefficient >
+      exhaleSafetyLimitCmH2O;
 }
