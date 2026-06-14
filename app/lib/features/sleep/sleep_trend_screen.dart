@@ -9,7 +9,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
-import '../../core/db/app_database.dart';
 import '../../core/db/db_providers.dart';
 import '../../core/db/trend_bucketing.dart';
 import '../../core/health/sleep_analysis.dart';
@@ -75,11 +74,8 @@ class _SleepTrendScreenState extends ConsumerState<SleepTrendScreen> {
     final media = MediaQuery.of(context);
     final f = _Frame(media.size.width);
     final records = ref.watch(recentSleepProvider).valueOrNull ?? const [];
-    final sorted = [...records]..sort((a, b) => a.night.compareTo(b.night));
     final effect = computeSleepEffect(records);
     final buckets = bucketizeSpo2(records, _period);
-    final trainedDates =
-        ref.watch(trainedDatesProvider).valueOrNull ?? const <DateTime>{};
 
     return Scaffold(
       backgroundColor:
@@ -100,10 +96,8 @@ class _SleepTrendScreenState extends ConsumerState<SleepTrendScreen> {
             child: _content(
               context,
               f,
-              sorted,
               effect,
               buckets,
-              trainedDates,
               isDark,
             ),
           ),
@@ -139,10 +133,8 @@ class _SleepTrendScreenState extends ConsumerState<SleepTrendScreen> {
   Widget _content(
     BuildContext context,
     _Frame f,
-    List<SleepRecord> sorted,
     SleepEffect effect,
     List<Spo2Bucket> buckets,
-    Set<DateTime> trainedDates,
     bool isDark,
   ) {
     final headline = _headline(effect);
@@ -279,7 +271,7 @@ class _SleepTrendScreenState extends ConsumerState<SleepTrendScreen> {
             onTab: (i) => setState(() => _tabIndex = i),
           ),
         ),
-        // 훈련 연관성 카드 — 차트 아래.
+        // 훈련 효과 카드 — 차트 아래. 장기(전 vs 최근) 수면 지표 변화.
         f.at(
           x: 20,
           y: 600,
@@ -287,8 +279,7 @@ class _SleepTrendScreenState extends ConsumerState<SleepTrendScreen> {
           h: 150,
           child: _TrainingCorrelationCard(
             f: f,
-            records: sorted,
-            trainedDates: trainedDates,
+            effect: effect,
             isDark: isDark,
           ),
         ),
@@ -415,126 +406,138 @@ class _Spo2TrendCard extends StatelessWidget {
   final ValueChanged<int> onTab;
 
   static const _tabs = ['일간', '주간', '월간', '년간'];
+  static const _segW = 362.0 / 4; // 카드(362) 4등분 = 탭 1칸 폭
+  static const _tabRowH = 34.0; // 탭 행 높이 (이 아래부터 차트 카드)
 
   @override
   Widget build(BuildContext context) {
     final allEmpty = buckets.every((b) => b.avgSpo2Min == null);
+    final cardBg = isDark ? const Color(0xFF181836) : Colors.white;
+    final inkColor = isDark ? DotColors.darkTextPrimary : _ink;
     // 카드 내부 세로 레이아웃: 탭 행(높이 ~32) → 그 아래 차트 영역.
     // 차트 영역은 card-local frame 좌표로 그리되, 탭 행 높이만큼 내려서 시작.
-    return Container(
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF181836) : Colors.white,
-        borderRadius: BorderRadius.circular(f.sx(10)),
-      ),
-      child: Stack(
-        children: [
-          // ── 탭 행 (일간/주간/월간/년간) — 카드 상단, 4등분 균등 배치 ──
-          Positioned(
-            left: 0,
-            right: 0,
-            top: f.sx(12),
-            child: Row(
-              children: [
-                for (var i = 0; i < _tabs.length; i++)
-                  Expanded(
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: () => onTab(i),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            _tabs[i],
-                            style: TextStyle(
-                              fontSize: f.sx(13),
-                              fontWeight: i == tabIndex
-                                  ? FontWeight.w700
-                                  : FontWeight.w500,
-                              color: i == tabIndex
-                                  ? DotColors.primary
-                                  : (isDark ? DotColors.darkTextMuted : _muted),
-                              fontFamily: BlowfitTheme.fontFamily,
-                            ),
-                          ),
-                          SizedBox(height: f.sx(5)),
-                          // active indicator (pill)
-                          Container(
-                            width: f.sx(20),
-                            height: f.sx(2.5),
-                            decoration: BoxDecoration(
-                              color: i == tabIndex
-                                  ? DotColors.primary
-                                  : Colors.transparent,
-                              borderRadius: BorderRadius.circular(f.sx(2)),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-              ],
+    return Stack(
+      children: [
+        // ── 선택 탭 박스 (folder tab) — 선택된 탭만 카드색 배경 (일반 추이와 동일) ──
+        Positioned(
+          left: f.sx(tabIndex * _segW),
+          top: 0,
+          width: f.sx(_segW),
+          height: f.sx(_tabRowH + 10),
+          child: Container(
+            decoration: BoxDecoration(
+              color: cardBg,
+              borderRadius:
+                  BorderRadius.vertical(top: Radius.circular(f.sx(10))),
             ),
           ),
-          // ── legend (탭 행 아래) ──
+        ),
+        // ── 차트 카드 (탭 행 아래) — 선택 탭과 union corner ──
+        Positioned(
+          left: 0,
+          right: 0,
+          top: f.sx(_tabRowH),
+          bottom: 0,
+          child: Container(
+            decoration: BoxDecoration(
+              color: cardBg,
+              borderRadius: BorderRadius.only(
+                topLeft:
+                    tabIndex == 0 ? Radius.zero : Radius.circular(f.sx(10)),
+                topRight: tabIndex == _tabs.length - 1
+                    ? Radius.zero
+                    : Radius.circular(f.sx(10)),
+                bottomLeft: Radius.circular(f.sx(10)),
+                bottomRight: Radius.circular(f.sx(10)),
+              ),
+            ),
+          ),
+        ),
+        // ── 탭 텍스트 4개 (각 세그먼트 중앙). 선택만 진하게. ──
+        for (var i = 0; i < _tabs.length; i++)
           Positioned(
-            left: f.sx(16),
-            top: f.sx(50),
-            child: Row(
-              children: [
-                Container(
-                  width: f.sx(9),
-                  height: f.sx(9),
-                  decoration: BoxDecoration(
-                    color: DotColors.primary,
-                    borderRadius: BorderRadius.circular(f.sx(1)),
-                  ),
-                ),
-                SizedBox(width: f.sx(6)),
-                Text(
-                  '최저 SpO₂ (%)',
+            left: f.sx(i * _segW),
+            top: f.sx(10),
+            width: f.sx(_segW),
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => onTab(i),
+              child: Container(
+                alignment: Alignment.center,
+                child: Text(
+                  _tabs[i],
                   style: TextStyle(
-                    fontSize: f.sx(10),
-                    fontWeight: FontWeight.w500,
-                    color: isDark ? DotColors.darkTextSecondary : _ink2,
+                    fontSize: f.sx(13),
+                    fontWeight:
+                        i == tabIndex ? FontWeight.w700 : FontWeight.w500,
+                    color: inkColor.withValues(
+                      alpha: i == tabIndex ? 1.0 : 0.6,
+                    ),
                     fontFamily: BlowfitTheme.fontFamily,
                   ),
                 ),
-              ],
+              ),
             ),
           ),
-          // ── 차트 (탭 행 + legend 아래 영역) ──
+        // ── legend (탭 행 아래) ──
+        Positioned(
+          left: f.sx(16),
+          top: f.sx(50),
+          child: Row(
+            children: [
+              Container(
+                width: f.sx(9),
+                height: f.sx(9),
+                decoration: BoxDecoration(
+                  color: DotColors.primary,
+                  borderRadius: BorderRadius.circular(f.sx(1)),
+                ),
+              ),
+              SizedBox(width: f.sx(6)),
+              Text(
+                '최저 SpO₂ (%)',
+                style: TextStyle(
+                  fontSize: f.sx(10),
+                  fontWeight: FontWeight.w500,
+                  color: isDark ? DotColors.darkTextSecondary : _ink2,
+                  fontFamily: BlowfitTheme.fontFamily,
+                ),
+              ),
+            ],
+          ),
+        ),
+        // ── 차트 (탭 행 + legend 아래 영역) ──
+        Positioned(
+          left: 0,
+          right: 0,
+          top: f.sx(64),
+          bottom: 0,
+          child: CustomPaint(
+            painter: _Spo2LinePainter(
+              scale: f.scale,
+              buckets: buckets,
+              isDark: isDark,
+            ),
+          ),
+        ),
+        if (allEmpty)
           Positioned(
             left: 0,
             right: 0,
             top: f.sx(64),
             bottom: 0,
-            child: CustomPaint(
-              painter: _Spo2LinePainter(
-                scale: f.scale,
-                buckets: buckets,
-                isDark: isDark,
-              ),
-            ),
-          ),
-          if (allEmpty)
-            Positioned(
-              left: 0,
-              right: 0,
-              top: f.sx(64),
-              bottom: 0,
-              child: Center(
-                child: Text(
-                  'SpO₂ 데이터 없음',
-                  style: TextStyle(
-                    fontSize: f.sx(12),
-                    color: isDark ? DotColors.darkTextMuted : _muted,
-                    fontFamily: BlowfitTheme.fontFamily,
-                  ),
+            child: Center(
+              child: Text(
+                'SpO₂ 데이터 없음',
+                style: TextStyle(
+                  fontSize: f.sx(12),
+                  color: isDark ? DotColors.darkTextMuted : _muted,
+                  fontFamily: BlowfitTheme.fontFamily,
                 ),
               ),
             ),
-        ],
-      ),
+          ),
+      ],
     );
   }
 }
@@ -653,31 +656,23 @@ class _Spo2LinePainter extends CustomPainter {
 class _TrainingCorrelationCard extends StatelessWidget {
   const _TrainingCorrelationCard({
     required this.f,
-    required this.records,
-    required this.trainedDates,
+    required this.effect,
     required this.isDark,
   });
   final _Frame f;
-  final List<SleepRecord> records; // asc
-  final Set<DateTime> trainedDates;
+  final SleepEffect effect;
   final bool isDark;
-
-  bool _isTrained(SleepRecord r) =>
-      trainedDates.contains(DateTime(r.night.year, r.night.month, r.night.day));
 
   @override
   Widget build(BuildContext context) {
-    final cmp = compareTrainingSpo2(records, trainedDates);
     final inkColor = isDark ? DotColors.darkTextPrimary : _ink;
     final mutedColor = isDark ? DotColors.darkTextMuted : _muted;
-    final trainedStr =
-        cmp.trainedAvg != null ? '${cmp.trainedAvg!.round()}%' : '—';
-    final untrainedStr =
-        cmp.untrainedAvg != null ? '${cmp.untrainedAvg!.round()}%' : '—';
 
-    // 최근 ~14박 (오래→최신, 왼→오른쪽). records 는 asc 정렬.
-    final recent =
-        records.length > 14 ? records.sublist(records.length - 14) : records;
+    // 장기 효과 — 훈련 초반(처음 ~7박) vs 최근(~7박) 수면 지표 변화.
+    // 같은 날 인과가 아니라 시차를 반영한 누적 효과(computeSleepEffect 재사용).
+    final hasEffect = effect.nights >= 4;
+    final apneaImproved = effect.apneaBaseline == 'DETECTED' &&
+        effect.apneaRecent == 'NOT_DETECTED';
 
     return Container(
       decoration: BoxDecoration(
@@ -692,9 +687,8 @@ class _TrainingCorrelationCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 타이틀
             Text(
-              '훈련과 수면',
+              '훈련 효과',
               style: TextStyle(
                 fontSize: f.sx(13),
                 fontWeight: FontWeight.w700,
@@ -702,84 +696,61 @@ class _TrainingCorrelationCard extends StatelessWidget {
                 fontFamily: BlowfitTheme.fontFamily,
               ),
             ),
-            SizedBox(height: f.sx(10)),
-            // 평균 비교 한 줄
-            Wrap(
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                Text(
-                  '훈련한 날 평균 최저 산소  ',
-                  style: TextStyle(
-                    fontSize: f.sx(11),
-                    fontWeight: FontWeight.w500,
-                    color: mutedColor,
-                    fontFamily: BlowfitTheme.fontFamily,
-                  ),
-                ),
-                Text(
-                  trainedStr,
-                  style: TextStyle(
-                    fontSize: f.sx(13),
-                    fontWeight: FontWeight.w700,
-                    color: DotColors.primary,
-                    fontFamily: BlowfitTheme.fontFamily,
-                  ),
-                ),
-                Text(
-                  '   ·   안 한 날  ',
-                  style: TextStyle(
-                    fontSize: f.sx(11),
-                    fontWeight: FontWeight.w500,
-                    color: mutedColor,
-                    fontFamily: BlowfitTheme.fontFamily,
-                  ),
-                ),
-                Text(
-                  untrainedStr,
-                  style: TextStyle(
-                    fontSize: f.sx(13),
-                    fontWeight: FontWeight.w700,
-                    color: mutedColor,
-                    fontFamily: BlowfitTheme.fontFamily,
-                  ),
-                ),
-              ],
+            SizedBox(height: f.sx(2)),
+            Text(
+              '훈련 전 → 최근 변화',
+              style: TextStyle(
+                fontSize: f.sx(11),
+                fontWeight: FontWeight.w500,
+                color: mutedColor,
+                fontFamily: BlowfitTheme.fontFamily,
+              ),
             ),
-            SizedBox(height: f.sx(12)),
-            // 일별 훈련 띠 (strip) — 최근 ~14박.
-            if (recent.isEmpty)
+            SizedBox(height: f.sx(10)),
+            if (!hasEffect)
               Text(
-                '최근 수면 기록이 없어요',
+                '수면 기록이 쌓이면 훈련 전·후 변화를 보여드려요.',
                 style: TextStyle(
                   fontSize: f.sx(11),
                   color: mutedColor,
                   fontFamily: BlowfitTheme.fontFamily,
                 ),
               )
-            else
-              Row(
-                children: [
-                  for (var i = 0; i < recent.length; i++) ...[
-                    if (i > 0) SizedBox(width: f.sx(5)),
-                    _DayCell(
-                      f: f,
-                      trained: _isTrained(recent[i]),
-                      isDark: isDark,
-                    ),
-                  ],
-                ],
+            else ...[
+              _EffectRow(
+                f: f,
+                label: '최저 혈중산소',
+                base: _baStr(
+                  effect.baselineSpo2Min,
+                  effect.recentSpo2Min,
+                  '%',
+                ),
+                delta: _deltaStr(effect.spo2MinDelta, '%p'),
+                improved: (effect.spo2MinDelta ?? 0) > 0,
+                inkColor: inkColor,
+                mutedColor: mutedColor,
               ),
-            SizedBox(height: f.sx(10)),
-            // legend
-            Text(
-              '● 훈련함  ○ 안 함',
-              style: TextStyle(
-                fontSize: f.sx(10),
-                fontWeight: FontWeight.w500,
-                color: mutedColor,
-                fontFamily: BlowfitTheme.fontFamily,
+              SizedBox(height: f.sx(6)),
+              _EffectRow(
+                f: f,
+                label: '수면 점수',
+                base: _baStr(effect.baselineScore, effect.recentScore, ''),
+                delta: _deltaStr(effect.scoreDelta, ''),
+                improved: (effect.scoreDelta ?? 0) > 0,
+                inkColor: inkColor,
+                mutedColor: mutedColor,
               ),
-            ),
+              SizedBox(height: f.sx(6)),
+              _EffectRow(
+                f: f,
+                label: '수면무호흡 징후',
+                base: _apneaBaStr(effect.apneaBaseline, effect.apneaRecent),
+                delta: apneaImproved ? '개선' : '',
+                improved: apneaImproved,
+                inkColor: inkColor,
+                mutedColor: mutedColor,
+              ),
+            ],
           ],
         ),
       ),
@@ -787,28 +758,86 @@ class _TrainingCorrelationCard extends StatelessWidget {
   }
 }
 
-class _DayCell extends StatelessWidget {
-  const _DayCell({
+/// 장기 효과 한 줄 — 라벨 + "전 → 후" + 변화량(개선 시 강조).
+class _EffectRow extends StatelessWidget {
+  const _EffectRow({
     required this.f,
-    required this.trained,
-    required this.isDark,
+    required this.label,
+    required this.base,
+    required this.delta,
+    required this.improved,
+    required this.inkColor,
+    required this.mutedColor,
   });
   final _Frame f;
-  final bool trained;
-  final bool isDark;
+  final String label;
+  final String base;
+  final String delta;
+  final bool improved;
+  final Color inkColor;
+  final Color mutedColor;
 
   @override
   Widget build(BuildContext context) {
-    final hollow = isDark ? Colors.white24 : Colors.black12;
-    return Container(
-      width: f.sx(14),
-      height: f.sx(14),
-      decoration: BoxDecoration(
-        color: trained ? DotColors.primary : hollow,
-        borderRadius: BorderRadius.circular(f.sx(4)),
-      ),
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: f.sx(11),
+              fontWeight: FontWeight.w500,
+              color: mutedColor,
+              fontFamily: BlowfitTheme.fontFamily,
+            ),
+          ),
+        ),
+        Text(
+          base,
+          style: TextStyle(
+            fontSize: f.sx(12),
+            fontWeight: FontWeight.w700,
+            color: inkColor,
+            fontFamily: BlowfitTheme.fontFamily,
+            fontFeatures: const [FontFeature.tabularFigures()],
+          ),
+        ),
+        if (delta.isNotEmpty) ...[
+          SizedBox(width: f.sx(6)),
+          Text(
+            delta,
+            style: TextStyle(
+              fontSize: f.sx(11),
+              fontWeight: FontWeight.w700,
+              color: improved ? DotColors.primary : mutedColor,
+              fontFamily: BlowfitTheme.fontFamily,
+            ),
+          ),
+        ],
+      ],
     );
   }
+}
+
+// 장기 효과 포맷 헬퍼.
+String _baStr(double? b, double? r, String unit) {
+  if (b == null || r == null) return '—';
+  return '${b.round()}$unit → ${r.round()}$unit';
+}
+
+String _deltaStr(double? d, String unit) {
+  if (d == null) return '';
+  final n = d.round();
+  if (n == 0) return '';
+  return n > 0 ? '+$n$unit' : '$n$unit';
+}
+
+String _apneaLabel(String? s) =>
+    s == 'DETECTED' ? '있음' : (s == 'NOT_DETECTED' ? '없음' : '—');
+
+String _apneaBaStr(String? b, String? r) {
+  if (b == null && r == null) return '기록 없음';
+  return '${_apneaLabel(b)} → ${_apneaLabel(r)}';
 }
 
 // ───────────────────────── 배경 페인터 (추이와 동일) ─────────────────────────

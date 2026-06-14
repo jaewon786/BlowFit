@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:rive/rive.dart' as rive;
 
 import '../../core/theme/blowfit_colors.dart';
 
@@ -124,8 +125,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        Text(
-                          cur.title,
+                        Text.rich(
+                          TextSpan(children: _titleSpans(cur.title)),
                           textAlign: TextAlign.center,
                           style: const TextStyle(
                             fontSize: 28,
@@ -167,6 +168,23 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       ),
     );
   }
+}
+
+/// 제목에서 워드마크 "BRELOW" 의 'O' 만 로고 파란색으로 강조한 span 들을 만든다.
+/// (다른 제목엔 "BRELOW" 가 없어 그대로 단일 span 으로 반환.)
+List<InlineSpan> _titleSpans(String title) {
+  const brand = 'BRELOW';
+  const oOffset = 4; // BREL[O]W
+  final idx = title.indexOf(brand);
+  if (idx < 0) return [TextSpan(text: title)];
+  return [
+    TextSpan(text: title.substring(0, idx + oOffset)),
+    const TextSpan(
+      text: 'O',
+      style: TextStyle(color: DotColors.primary), // 로고 파란색
+    ),
+    TextSpan(text: title.substring(idx + oOffset + 1)),
+  ];
 }
 
 class _Step {
@@ -283,7 +301,7 @@ class _Illustration extends StatelessWidget {
       case _IllustKind.mouthpiece:
         return const _MouthpieceIllust();
       case _IllustKind.dial:
-        return const _DialIllust();
+        return const _DialRiveIllust();
       case _IllustKind.breath:
         return const _BreathIllust();
       case _IllustKind.introGuide:
@@ -303,6 +321,7 @@ class _WelcomeIllust extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 환영 화면 — 바람 아이콘 대신 앱 아이콘(로고)을 노출.
     return Container(
       width: 220,
       height: 220,
@@ -319,11 +338,6 @@ class _WelcomeIllust extends StatelessWidget {
           height: 140,
           decoration: const BoxDecoration(
             shape: BoxShape.circle,
-            gradient: LinearGradient(
-              colors: [BlowfitColors.blue400, BlowfitColors.blue500],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
             boxShadow: [
               BoxShadow(
                 color: Color.fromRGBO(0, 102, 255, 0.30),
@@ -332,7 +346,13 @@ class _WelcomeIllust extends StatelessWidget {
               ),
             ],
           ),
-          child: const Icon(Icons.air, size: 64, color: Colors.white),
+          child: ClipOval(
+            child: Image.asset(
+              'assets/icon/app_icon.png',
+              fit: BoxFit.cover,
+              filterQuality: FilterQuality.high,
+            ),
+          ),
         ),
       ),
     );
@@ -344,146 +364,85 @@ class _MouthpieceIllust extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 디자인 v2 — 4 step 모두 220×220 frame 안에 맞도록 220×183 으로 통일.
+    // 마우스피스 착용 안내 — 첨부 이미지(assets/images/mouthpiece.png).
     return SizedBox(
       width: 220,
-      height: 183,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          // lip stand-in
-          Positioned(
-            left: 24,
-            child: Container(
-              width: 78,
-              height: 32,
-              decoration: BoxDecoration(
-                color: const Color(0xFFFB7185),
-                borderRadius: BorderRadius.circular(99),
-              ),
-            ),
-          ),
-          // mouthpiece tube
-          Positioned(
-            left: 96,
-            child: Container(
-              width: 34,
-              height: 22,
-              decoration: BoxDecoration(
-                color: const Color(0xFFE5E7EB),
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-          ),
-          // device body
-          Positioned(
-            right: 14,
-            child: Container(
-              width: 88,
-              height: 60,
-              decoration: BoxDecoration(
-                color: BlowfitColors.blue500,
-                borderRadius: BorderRadius.circular(14),
-                boxShadow: const [
-                  BoxShadow(
-                    color: Color.fromRGBO(0, 102, 255, 0.24),
-                    blurRadius: 16,
-                    offset: Offset(0, 6),
-                  ),
-                ],
-              ),
-              child: const Center(
-                child: Icon(Icons.tune, color: Colors.white, size: 26),
-              ),
-            ),
-          ),
-        ],
+      height: 200,
+      child: Image.asset(
+        'assets/images/mouthpiece.png',
+        fit: BoxFit.contain,
+        filterQuality: FilterQuality.high,
       ),
     );
   }
 }
 
-class _DialIllust extends StatelessWidget {
-  const _DialIllust();
+/// "다이얼은 1단계부터" 슬라이드 — dial.riv 애니메이션.
+class _DialRiveIllust extends StatefulWidget {
+  const _DialRiveIllust();
+
+  @override
+  State<_DialRiveIllust> createState() => _DialRiveIllustState();
+}
+
+class _DialRiveIllustState extends State<_DialRiveIllust> {
+  rive.File? _file;
+  rive.RiveWidgetController? _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final file = await rive.File.asset(
+        'assets/images/dial.riv',
+        riveFactory: rive.Factory.flutter,
+      );
+      if (!mounted || file == null) {
+        file?.dispose();
+        return;
+      }
+      setState(() {
+        _file = file;
+        _controller = _DialSpeedController(file);
+      });
+    } catch (_) {
+      // 로드 실패 시 빈 자리 (디자인 깨짐 방지).
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    _file?.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        for (var n = 1; n <= 3; n++) ...[
-          if (n > 1) const SizedBox(width: 16),
-          _DialPill(level: n, active: n == 1),
-        ],
-      ],
+    final c = _controller;
+    return SizedBox(
+      width: 220,
+      height: 200,
+      child: c == null
+          ? const SizedBox.shrink()
+          : rive.RiveWidget(controller: c, fit: rive.Fit.contain),
     );
   }
 }
 
-class _DialPill extends StatelessWidget {
-  const _DialPill({required this.level, required this.active});
-  final int level;
-  final bool active;
+/// dial.riv 재생 속도 50% — advance 의 경과시간을 절반으로 줘 State Machine 을
+/// 천천히 진행시킨다. (base/final 상속 규칙상 서브타입도 final.)
+final class _DialSpeedController extends rive.RiveWidgetController {
+  _DialSpeedController(super.file);
+
+  static const double _speed = 0.5;
 
   @override
-  Widget build(BuildContext context) {
-    return Stack(
-      clipBehavior: Clip.none,
-      alignment: Alignment.bottomCenter,
-      children: [
-        Container(
-          width: 70,
-          height: 70,
-          decoration: BoxDecoration(
-            color: active ? BlowfitColors.blue500 : BlowfitColors.gray100,
-            shape: BoxShape.circle,
-            border: active
-                ? null
-                : Border.all(color: BlowfitColors.gray200, width: 2),
-            boxShadow: active
-                ? const [
-                    BoxShadow(
-                      color: Color.fromRGBO(0, 102, 255, 0.3),
-                      blurRadius: 24,
-                      offset: Offset(0, 8),
-                    ),
-                  ]
-                : null,
-          ),
-          child: Center(
-            child: Text(
-              '$level',
-              style: TextStyle(
-                fontSize: 26,
-                fontWeight: FontWeight.w700,
-                color: active ? Colors.white : BlowfitColors.gray400,
-              ),
-            ),
-          ),
-        ),
-        if (active)
-          Positioned(
-            bottom: -16,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(999),
-                boxShadow: BlowfitColors.shadowLevel1,
-              ),
-              child: const Text(
-                '여기서 시작',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  color: BlowfitColors.blue500,
-                ),
-              ),
-            ),
-          ),
-      ],
-    );
-  }
+  bool advance(double elapsedSeconds) => super.advance(elapsedSeconds * _speed);
 }
 
 class _BreathIllust extends StatelessWidget {
@@ -491,68 +450,14 @@ class _BreathIllust extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 디자인 v2 — 220×183 으로 통일.
+    // 호흡 방향 다이어그램 — 첨부 이미지(assets/images/breath.png).
     return SizedBox(
       width: 220,
-      height: 183,
-      child: Stack(
-        children: [
-          // Face
-          Positioned(
-            left: 24,
-            top: 42,
-            child: Container(
-              width: 92,
-              height: 92,
-              decoration: const BoxDecoration(
-                color: Color(0xFFFFE4D6),
-                shape: BoxShape.circle,
-              ),
-              child: const Center(
-                child: Icon(Icons.face, size: 52, color: Color(0xFF8A5A00)),
-              ),
-            ),
-          ),
-          // Inhale arrow (cyan, top)
-          const Positioned(
-            right: 14,
-            top: 52,
-            child: Row(
-              children: [
-                Icon(Icons.arrow_back, size: 20, color: Color(0xFF0099CC)),
-                SizedBox(width: 4),
-                Text(
-                  '들숨',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF0099CC),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          // Exhale arrow (blue, bottom)
-          const Positioned(
-            right: 14,
-            top: 108,
-            child: Row(
-              children: [
-                Icon(Icons.arrow_forward,
-                    size: 20, color: BlowfitColors.blue500,),
-                SizedBox(width: 4),
-                Text(
-                  '날숨',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: BlowfitColors.blue500,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
+      height: 200,
+      child: Image.asset(
+        'assets/images/breath.png',
+        fit: BoxFit.contain,
+        filterQuality: FilterQuality.high,
       ),
     );
   }
